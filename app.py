@@ -1,5 +1,5 @@
 # =========================================================
-# Farm Profit Mapping Tool (Base Framework v1)
+# Farm ROI Tool V2
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -12,8 +12,8 @@ import zipfile
 import os
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Farm ROI Tool", layout="wide")
-st.title("Farm Profit Mapping Tool")
+st.set_page_config(page_title="Farm ROI Tool V2", layout="wide")
+st.title("Farm Profit Mapping Tool V2")
 
 # =========================================================
 # 1. ZONE MAP UPLOAD
@@ -49,37 +49,60 @@ st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
 # =========================================================
-# 3. EXPENSE INPUTS (ALWAYS SHOW)
+# 3. PRESCRIPTION MAP UPLOADS
+# =========================================================
+st.header("Prescription Map Uploads")
+
+fert_file = st.file_uploader("Upload Fertilizer Prescription Map", 
+                             type=["csv", "geojson", "json", "zip"], key="fert")
+seed_file = st.file_uploader("Upload Seed Prescription Map", 
+                             type=["csv", "geojson", "json", "zip"], key="seed")
+
+fertilizer_costs_per_acre = 0
+seed_costs_per_acre = 0
+
+# (placeholder until we process prescription files into actual costs)
+# later we'll merge rates with user-input product prices
+if fert_file:
+    st.success("Fertilizer prescription uploaded")
+    # TODO: process fertilizer costs here
+if seed_file:
+    st.success("Seed prescription uploaded")
+    # TODO: process seed costs here
+
+# =========================================================
+# 4. EXPENSE INPUTS (ALWAYS SHOW)
 # =========================================================
 st.header("Expense Inputs (Per Acre $)")
 
 cols = st.columns(6)
+
 sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
-chemicals = cols[1].number_input("Chemicals ($/ac)", min_value=0.0, value=0.0, step=0.1)
-insurance = cols[2].number_input("Insurance ($/ac)", min_value=0.0, value=0.0, step=0.1)
-insecticide = cols[3].number_input("Insect/Fungicide ($/ac)", min_value=0.0, value=0.0, step=0.1)
-fertilizer = cols[4].number_input("Fertilizer ($/ac)", min_value=0.0, value=0.0, step=0.1)
-machinery = cols[5].number_input("Machinery ($/ac)", min_value=0.0, value=0.0, step=0.1)
+chemicals = cols[1].number_input("Chemicals", min_value=0.0, value=0.0, step=0.1)
+insurance = cols[2].number_input("Insurance", min_value=0.0, value=0.0, step=0.1)
+insecticide = cols[3].number_input("Insect/Fungicide", min_value=0.0, value=0.0, step=0.1)
+fertilizer = cols[4].number_input("Fertilizer (Flat)", min_value=0.0, value=0.0, step=0.1)
+machinery = cols[5].number_input("Machinery", min_value=0.0, value=0.0, step=0.1)
 
 cols2 = st.columns(6)
-seed = cols2[0].number_input("Seed ($/ac)", min_value=0.0, value=0.0, step=0.1)
-cost_of_living = cols2[1].number_input("Cost of Living ($/ac)", min_value=0.0, value=0.0, step=0.1)
-extra_fuel = cols2[2].number_input("Extra Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
-extra_interest = cols2[3].number_input("Extra Interest ($/ac)", min_value=0.0, value=0.0, step=0.1)
-truck_fuel = cols2[4].number_input("Truck Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
-labor = cols2[5].number_input("Labor ($/ac)", min_value=0.0, value=0.0, step=0.1)
 
-cols3 = st.columns(6)
-cash_rent = cols3[0].number_input("Cash Rent ($/ac)", min_value=0.0, value=0.0, step=0.1)
+seed = cols2[0].number_input("Seed (Flat)", min_value=0.0, value=0.0, step=0.1)
+cost_of_living = cols2[1].number_input("Cost of Living", min_value=0.0, value=0.0, step=0.1)
+extra_fuel = cols2[2].number_input("Extra Fuel", min_value=0.0, value=0.0, step=0.1)
+extra_interest = cols2[3].number_input("Extra Interest", min_value=0.0, value=0.0, step=0.1)
+truck_fuel = cols2[4].number_input("Truck Fuel", min_value=0.0, value=0.0, step=0.1)
+labor = cols2[5].number_input("Labor", min_value=0.0, value=0.0, step=0.1)
 
-# Store expenses
+cols3 = st.columns(1)
+cash_rent = cols3[0].number_input("Cash Rent", min_value=0.0, value=0.0, step=0.1)
+
 expenses = {
     "Chemicals": chemicals,
     "Insurance": insurance,
     "Insecticide/Fungicide": insecticide,
-    "Fertilizer": fertilizer,
+    "Fertilizer (Flat)": fertilizer,
     "Machinery": machinery,
-    "Seed": seed,
+    "Seed (Flat)": seed,
     "Cost of Living": cost_of_living,
     "Extra Fuel": extra_fuel,
     "Extra Interest": extra_interest,
@@ -90,7 +113,7 @@ expenses = {
 expenses_per_acre = sum(expenses.values())
 
 # =========================================================
-# 4. CREATE MAP (ALWAYS SHOW BASE MAP)
+# 5. BASE MAP (ALWAYS SHOW)
 # =========================================================
 m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
 
@@ -105,7 +128,7 @@ folium.TileLayer(
 ).add_to(m)
 
 # =========================================================
-# 5. ZONES (IF UPLOADED)
+# 6. ZONES (IF UPLOADED)
 # =========================================================
 if zones_gdf is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
@@ -135,7 +158,7 @@ if zones_gdf is not None:
     zone_layer.add_to(m)
 
 # =========================================================
-# 6. YIELD + PROFIT (IF FILE UPLOADED)
+# 7. YIELD + PROFIT (IF FILE UPLOADED)
 # =========================================================
 df = None
 if uploaded_files:
@@ -146,9 +169,14 @@ if uploaded_files:
             m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
             m.zoom_start = 15
 
-            # Revenue & Profit
+            # Revenue & Profit (flexible calc)
             df["Revenue_per_acre"] = df["Yield"] * sell_price
-            df["NetProfit_per_acre"] = df["Revenue_per_acre"] - expenses_per_acre
+            df["NetProfit_per_acre"] = (
+                df["Revenue_per_acre"]
+                - expenses_per_acre
+                - fertilizer_costs_per_acre
+                - seed_costs_per_acre
+            )
 
             # Profit Heatmap
             grid_x, grid_y = np.mgrid[
@@ -171,13 +199,7 @@ if uploaded_files:
             ).add_to(m)
 
 # =========================================================
-# 7. DISPLAY MAP
-# =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=800, height=600)
-
-# =========================================================
-# 8. SUMMARY TABLE (ALWAYS SHOW BELOW MAP)
+# 8. SUMMARY TABLE (ALWAYS SHOW)
 # =========================================================
 st.header("Summary")
 if df is not None:
@@ -194,3 +216,9 @@ if df is not None:
     ))
 else:
     st.write("Upload a yield map to see summary results.")
+
+# =========================================================
+# 9. DISPLAY MAP
+# =========================================================
+folium.LayerControl(collapsed=False).add_to(m)
+st_folium(m, width=800, height=600)
