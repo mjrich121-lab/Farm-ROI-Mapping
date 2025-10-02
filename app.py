@@ -183,16 +183,16 @@ if uploaded_files:
                 name="Net Profit ($/ac)",
                 show=True
             ).add_to(m)
-
 # ==================================================
 # SECTION 7: Render Map + Summary Table
 # ==================================================
 folium.LayerControl(collapsed=False).add_to(m)
 st_map = st_folium(m, width=900, height=600)
 
+# Summary calculations (already computed above)
 summary_df = pd.DataFrame({
     "Metric": ["Revenue/acre ($)", "Expenses/acre ($)", "Net Profit/acre ($)", "ROI (%)"],
-    "Value": [
+    "Profit": [
         round(revenue_per_acre, 2),
         round(expenses_per_acre, 2),
         round(net_profit_per_acre, 2),
@@ -201,4 +201,17 @@ summary_df = pd.DataFrame({
 })
 
 st.subheader("Profitability Summary")
-st.table(summary_df)
+
+# Apply red/green styling to Net Profit row
+def highlight_profit(val, metric):
+    if metric == "Net Profit/acre ($)":
+        color = "green" if val >= 0 else "red"
+        return f"color: {color}; font-weight: bold"
+    return ""
+
+styled_summary = summary_df.style.apply(
+    lambda row: [highlight_profit(v, row["Metric"]) for v in row], axis=1
+)
+
+st.table(styled_summary)
+
