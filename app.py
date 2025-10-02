@@ -4,237 +4,153 @@ import folium
 from streamlit_folium import st_folium
 import numpy as np
 from scipy.interpolate import griddata
-import matplotlib.pyplot as plt
 import geopandas as gpd
 import zipfile
 import os
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Farm ROI Tool", layout="wide")
 st.title("Farm Profit Mapping Tool")
 
-# ---------------- Yield CSV Upload ----------------
+# ---------------- Zone Map Upload ----------------
+st.header("Zone Map Upload")
+zone_file = st.file_uploader("Upload Zone Map (GeoJSON or zipped Shapefile)",
+                             type=["geojson", "json", "zip"], key="zone")
+
+zones_gdf = None
+if zone_file is not None:
+    if zone_file.name.endswith(".geojson") or zone_file.name.endswith(".json"):
+        zones_gdf = gpd.read_file(zone_file)
+    elif zone_file.name.endswith(".zip"):
+        with open("temp.zip", "wb") as f:
+            f.write(zone_file.getbuffer())
+        with zipfile.ZipFile("temp.zip", "r") as zip_ref:
+            zip_ref.extractall("temp_shp")
+        for f_name in os.listdir("temp_shp"):
+            if f_name.endswith(".shp"):
+                shp_path = os.path.join("temp_shp", f_name)
+                zones_gdf = gpd.read_file(shp_path)
+                break
+        os.remove("temp.zip")
+        import shutil
+        shutil.rmtree("temp_shp", ignore_errors=True)
+
+    if zones_gdf is not None:
+        st.success("Zone map loaded successfully")
+
+# ---------------- Yield Map Upload ----------------
 st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
-if uploaded_files:
-    for file in uploaded_files:
-        st.subheader(f"Field: {file.name}")
-        df = pd.read_csv(file)
+if uploaded_files or zones_gdf is not None:
+    m = folium.Map(location=[40, -95], zoom_start=5, tiles=None)
 
-        # ---------------- Field Inputs ----------------
-        with st.expander("Field Inputs & Expenses", expanded=True):
-            acres = st.number_input("Field Acres", min_value=1, value=100, key=f"{file.name}_acres")
-            sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=5.0, key=f"{file.name}_sell_price")
-            yield_ac = st.number_input("Yield (bu/ac)", min_value=0.0, value=200.0, key=f"{file.name}_yield")
+    # Satellite base
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Esri Satellite",
+        overlay=False,
+        control=False
+    ).add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Labels",
+        overlay=True,
+        control=False
+    ).add_to(m)
 
-            st.markdown("### Expenses per Acre ($)")
-            chemicals = st.number_input("Chemicals", value=0.0, key=f"{file.name}_chemicals")
-            insurance = st.number_input("Crop & Hail Insurance", value=0.0, key=f"{file.name}_insurance")
-            insecticide = st.number_input("Insecticide/Fungicide", value=0.0, key=f"{file.name}_insecticide")
-            fertilizer = st.number_input("Fertilizer", value=0.0, key=f"{file.name}_fertilizer")
-            machinery = st.number_input("Machinery", value=0.0, key=f"{file.name}_machinery")
-            seed = st.number_input("Seed", value=0.0, key=f"{file.name}_seed")
-            cost_of_living = st.number_input("Cost of Living", value=0.0, key=f"{file.name}_cost_of_living")
-            extra_fuel = st.number_input("Extra Fuel for Corn", value=0.0, key=f"{file.name}_extra_fuel")
-            extra_interest = st.number_input("Extra Interest", value=0.0, key=f"{file.name}_extra_interest")
-            truck_fuel = st.number_input("Truck Fuel", value=0.0, key=f"{file.name}_truck_fuel")
-            labor = st.number_input("Labor", value=0.0, key=f"{file.name}_labor")
-            cash_rent = st.number_input("Cash Rent", value=0.0, key=f"{file.name}_cash_rent")
+    # --- Zones ---
+    if zones_gdf is not None:
+        zone_layer = folium.FeatureGroup(name="Zones", show=True)
+        static_zone_colors = {
+            1: "#FF0000",  # Red
+            2: "#FF8000",  # Orange
+            3: "#FFFF00",  # Yellow
+            4: "#80FF00",  # Light Green
+            5: "#008000"   # Dark Green
+        }
 
-        # ---------------- ROI Calculations ----------------
-        expense_inputs = [chemicals, insurance, insecticide, fertilizer, machinery,
-                          seed, cost_of_living, extra_fuel, extra_interest, truck_fuel,
-                          labor, cash_rent]
-        expenses_per_acre = sum(expense_inputs)
-        revenue_per_acre = yield_ac * sell_price
-        net_profit_per_acre = revenue_per_acre - expenses_per_acre
-        roi_percent = (net_profit_per_acre / expenses_per_acre * 100) if expenses_per_acre else 0
+        zone_col = None
+        for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
+            if candidate in zones_gdf.columns:
+                zone_col = candidate
+                break
+        if zone_col is None:
+            zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+            zone_col = "ZoneIndex"
 
-        report = pd.DataFrame({
-            "Metric": ["Acres", "Sell Price ($/bu)", "Yield (bu/ac)",
-                       "Revenue per Acre ($)", "Expenses per Acre ($)",
-                       "Net Profit per Acre ($)", "ROI (%)"],
-            "Value": [acres, sell_price, yield_ac,
-                      round(revenue_per_acre, 2), round(expenses_per_acre, 2),
-                      round(net_profit_per_acre, 2), round(roi_percent, 2)]
-        })
-        st.table(report)
+        for _, row in zones_gdf.iterrows():
+            try:
+                zone_value = int(row[zone_col])
+            except:
+                zone_value = row[zone_col]
 
-        # ---------------- Map Creation ----------------
-        if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
-            df["Revenue_per_acre"] = df["Yield"] * sell_price
-            df["Expenses_per_acre"] = expenses_per_acre
-            df["NetProfit_per_acre"] = df["Revenue_per_acre"] - df["Expenses_per_acre"]
+            zone_color = static_zone_colors.get(zone_value, "#0000FF")
 
-            m = folium.Map(
-                location=[df["Latitude"].mean(), df["Longitude"].mean()],
-                zoom_start=15,
-                tiles=None
-            )
+            folium.GeoJson(
+                row["geometry"],
+                name=f"Zone {zone_value}",
+                style_function=lambda x, c=zone_color: {
+                    "fillOpacity": 0.3,
+                    "color": c,
+                    "weight": 3
+                },
+                tooltip=f"Zone: {zone_value}"
+            ).add_to(zone_layer)
 
-            # Satellite base
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri",
-                name="Esri Satellite",
-                overlay=False,
-                control=False
-            ).add_to(m)
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri",
-                name="Labels",
-                overlay=True,
-                control=False
-            ).add_to(m)
+        zone_layer.add_to(m)
 
-            # Heatmap function
-            def create_heatmap_layer(values, label, cmap_name="RdYlGn", opacity=0.6, show=True, legend_id="legend"):
+        # Zone Legend (bottom-right)
+        zone_legend_html = """
+        <div style="position: fixed; 
+                    bottom: 30px; right: 30px; width: 180px; 
+                    background-color: white; z-index:9999; 
+                    font-size:14px; border:2px solid grey; border-radius:5px;
+                    padding: 10px;">
+        <b>Zone Legend</b><br>
+        <i style="background:#FF0000;width:20px;height:10px;display:inline-block;"></i> Zone 1<br>
+        <i style="background:#FF8000;width:20px;height:10px;display:inline-block;"></i> Zone 2<br>
+        <i style="background:#FFFF00;width:20px;height:10px;display:inline-block;"></i> Zone 3<br>
+        <i style="background:#80FF00;width:20px;height:10px;display:inline-block;"></i> Zone 4<br>
+        <i style="background:#008000;width:20px;height:10px;display:inline-block;"></i> Zone 5<br>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(zone_legend_html))
+
+    # --- Yield ---
+    if uploaded_files:
+        for file in uploaded_files:
+            df = pd.read_csv(file)
+            if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
+                df["NetProfit_per_acre"] = df["Yield"] * 5  # placeholder until expenses linked
+
+                # Heatmap
                 grid_x, grid_y = np.mgrid[
                     df["Longitude"].min():df["Longitude"].max():200j,
                     df["Latitude"].min():df["Latitude"].max():200j
                 ]
                 grid_z = griddata(
                     (df["Longitude"], df["Latitude"]),
-                    values,
+                    df["NetProfit_per_acre"],
                     (grid_x, grid_y),
                     method="linear"
                 )
-                vmin, vmax = np.nanmin(values), np.nanmax(values)
-                cmap = plt.cm.get_cmap(cmap_name)
+                vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+                cmap = plt.cm.get_cmap("RdYlGn")
                 rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
                 rgba_img = np.nan_to_num(rgba_img, nan=0.0)
+
                 folium.raster_layers.ImageOverlay(
                     image=np.uint8(rgba_img * 255),
                     bounds=[[df["Latitude"].min(), df["Longitude"].min()],
                             [df["Latitude"].max(), df["Longitude"].max()]],
-                    opacity=opacity,
-                    name=label,
-                    show=show
+                    opacity=0.6,
+                    name="Net Profit ($/ac)",
+                    show=True
                 ).add_to(m)
 
-                # Custom legend placement
-                bottom_offset = "120px" if "Profit" in label else "60px"
-                legend_html = f"""
-                <div style="position: fixed; bottom: {bottom_offset}; left: 30px; width: 220px;
-                            background-color: white; z-index:9999; font-size:14px;
-                            border:2px solid grey; border-radius:5px; padding: 10px;">
-                <b>{label}</b><br>
-                Min: {vmin:.0f} &nbsp;&nbsp; Max: {vmax:.0f}
-                </div>
-                """
-                m.get_root().html.add_child(folium.Element(legend_html))
-
-            # Yield heatmap (toggleable, default off)
-            create_heatmap_layer(df["Yield"], "Yield (bu/ac)", show=False)
-
-            # Profit heatmap (default on)
-            create_heatmap_layer(df["NetProfit_per_acre"], "Net Profit ($/ac)", show=True)
-
-            # Auto-zoom to field bounds
-            m.fit_bounds([
-                [df["Latitude"].min(), df["Longitude"].min()],
-                [df["Latitude"].max(), df["Longitude"].max()]
-            ])
-
-            # ---------------- Zone Upload ----------------
-            st.markdown("---")
-            st.header("Zone Map Upload")
-            zone_file = st.file_uploader("Upload Zone Map (GeoJSON or zipped Shapefile)",
-                                         type=["geojson", "json", "zip"], key=f"{file.name}_zone")
-
-            if zone_file is not None:
-                zones_gdf = None
-
-                # --- Load GeoJSON or Shapefile ---
-                if zone_file.name.endswith(".geojson") or zone_file.name.endswith(".json"):
-                    zones_gdf = gpd.read_file(zone_file)
-
-                elif zone_file.name.endswith(".zip"):
-                    with open("temp.zip", "wb") as f:
-                        f.write(zone_file.getbuffer())
-                    with zipfile.ZipFile("temp.zip", "r") as zip_ref:
-                        zip_ref.extractall("temp_shp")
-
-                    for f_name in os.listdir("temp_shp"):
-                        if f_name.endswith(".shp"):
-                            shp_path = os.path.join("temp_shp", f_name)
-                            zones_gdf = gpd.read_file(shp_path)
-                            break
-
-                    os.remove("temp.zip")
-                    import shutil
-                    shutil.rmtree("temp_shp", ignore_errors=True)
-
-                if zones_gdf is not None:
-                    st.success("Zone map loaded successfully")
-                    zone_layer = folium.FeatureGroup(name="Zones", show=True)
-
-                    zone_col = None
-                    for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
-                        if candidate in zones_gdf.columns:
-                            zone_col = candidate
-                            break
-                    if zone_col is None:
-                        zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
-                        zone_col = "ZoneIndex"
-
-                    static_zone_colors = {
-                        1: "#FF0000",  # Red
-                        2: "#FF8000",  # Orange
-                        3: "#FFFF00",  # Yellow
-                        4: "#80FF00",  # Light Green
-                        5: "#008000"   # Dark Green
-                    }
-
-                    for _, row in zones_gdf.iterrows():
-                        try:
-                            zone_value = int(row[zone_col])
-                        except:
-                            zone_value = row[zone_col]
-
-                        zone_color = static_zone_colors.get(zone_value, "#0000FF")
-
-                        folium.GeoJson(
-                            row["geometry"],
-                            name=f"Zone {zone_value}",
-                            style_function=lambda x, c=zone_color: {
-                                "fillOpacity": 0.3,
-                                "color": c,
-                                "weight": 3
-                            },
-                            tooltip=f"Zone: {zone_value}"
-                        ).add_to(zone_layer)
-
-                    zone_layer.add_to(m)
-
-                    # Collapsible Zone Legend (bottom-right)
-                    zone_legend_html = """
-                    <div id="zone-legend" style="position: fixed; 
-                                bottom: 30px; right: 30px; width: 180px; 
-                                background-color: white; z-index:9999; 
-                                font-size:14px; border:2px solid grey; border-radius:5px;
-                                padding: 10px;">
-                    <b>Zone Legend</b>
-                    <button onclick="var x=document.getElementById('zone-legend-body'); 
-                                     if(x.style.display==='none'){x.style.display='block';this.innerText='-';} 
-                                     else{x.style.display='none';this.innerText='+';}" 
-                            style="float:right;">-</button>
-                    <div id="zone-legend-body">
-                    <i style="background:#FF0000;width:20px;height:10px;display:inline-block;"></i> Zone 1<br>
-                    <i style="background:#FF8000;width:20px;height:10px;display:inline-block;"></i> Zone 2<br>
-                    <i style="background:#FFFF00;width:20px;height:10px;display:inline-block;"></i> Zone 3<br>
-                    <i style="background:#80FF00;width:20px;height:10px;display:inline-block;"></i> Zone 4<br>
-                    <i style="background:#008000;width:20px;height:10px;display:inline-block;"></i> Zone 5<br>
-                    </div>
-                    </div>
-                    """
-                    m.get_root().html.add_child(folium.Element(zone_legend_html))
-
-            # ---------------- Layer Control & Map Render ----------------
-            folium.LayerControl(collapsed=False).add_to(m)
-            st_folium(m, width=700, height=500)
-
-        else:
-            st.warning("CSV must include Latitude, Longitude, and Yield columns.")
-
+    # Controls
+    folium.LayerControl(collapsed=False).add_to(m)
+    st_folium(m, width=700, height=500)
