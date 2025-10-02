@@ -1,5 +1,5 @@
 # =========================================================
-# Farm Profit Mapping Tool (Expenses + Summary Fixed)
+# Farm Profit Mapping Tool (Always Show Expenses + Summary)
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -12,9 +12,6 @@ import zipfile
 import os
 import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
 st.set_page_config(page_title="Farm ROI Tool", layout="wide")
 st.title("Farm Profit Mapping Tool")
 
@@ -52,7 +49,21 @@ st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
 # =========================================================
-# 3. CREATE MAP (ALWAYS SHOW BASE MAP)
+# 3. EXPENSE INPUTS (ALWAYS SHOW)
+# =========================================================
+st.header("Expense Inputs")
+expense_cols = st.columns(6)
+sell_price = expense_cols[0].number_input("Sell Price ($/bu)", value=0.0, step=0.1)
+chemicals = expense_cols[1].number_input("Chemicals", value=0.0, step=1.0)
+fertilizer = expense_cols[2].number_input("Fertilizer", value=0.0, step=1.0)
+seed = expense_cols[3].number_input("Seed", value=0.0, step=1.0)
+machinery = expense_cols[4].number_input("Machinery", value=0.0, step=1.0)
+labor = expense_cols[5].number_input("Labor", value=0.0, step=1.0)
+
+expenses_per_acre = chemicals + fertilizer + seed + machinery + labor
+
+# =========================================================
+# 4. CREATE MAP (ALWAYS SHOW BASE MAP)
 # =========================================================
 m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
 
@@ -67,7 +78,7 @@ folium.TileLayer(
 ).add_to(m)
 
 # =========================================================
-# 4. ZONES (IF UPLOADED)
+# 5. ZONES (IF UPLOADED)
 # =========================================================
 if zones_gdf is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
@@ -96,24 +107,10 @@ if zones_gdf is not None:
         ).add_to(zone_layer)
     zone_layer.add_to(m)
 
-    # Zone Legend
-    zone_legend_html = """
-    <div style="position: fixed; bottom: 30px; right: 30px; width: 180px;
-                background-color: white; z-index:9999; font-size:14px;
-                border:2px solid grey; border-radius:5px; padding: 10px;">
-    <b>Zone Legend</b><br>
-    <i style="background:#FF0000;width:20px;height:10px;display:inline-block;"></i> Zone 1<br>
-    <i style="background:#FF8000;width:20px;height:10px;display:inline-block;"></i> Zone 2<br>
-    <i style="background:#FFFF00;width:20px;height:10px;display:inline-block;"></i> Zone 3<br>
-    <i style="background:#80FF00;width:20px;height:10px;display:inline-block;"></i> Zone 4<br>
-    <i style="background:#008000;width:20px;height:10px;display:inline-block;"></i> Zone 5<br>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(zone_legend_html))
-
 # =========================================================
-# 5. YIELD + PROFIT (IF UPLOADED)
+# 6. YIELD + PROFIT (IF FILE UPLOADED)
 # =========================================================
+df = None
 if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
@@ -122,21 +119,11 @@ if uploaded_files:
             m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
             m.zoom_start = 15
 
-            # ---------------- Expense Inputs ----------------
-            st.subheader("Expense Inputs")
-            expense_cols = st.columns(6)
-            sell_price = expense_cols[0].number_input("Sell Price ($/bu)", value=0.0, step=0.1, key=f"{file.name}_sell_price")
-            chemicals = expense_cols[1].number_input("Chemicals", value=0.0, step=1.0, key=f"{file.name}_chemicals")
-            fertilizer = expense_cols[2].number_input("Fertilizer", value=0.0, step=1.0, key=f"{file.name}_fertilizer")
-            seed = expense_cols[3].number_input("Seed", value=0.0, step=1.0, key=f"{file.name}_seed")
-            machinery = expense_cols[4].number_input("Machinery", value=0.0, step=1.0, key=f"{file.name}_machinery")
-            labor = expense_cols[5].number_input("Labor", value=0.0, step=1.0, key=f"{file.name}_labor")
-
-            expenses_per_acre = chemicals + fertilizer + seed + machinery + labor
+            # Revenue & Profit
             df["Revenue_per_acre"] = df["Yield"] * sell_price
             df["NetProfit_per_acre"] = df["Revenue_per_acre"] - expenses_per_acre
 
-            # ---------------- Profit Heatmap ----------------
+            # Profit Heatmap
             grid_x, grid_y = np.mgrid[
                 df["Longitude"].min():df["Longitude"].max():200j,
                 df["Latitude"].min():df["Latitude"].max():200j
@@ -156,43 +143,27 @@ if uploaded_files:
                 opacity=0.6, name="Net Profit ($/ac)", show=True
             ).add_to(m)
 
-            # ---------------- Yield Heatmap (toggle) ----------------
-            grid_z_yield = griddata(
-                (df["Longitude"], df["Latitude"]),
-                df["Yield"], (grid_x, grid_y), method="linear"
-            )
-            vmin_y, vmax_y = np.nanmin(df["Yield"]), np.nanmax(df["Yield"])
-            cmap_y = plt.cm.get_cmap("YlGn")
-            rgba_img_y = cmap_y((grid_z_yield - vmin_y) / (vmax_y - vmin_y))
-            rgba_img_y = np.nan_to_num(rgba_img_y, nan=0.0)
-            folium.raster_layers.ImageOverlay(
-                image=np.uint8(rgba_img_y * 255),
-                bounds=[[df["Latitude"].min(), df["Longitude"].min()],
-                        [df["Latitude"].max(), df["Longitude"].max()]],
-                opacity=0.4, name="Yield (bu/ac)", show=False
-            ).add_to(m)
-
-            # ---------------- Summary Table ----------------
-            st.subheader("Summary")
-            revenue_per_acre = df["Revenue_per_acre"].mean()
-            net_profit_per_acre = df["NetProfit_per_acre"].mean()
-
-            summary = pd.DataFrame({
-                "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-                "Profit": [round(revenue_per_acre, 2),
-                           round(expenses_per_acre, 2),
-                           round(net_profit_per_acre, 2)]
-            })
-
-            # Color profits red/green
-            st.dataframe(summary.style.applymap(
-                lambda v: "color: green; font-weight: bold;" if v > 0 else
-                          "color: red; font-weight: bold;" if v < 0 else "",
-                subset=["Profit"]
-            ))
+# =========================================================
+# 7. SUMMARY TABLE (ALWAYS SHOW)
+# =========================================================
+st.header("Summary")
+if df is not None:
+    revenue_per_acre = df["Revenue_per_acre"].mean()
+    net_profit_per_acre = df["NetProfit_per_acre"].mean()
+    summary = pd.DataFrame({
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+        "Profit": [round(revenue_per_acre, 2), round(expenses_per_acre, 2), round(net_profit_per_acre, 2)]
+    })
+    st.dataframe(summary.style.applymap(
+        lambda v: "color: green; font-weight: bold;" if v > 0 else
+                  "color: red; font-weight: bold;" if v < 0 else "",
+        subset=["Profit"]
+    ))
+else:
+    st.write("Upload a yield map to see summary results.")
 
 # =========================================================
-# 6. LAYER CONTROL + DISPLAY
+# 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, width=800, height=600)
