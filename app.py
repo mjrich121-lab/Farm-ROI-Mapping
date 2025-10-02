@@ -42,8 +42,25 @@ if zone_file is not None:
 st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
+# ---------------- Map Creation ----------------
 if uploaded_files or zones_gdf is not None:
+    bounds = None
+
+    # Determine bounds (priority: zones > yield)
+    if zones_gdf is not None:
+        minx, miny, maxx, maxy = zones_gdf.total_bounds
+        bounds = [[miny, minx], [maxy, maxx]]
+    elif uploaded_files:
+        dfs = [pd.read_csv(f) for f in uploaded_files]
+        all_lat = pd.concat([d["Latitude"] for d in dfs if "Latitude" in d.columns])
+        all_lon = pd.concat([d["Longitude"] for d in dfs if "Longitude" in d.columns])
+        bounds = [[all_lat.min(), all_lon.min()],
+                  [all_lat.max(), all_lon.max()]]
+
+    # Initialize map
     m = folium.Map(location=[40, -95], zoom_start=5, tiles=None)
+    if bounds:
+        m.fit_bounds(bounds)
 
     # Satellite base
     folium.TileLayer(
@@ -119,31 +136,39 @@ if uploaded_files or zones_gdf is not None:
         """
         m.get_root().html.add_child(folium.Element(zone_legend_html))
 
-    # --- Yield ---
+    # --- Yield + Profit ---
     if uploaded_files:
         for file in uploaded_files:
             df = pd.read_csv(file)
             if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
-                df["NetProfit_per_acre"] = df["Yield"] * 5  # placeholder until expenses linked
+                df["NetProfit_per_acre"] = df["Yield"] * 5  # Placeholder until expenses added
 
-                # Heatmap
+                # Interpolation grid
                 grid_x, grid_y = np.mgrid[
                     df["Longitude"].min():df["Longitude"].max():200j,
                     df["Latitude"].min():df["Latitude"].max():200j
                 ]
-                grid_z = griddata(
+                grid_profit = griddata(
                     (df["Longitude"], df["Latitude"]),
                     df["NetProfit_per_acre"],
                     (grid_x, grid_y),
                     method="linear"
                 )
-                vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
-                cmap = plt.cm.get_cmap("RdYlGn")
-                rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
-                rgba_img = np.nan_to_num(rgba_img, nan=0.0)
+                grid_yield = griddata(
+                    (df["Longitude"], df["Latitude"]),
+                    df["Yield"],
+                    (grid_x, grid_y),
+                    method="linear"
+                )
+
+                # Profit overlay (default ON)
+                vmin_p, vmax_p = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+                cmap_p = plt.cm.get_cmap("RdYlGn")
+                rgba_profit = cmap_p((grid_profit - vmin_p) / (vmax_p - vmin_p))
+                rgba_profit = np.nan_to_num(rgba_profit, nan=0.0)
 
                 folium.raster_layers.ImageOverlay(
-                    image=np.uint8(rgba_img * 255),
+                    image=np.uint8(rgba_profit * 255),
                     bounds=[[df["Latitude"].min(), df["Longitude"].min()],
                             [df["Latitude"].max(), df["Longitude"].max()]],
                     opacity=0.6,
@@ -151,6 +176,47 @@ if uploaded_files or zones_gdf is not None:
                     show=True
                 ).add_to(m)
 
+                # Yield overlay (default OFF but legend visible)
+                vmin_y, vmax_y = np.nanmin(df["Yield"]), np.nanmax(df["Yield"])
+                cmap_y = plt.cm.get_cmap("RdYlGn")
+                rgba_yield = cmap_y((grid_yield - vmin_y) / (vmax_y - vmin_y))
+                rgba_yield = np.nan_to_num(rgba_yield, nan=0.0)
+
+                folium.raster_layers.ImageOverlay(
+                    image=np.uint8(rgba_yield * 255),
+                    bounds=[[df["Latitude"].min(), df["Longitude"].min()],
+                            [df["Latitude"].max(), df["Longitude"].max()]],
+                    opacity=0.4,
+                    name="Yield (bu/ac)",
+                    show=False
+                ).add_to(m)
+
+                # Profit Legend (top-left)
+                profit_legend_html = """
+                <div style="position: fixed; 
+                            top: 20px; left: 20px; width: 180px; 
+                            background-color: white; z-index:9999; 
+                            font-size:14px; border:2px solid grey; border-radius:5px;
+                            padding: 10px;">
+                <b>Net Profit ($/ac)</b><br>
+                <span style="color:red;">Low</span> → <span style="color:green;">High</span>
+                </div>
+                """
+                m.get_root().html.add_child(folium.Element(profit_legend_html))
+
+                # Yield Legend (below profit)
+                yield_legend_html = """
+                <div style="position: fixed; 
+                            top: 90px; left: 20px; width: 180px; 
+                            background-color: white; z-index:9999; 
+                            font-size:14px; border:2px solid grey; border-radius:5px;
+                            padding: 10px;">
+                <b>Yield (bu/ac)</b><br>
+                <span style="color:red;">Low</span> → <span style="color:green;">High</span>
+                </div>
+                """
+                m.get_root().html.add_child(folium.Element(yield_legend_html))
+
     # Controls
     folium.LayerControl(collapsed=False).add_to(m)
-    st_folium(m, width=700, height=500)
+    st_folium(m, width=900, height=600)
