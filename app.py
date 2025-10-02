@@ -248,7 +248,6 @@ if uploaded_files:
             """
             m.get_root().html.add_child(folium.Element(zone_legend_html))
 
-        
             folium.LayerControl(collapsed=False).add_to(m)
             st_folium(m, width=700, height=500)
 
