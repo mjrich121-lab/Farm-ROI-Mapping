@@ -94,32 +94,63 @@ if not fert_products.empty:
 if not seed_products.empty:
     st.success("Seed prescription uploaded and processed")
 
-
-
 # =========================================================
-# 4. EXPENSE INPUTS
+# 4. EXPENSE INPUTS (PER ACRE $)
 # =========================================================
 st.header("Expense Inputs (Per Acre $)")
 
 cols = st.columns(6)
-sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
-chemicals = cols[1].number_input("Chemicals", min_value=0.0, value=0.0, step=0.1)
-insurance = cols[2].number_input("Insurance", min_value=0.0, value=0.0, step=0.1)
-insecticide = cols[3].number_input("Insect/Fungicide", min_value=0.0, value=0.0, step=0.1)
-machinery = cols[4].number_input("Machinery", min_value=0.0, value=0.0, step=0.1)
-labor = cols[5].number_input("Labor", min_value=0.0, value=0.0, step=0.1)
+with cols[0]:
+    st.markdown("**Sell Price ($/bu)**")
+    sell_price = st.number_input("sell", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols[1]:
+    st.markdown("**Chemicals ($/ac)**")
+    chemicals = st.number_input("chem", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols[2]:
+    st.markdown("**Insurance ($/ac)**")
+    insurance = st.number_input("ins", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols[3]:
+    st.markdown("**Insect/Fungicide ($/ac)**")
+    insecticide = st.number_input("insect", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols[4]:
+    st.markdown("**Fertilizer (Flat $/ac)**")
+    fertilizer = st.number_input("fert", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols[5]:
+    st.markdown("**Seed (Flat $/ac)**")
+    seed = st.number_input("seed", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
 
 cols2 = st.columns(6)
-cost_of_living = cols2[0].number_input("Cost of Living", min_value=0.0, value=0.0, step=0.1)
-extra_fuel = cols2[1].number_input("Extra Fuel", min_value=0.0, value=0.0, step=0.1)
-extra_interest = cols2[2].number_input("Extra Interest", min_value=0.0, value=0.0, step=0.1)
-truck_fuel = cols2[3].number_input("Truck Fuel", min_value=0.0, value=0.0, step=0.1)
-cash_rent = cols2[4].number_input("Cash Rent", min_value=0.0, value=0.0, step=0.1)
+with cols2[0]:
+    st.markdown("**Machinery ($/ac)**")
+    machinery = st.number_input("mach", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols2[1]:
+    st.markdown("**Labor ($/ac)**")
+    labor = st.number_input("labor", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols2[2]:
+    st.markdown("**Cost of Living ($/ac)**")
+    cost_of_living = st.number_input("col", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols2[3]:
+    st.markdown("**Extra Fuel ($/ac)**")
+    extra_fuel = st.number_input("fuel", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols2[4]:
+    st.markdown("**Extra Interest ($/ac)**")
+    extra_interest = st.number_input("int", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+with cols2[5]:
+    st.markdown("**Truck Fuel ($/ac)**")
+    truck_fuel = st.number_input("truck", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
 
-base_expenses = {
+cols3 = st.columns(6)
+with cols3[0]:
+    st.markdown("**Cash Rent ($/ac)**")
+    cash_rent = st.number_input("rent", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+
+# Collect into dict
+expenses = {
     "Chemicals": chemicals,
     "Insurance": insurance,
     "Insecticide/Fungicide": insecticide,
+    "Fertilizer (Flat)": fertilizer,
+    "Seed (Flat)": seed,
     "Machinery": machinery,
     "Labor": labor,
     "Cost of Living": cost_of_living,
@@ -128,7 +159,8 @@ base_expenses = {
     "Truck Fuel": truck_fuel,
     "Cash Rent": cash_rent
 }
-base_expenses_per_acre = sum(base_expenses.values())
+expenses_per_acre = sum(expenses.values())
+
 
 # =========================================================
 # 5. BASE MAP
