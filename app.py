@@ -43,10 +43,17 @@ if zone_file is not None:
         st.error(f"Error loading zone file: {e}")
 
 # ==================================================
-# SECTION 2: Expenses Input (Always Visible)
+# SECTION 2: Yield Map Upload
+# ==================================================
+st.header("Yield Map Upload")
+uploaded_files = st.file_uploader("Upload Yield Map CSV(s)",
+                                  type="csv", accept_multiple_files=True)
+
+# ==================================================
+# SECTION 3: Expense Inputs (always visible, AFTER yield upload)
 # ==================================================
 st.header("Expense Inputs (Per Acre)")
-sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=5.0, step=0.1)
+sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
 
 st.markdown("### Expenses per Acre ($)")
 chemicals = st.number_input("Chemicals", value=0.0)
@@ -67,13 +74,6 @@ expenses_per_acre = sum([
     seed, cost_of_living, extra_fuel, extra_interest,
     truck_fuel, labor, cash_rent
 ])
-
-# ==================================================
-# SECTION 3: Yield Upload
-# ==================================================
-st.header("Yield Map Upload")
-uploaded_files = st.file_uploader("Upload Yield Map CSV(s)",
-                                  type="csv", accept_multiple_files=True)
 
 # ==================================================
 # SECTION 4: Map Setup
