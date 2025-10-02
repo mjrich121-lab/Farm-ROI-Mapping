@@ -50,25 +50,34 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)",
                                   type="csv", accept_multiple_files=True)
 
 # ==================================================
-# SECTION 3: Expense Inputs (always visible, AFTER yield upload)
+# SECTION 3: Expense Inputs (concise horizontal table)
 # ==================================================
 st.header("Expense Inputs (Per Acre)")
-sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
 
-st.markdown("### Expenses per Acre ($)")
-chemicals = st.number_input("Chemicals", value=0.0)
-insurance = st.number_input("Crop & Hail Insurance", value=0.0)
-insecticide = st.number_input("Insecticide/Fungicide", value=0.0)
-fertilizer = st.number_input("Fertilizer", value=0.0)
-machinery = st.number_input("Machinery", value=0.0)
-seed = st.number_input("Seed", value=0.0)
-cost_of_living = st.number_input("Cost of Living", value=0.0)
-extra_fuel = st.number_input("Extra Fuel for Corn", value=0.0)
-extra_interest = st.number_input("Extra Interest", value=0.0)
-truck_fuel = st.number_input("Truck Fuel", value=0.0)
-labor = st.number_input("Labor", value=0.0)
-cash_rent = st.number_input("Cash Rent", value=0.0)
+cols = st.columns(4)  # 4 columns to spread inputs horizontally
 
+with cols[0]:
+    sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
+    chemicals = st.number_input("Chemicals", value=0.0)
+    insurance = st.number_input("Crop & Hail Insurance", value=0.0)
+
+with cols[1]:
+    insecticide = st.number_input("Insecticide/Fungicide", value=0.0)
+    fertilizer = st.number_input("Fertilizer", value=0.0)
+    machinery = st.number_input("Machinery", value=0.0)
+
+with cols[2]:
+    seed = st.number_input("Seed", value=0.0)
+    cost_of_living = st.number_input("Cost of Living", value=0.0)
+    extra_fuel = st.number_input("Extra Fuel for Corn", value=0.0)
+
+with cols[3]:
+    extra_interest = st.number_input("Extra Interest", value=0.0)
+    truck_fuel = st.number_input("Truck Fuel", value=0.0)
+    labor = st.number_input("Labor", value=0.0)
+    cash_rent = st.number_input("Cash Rent", value=0.0)
+
+# Sum up expenses
 expenses_per_acre = sum([
     chemicals, insurance, insecticide, fertilizer, machinery,
     seed, cost_of_living, extra_fuel, extra_interest,
