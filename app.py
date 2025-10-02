@@ -1,5 +1,5 @@
 # =========================================================
-# Farm Profit Mapping Tool (Clean Structured Version)
+# Farm Profit Mapping Tool (Expenses + Summary Fixed)
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -52,9 +52,8 @@ st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
 # =========================================================
-# 3. CREATE MAP
+# 3. CREATE MAP (ALWAYS SHOW BASE MAP)
 # =========================================================
-# Default map
 m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
 
 # Base layers
@@ -126,12 +125,12 @@ if uploaded_files:
             # ---------------- Expense Inputs ----------------
             st.subheader("Expense Inputs")
             expense_cols = st.columns(6)
-            sell_price = expense_cols[0].number_input("Sell Price ($/bu)", value=0.0, step=0.1, key="sell_price")
-            chemicals = expense_cols[1].number_input("Chemicals", value=0.0, step=1.0, key="chemicals")
-            fertilizer = expense_cols[2].number_input("Fertilizer", value=0.0, step=1.0, key="fertilizer")
-            seed = expense_cols[3].number_input("Seed", value=0.0, step=1.0, key="seed")
-            machinery = expense_cols[4].number_input("Machinery", value=0.0, step=1.0, key="machinery")
-            labor = expense_cols[5].number_input("Labor", value=0.0, step=1.0, key="labor")
+            sell_price = expense_cols[0].number_input("Sell Price ($/bu)", value=0.0, step=0.1, key=f"{file.name}_sell_price")
+            chemicals = expense_cols[1].number_input("Chemicals", value=0.0, step=1.0, key=f"{file.name}_chemicals")
+            fertilizer = expense_cols[2].number_input("Fertilizer", value=0.0, step=1.0, key=f"{file.name}_fertilizer")
+            seed = expense_cols[3].number_input("Seed", value=0.0, step=1.0, key=f"{file.name}_seed")
+            machinery = expense_cols[4].number_input("Machinery", value=0.0, step=1.0, key=f"{file.name}_machinery")
+            labor = expense_cols[5].number_input("Labor", value=0.0, step=1.0, key=f"{file.name}_labor")
 
             expenses_per_acre = chemicals + fertilizer + seed + machinery + labor
             df["Revenue_per_acre"] = df["Yield"] * sell_price
@@ -177,6 +176,7 @@ if uploaded_files:
             st.subheader("Summary")
             revenue_per_acre = df["Revenue_per_acre"].mean()
             net_profit_per_acre = df["NetProfit_per_acre"].mean()
+
             summary = pd.DataFrame({
                 "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
                 "Profit": [round(revenue_per_acre, 2),
