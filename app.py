@@ -223,31 +223,47 @@ if uploaded_files:
                 - fert_costs
                 - seed_costs
             )
+# Auto-zoom to yield points
+bounds = [[df["Latitude"].min(), df["Longitude"].min()],
+          [df["Latitude"].max(), df["Longitude"].max()]]
+m.fit_bounds(bounds)
 
-            # Auto-zoom to yield
-            m = auto_zoom_map(m, df=df)
+# Always plot raw points so you see data
+for _, row in df.iterrows():
+    folium.CircleMarker(
+        location=[row["Latitude"], row["Longitude"]],
+        radius=2,
+        color="blue",
+        fill=True,
+        fill_opacity=0.5,
+        tooltip=f"Yield: {row['Yield']:.1f}, Profit: {row['NetProfit_per_acre']:.2f}"
+    ).add_to(m)
 
-            # Heatmap overlay
-            grid_x, grid_y = np.mgrid[
-                df["Longitude"].min():df["Longitude"].max():200j,
-                df["Latitude"].min():df["Latitude"].max():200j
-            ]
-            grid_z = griddata(
-                (df["Longitude"], df["Latitude"]),
-                df["NetProfit_per_acre"],
-                (grid_x, grid_y),
-                method="linear"
-            )
-            vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
-            cmap = plt.cm.get_cmap("RdYlGn")
-            rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
-            rgba_img = np.nan_to_num(rgba_img, nan=0.0)
-            folium.raster_layers.ImageOverlay(
-                image=np.uint8(rgba_img * 255),
-                bounds=[[df["Latitude"].min(), df["Longitude"].min()],
-                        [df["Latitude"].max(), df["Longitude"].max()]],
-                opacity=0.6, name="Net Profit ($/ac)", show=True
-            ).add_to(m)
+# Heatmap overlay (keep if interpolation works)
+try:
+    grid_x, grid_y = np.mgrid[
+        df["Longitude"].min():df["Longitude"].max():200j,
+        df["Latitude"].min():df["Latitude"].max():200j
+    ]
+    grid_z = griddata(
+        (df["Longitude"], df["Latitude"]),
+        df["NetProfit_per_acre"],
+        (grid_x, grid_y),
+        method="linear"
+    )
+    vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+    cmap = plt.cm.get_cmap("RdYlGn")
+    rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
+    rgba_img = np.nan_to_num(rgba_img, nan=0.0)
+    folium.raster_layers.ImageOverlay(
+        image=np.uint8(rgba_img * 255),
+        bounds=bounds,
+        opacity=0.6, name="Net Profit ($/ac)", show=True
+    ).add_to(m)
+except Exception as e:
+    st.warning(f"Heatmap could not be generated: {e}")
+
+           
 
 # =========================================================
 # 8. DISPLAY MAP
