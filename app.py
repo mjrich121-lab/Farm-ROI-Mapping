@@ -1,5 +1,5 @@
 # =========================================================
-# Farm ROI Tool V2.1
+# Farm ROI Tool V3
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -12,8 +12,8 @@ import zipfile
 import os
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Farm ROI Tool V2.1", layout="wide")
-st.title("Farm Profit Mapping Tool V2.1")
+st.set_page_config(page_title="Farm ROI Tool V3", layout="wide")
+st.title("Farm Profit Mapping Tool V3")
 
 # =========================================================
 # 1. ZONE MAP UPLOAD
@@ -52,21 +52,30 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_
 # 3. PRESCRIPTION MAP UPLOADS
 # =========================================================
 st.header("Prescription Map Uploads")
-fert_file = st.file_uploader("Upload Fertilizer Prescription Map", 
-                             type=["csv", "geojson", "json", "zip"], key="fert")
-seed_file = st.file_uploader("Upload Seed Prescription Map", 
-                             type=["csv", "geojson", "json", "zip"], key="seed")
+fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv"], key="fert")
+seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv"], key="seed")
 
-fertilizer_costs_per_acre = 0
-seed_costs_per_acre = 0
+fert_products = pd.DataFrame()
+seed_products = pd.DataFrame()
+
+def process_prescription(file, label):
+    if file is None:
+        return pd.DataFrame()
+    df = pd.read_csv(file)
+    if {"Product","Acres","CostTotal"}.issubset(df.columns):
+        df["CostPerAcre"] = df["CostTotal"] / df["Acres"]
+    return df
 
 if fert_file:
+    fert_products = process_prescription(fert_file, "Fertilizer")
     st.success("Fertilizer prescription uploaded")
+
 if seed_file:
+    seed_products = process_prescription(seed_file, "Seed")
     st.success("Seed prescription uploaded")
 
 # =========================================================
-# 4. EXPENSE INPUTS (ALWAYS SHOW)
+# 4. EXPENSE INPUTS
 # =========================================================
 st.header("Expense Inputs (Per Acre $)")
 
@@ -75,67 +84,59 @@ sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0,
 chemicals = cols[1].number_input("Chemicals", min_value=0.0, value=0.0, step=0.1)
 insurance = cols[2].number_input("Insurance", min_value=0.0, value=0.0, step=0.1)
 insecticide = cols[3].number_input("Insect/Fungicide", min_value=0.0, value=0.0, step=0.1)
-fertilizer = cols[4].number_input("Fertilizer (Flat)", min_value=0.0, value=0.0, step=0.1)
-machinery = cols[5].number_input("Machinery", min_value=0.0, value=0.0, step=0.1)
+machinery = cols[4].number_input("Machinery", min_value=0.0, value=0.0, step=0.1)
+labor = cols[5].number_input("Labor", min_value=0.0, value=0.0, step=0.1)
 
 cols2 = st.columns(6)
-seed = cols2[0].number_input("Seed (Flat)", min_value=0.0, value=0.0, step=0.1)
-cost_of_living = cols2[1].number_input("Cost of Living", min_value=0.0, value=0.0, step=0.1)
-extra_fuel = cols2[2].number_input("Extra Fuel", min_value=0.0, value=0.0, step=0.1)
-extra_interest = cols2[3].number_input("Extra Interest", min_value=0.0, value=0.0, step=0.1)
-truck_fuel = cols2[4].number_input("Truck Fuel", min_value=0.0, value=0.0, step=0.1)
-labor = cols2[5].number_input("Labor", min_value=0.0, value=0.0, step=0.1)
+cost_of_living = cols2[0].number_input("Cost of Living", min_value=0.0, value=0.0, step=0.1)
+extra_fuel = cols2[1].number_input("Extra Fuel", min_value=0.0, value=0.0, step=0.1)
+extra_interest = cols2[2].number_input("Extra Interest", min_value=0.0, value=0.0, step=0.1)
+truck_fuel = cols2[3].number_input("Truck Fuel", min_value=0.0, value=0.0, step=0.1)
+cash_rent = cols2[4].number_input("Cash Rent", min_value=0.0, value=0.0, step=0.1)
 
-cols3 = st.columns(6)
-cash_rent = cols3[0].number_input("Cash Rent", min_value=0.0, value=0.0, step=0.1)
-
-expenses = {
+base_expenses = {
     "Chemicals": chemicals,
     "Insurance": insurance,
     "Insecticide/Fungicide": insecticide,
-    "Fertilizer (Flat)": fertilizer,
     "Machinery": machinery,
-    "Seed (Flat)": seed,
+    "Labor": labor,
     "Cost of Living": cost_of_living,
     "Extra Fuel": extra_fuel,
     "Extra Interest": extra_interest,
     "Truck Fuel": truck_fuel,
-    "Labor": labor,
     "Cash Rent": cash_rent
 }
-expenses_per_acre = sum(expenses.values())
+base_expenses_per_acre = sum(base_expenses.values())
 
 # =========================================================
-# 5. BASE MAP (ALWAYS SHOW)
+# 5. BASE MAP
 # =========================================================
 m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
 
-# Base layers
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attr="Esri", name="Esri Satellite", overlay=False, control=False
 ).add_to(m)
+
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     attr="Esri", name="Labels", overlay=True, control=False
 ).add_to(m)
 
 # =========================================================
-# 6. ZONES (IF UPLOADED)
+# 6. ZONES
 # =========================================================
 if zones_gdf is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
     static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
-
     zone_col = None
-    for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
+    for candidate in ["Zone","zone","ZONE","Name","name"]:
         if candidate in zones_gdf.columns:
             zone_col = candidate
             break
     if zone_col is None:
-        zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+        zones_gdf["ZoneIndex"] = range(1, len(zones_gdf)+1)
         zone_col = "ZoneIndex"
-
     for _, row in zones_gdf.iterrows():
         try:
             zone_value = int(row[zone_col])
@@ -145,73 +146,83 @@ if zones_gdf is not None:
         folium.GeoJson(
             row["geometry"],
             name=f"Zone {zone_value}",
-            style_function=lambda x, c=zone_color: {"fillOpacity": 0.3, "color": c, "weight": 3},
+            style_function=lambda x, c=zone_color: {"fillOpacity":0.3,"color":c,"weight":3},
             tooltip=f"Zone: {zone_value}"
         ).add_to(zone_layer)
     zone_layer.add_to(m)
 
 # =========================================================
-# 7. YIELD + PROFIT (IF FILE UPLOADED)
+# 7. YIELD + PROFIT
 # =========================================================
 df = None
 if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
-        if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
-            # Auto-zoom
+        if {"Latitude","Longitude","Yield"}.issubset(df.columns):
             m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
             m.zoom_start = 15
-
-            # Revenue & Profit
             df["Revenue_per_acre"] = df["Yield"] * sell_price
-            df["NetProfit_per_acre"] = (
-                df["Revenue_per_acre"]
-                - expenses_per_acre
-                - fertilizer_costs_per_acre
-                - seed_costs_per_acre
-            )
+            fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
+            seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
+            df["NetProfit_per_acre"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
 
-            # Profit Heatmap
+            # Heatmap overlay
             grid_x, grid_y = np.mgrid[
                 df["Longitude"].min():df["Longitude"].max():200j,
                 df["Latitude"].min():df["Latitude"].max():200j
             ]
-            grid_z = griddata(
-                (df["Longitude"], df["Latitude"]),
-                df["NetProfit_per_acre"], (grid_x, grid_y), method="linear"
-            )
-            vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+            grid_z = griddata((df["Longitude"],df["Latitude"]), df["NetProfit_per_acre"], (grid_x,grid_y), method="linear")
+            vmin,vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
             cmap = plt.cm.get_cmap("RdYlGn")
-            rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
+            rgba_img = cmap((grid_z-vmin)/(vmax-vmin))
             rgba_img = np.nan_to_num(rgba_img, nan=0.0)
             folium.raster_layers.ImageOverlay(
-                image=np.uint8(rgba_img * 255),
+                image=np.uint8(rgba_img*255),
                 bounds=[[df["Latitude"].min(), df["Longitude"].min()],
                         [df["Latitude"].max(), df["Longitude"].max()]],
                 opacity=0.6, name="Net Profit ($/ac)", show=True
             ).add_to(m)
 
 # =========================================================
-# 8. DISPLAY MAP (ON TOP OF SUMMARY)
+# 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=800, height=600)
+st_folium(m, width=900, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY (ALWAYS SHOW BELOW MAP)
+# 9. PROFIT SUMMARY
 # =========================================================
 st.header("Profit Summary")
+
 if df is not None:
     revenue_per_acre = df["Revenue_per_acre"].mean()
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
+
+    st.subheader("Base Expenses (Flat $/ac)")
+    st.write(pd.DataFrame(base_expenses.items(), columns=["Expense","$/ac"]))
+
+    if not fert_products.empty:
+        st.subheader("Fertilizer Costs (Per Product)")
+        st.dataframe(fert_products[["Product","Acres","CostTotal","CostPerAcre"]])
+
+    if not seed_products.empty:
+        st.subheader("Seed Costs (Per Product)")
+        st.dataframe(seed_products[["Product","Acres","CostTotal","CostPerAcre"]])
+
+    st.subheader("Profit Metrics")
     summary = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Profit": [round(revenue_per_acre, 2), round(expenses_per_acre, 2), round(net_profit_per_acre, 2)]
+        "Metric":["Revenue ($/ac)","Expenses ($/ac)","Profit ($/ac)"],
+        "Value":[round(revenue_per_acre,2),
+                 round(base_expenses_per_acre,2),
+                 round(net_profit_per_acre,2)]
     })
-    st.dataframe(summary.style.applymap(
-        lambda v: "color: green; font-weight: bold;" if v > 0 else
-                  "color: red; font-weight: bold;" if v < 0 else "",
-        subset=["Profit"]
-    ))
+
+    def highlight_profit(val):
+        if val > 0:
+            return "color: green; font-weight: bold;"
+        elif val < 0:
+            return "color: red; font-weight: bold;"
+        return ""
+    st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]))
 else:
     st.write("Upload a yield map to see profit results.")
