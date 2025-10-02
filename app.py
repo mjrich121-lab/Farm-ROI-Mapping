@@ -1,5 +1,5 @@
 # =========================================================
-# Farm ROI Tool V3
+# Farm ROI Tool V3 (with auto-zoom logic)
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -14,6 +14,18 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Farm ROI Tool V3", layout="wide")
 st.title("Farm Profit Mapping Tool V3")
+
+# =========================================================
+# HELPER: AUTO-ZOOM
+# =========================================================
+def auto_zoom_map(m, df=None, gdf=None):
+    if df is not None and {"Latitude","Longitude"}.issubset(df.columns):
+        m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
+        m.zoom_start = 15
+    elif gdf is not None:
+        bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    return m
 
 # =========================================================
 # 1. ZONE MAP UPLOAD
@@ -59,26 +71,18 @@ def process_prescription(file):
     if file is None:
         return pd.DataFrame()
     df = pd.read_csv(file)
-
-    # Normalize column names
     df.columns = [c.strip().lower() for c in df.columns]
 
-    # We’ll accept a few schema variations
-    # Must have product and acres_applied
     if "product" not in df.columns or "acres" not in df.columns:
-        st.error("CSV must include columns: Product, Acres, [CostTotal or Price/Unit + Units]")
         return pd.DataFrame()
 
-    # Derive total cost if not provided
     if "costtotal" in df.columns:
         df["cost_total"] = df["costtotal"]
     elif "price_per_unit" in df.columns and "units" in df.columns:
         df["cost_total"] = df["price_per_unit"] * df["units"]
     else:
-        st.error("CSV must have either CostTotal OR Price_per_unit + Units")
         return pd.DataFrame()
 
-    # Group by product
     grouped = df.groupby("product", as_index=False).agg(
         Acres=("acres", "sum"),
         CostTotal=("cost_total", "sum")
@@ -88,11 +92,6 @@ def process_prescription(file):
 
 fert_products = process_prescription(fert_file)
 seed_products = process_prescription(seed_file)
-
-if not fert_products.empty:
-    st.success("Fertilizer prescription uploaded and processed")
-if not seed_products.empty:
-    st.success("Seed prescription uploaded and processed")
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
@@ -144,7 +143,6 @@ with cols3[0]:
     st.markdown("**Cash Rent ($/ac)**")
     cash_rent = st.number_input("rent", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
 
-# Collect into dict
 expenses = {
     "Chemicals": chemicals,
     "Insurance": insurance,
@@ -204,11 +202,10 @@ if zones_gdf is not None:
         ).add_to(zone_layer)
     zone_layer.add_to(m)
 
-# =========================================================
-# 8. DISPLAY MAP
-# =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=900, height=600)
+    # Auto-zoom if no yield yet
+    if not uploaded_files:
+        m = auto_zoom_map(m, gdf=zones_gdf)
+
 # =========================================================
 # 7. YIELD + PROFIT
 # =========================================================
@@ -217,18 +214,9 @@ if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
         if {"Latitude","Longitude","Yield"}.issubset(df.columns):
-            # Auto-zoom map
-            m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
-            m.zoom_start = 15
-
-            # Revenue per acre
             df["Revenue_per_acre"] = df["Yield"] * sell_price
-
-            # Fertilizer + Seed costs (safe defaults if not uploaded)
             fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
             seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
-
-            # Net profit per acre
             df["NetProfit_per_acre"] = (
                 df["Revenue_per_acre"]
                 - base_expenses_per_acre
@@ -236,7 +224,10 @@ if uploaded_files:
                 - seed_costs
             )
 
-            # Profit Heatmap overlay
+            # Auto-zoom to yield
+            m = auto_zoom_map(m, df=df)
+
+            # Heatmap overlay
             grid_x, grid_y = np.mgrid[
                 df["Longitude"].min():df["Longitude"].max():200j,
                 df["Latitude"].min():df["Latitude"].max():200j
@@ -247,18 +238,23 @@ if uploaded_files:
                 (grid_x, grid_y),
                 method="linear"
             )
-
             vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
             cmap = plt.cm.get_cmap("RdYlGn")
             rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
             rgba_img = np.nan_to_num(rgba_img, nan=0.0)
-
             folium.raster_layers.ImageOverlay(
                 image=np.uint8(rgba_img * 255),
                 bounds=[[df["Latitude"].min(), df["Longitude"].min()],
                         [df["Latitude"].max(), df["Longitude"].max()]],
                 opacity=0.6, name="Net Profit ($/ac)", show=True
             ).add_to(m)
+
+# =========================================================
+# 8. DISPLAY MAP
+# =========================================================
+folium.LayerControl(collapsed=False).add_to(m)
+st_folium(m, width=900, height=600)
+
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
@@ -269,15 +265,15 @@ if df is not None:
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
 
     st.subheader("Base Expenses (Flat $/ac)")
-    st.write(pd.DataFrame(base_expenses.items(), columns=["Expense","$/ac"]))
+    st.write(pd.DataFrame(expenses.items(), columns=["Expense","$/ac"]))
 
     if not fert_products.empty:
         st.subheader("Fertilizer Costs (Per Product)")
-        st.dataframe(fert_products[["Product","Acres","CostTotal","CostPerAcre"]])
+        st.dataframe(fert_products[["product","Acres","CostTotal","CostPerAcre"]])
 
     if not seed_products.empty:
         st.subheader("Seed Costs (Per Product)")
-        st.dataframe(seed_products[["Product","Acres","CostTotal","CostPerAcre"]])
+        st.dataframe(seed_products[["product","Acres","CostTotal","CostPerAcre"]])
 
     st.subheader("Profit Metrics")
     summary = pd.DataFrame({
@@ -295,4 +291,4 @@ if df is not None:
         return ""
     st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]))
 else:
-    st.write("Upload a yield map to see profit results.")
+    st.write("Upload a yield map (or zone file) to see profit results.")
