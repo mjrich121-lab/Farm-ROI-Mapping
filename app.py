@@ -241,4 +241,27 @@ if uploaded_files or zones_gdf is not None:
     # ==================================================
     folium.LayerControl(collapsed=False).add_to(m)
     st_folium(m, width=900, height=600)
+# ==================================================
+# SECTION 8: Summary Table (shown after map)
+# ==================================================
+if uploaded_files:
+    for file in uploaded_files:
+        df = pd.read_csv(file)
+        if "Yield" in df.columns:
+            avg_yield = df["Yield"].mean()
+            revenue_per_acre = avg_yield * sell_price
+            net_profit_per_acre = revenue_per_acre - expenses_per_acre
+            roi_percent = (net_profit_per_acre / expenses_per_acre * 100) if expenses_per_acre > 0 else 0
 
+            summary_df = pd.DataFrame({
+                "Metric": ["Revenue/acre ($)", "Expenses/acre ($)", "Net Profit/acre ($)", "ROI (%)"],
+                "Value": [
+                    round(revenue_per_acre, 2),
+                    round(expenses_per_acre, 2),
+                    round(net_profit_per_acre, 2),
+                    round(roi_percent, 2)
+                ]
+            })
+
+            st.subheader("Profitability Summary")
+            st.table(summary_df)
