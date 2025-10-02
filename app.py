@@ -159,8 +159,7 @@ expenses = {
     "Truck Fuel": truck_fuel,
     "Cash Rent": cash_rent
 }
-expenses_per_acre = sum(expenses.values())
-
+base_expenses_per_acre = sum(expenses.values())
 
 # =========================================================
 # 5. BASE MAP
@@ -204,6 +203,12 @@ if zones_gdf is not None:
             tooltip=f"Zone: {zone_value}"
         ).add_to(zone_layer)
     zone_layer.add_to(m)
+
+# =========================================================
+# 8. DISPLAY MAP
+# =========================================================
+folium.LayerControl(collapsed=False).add_to(m)
+st_folium(m, width=900, height=600)
 # =========================================================
 # 7. YIELD + PROFIT
 # =========================================================
@@ -219,7 +224,7 @@ if uploaded_files:
             # Revenue per acre
             df["Revenue_per_acre"] = df["Yield"] * sell_price
 
-            # --- FIXED COST CALCULATIONS ---
+            # Fertilizer + Seed costs (safe defaults if not uploaded)
             fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
             seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
 
@@ -254,14 +259,6 @@ if uploaded_files:
                         [df["Latitude"].max(), df["Longitude"].max()]],
                 opacity=0.6, name="Net Profit ($/ac)", show=True
             ).add_to(m)
-
-
-# =========================================================
-# 8. DISPLAY MAP
-# =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=900, height=600)
-
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
