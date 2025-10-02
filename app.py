@@ -51,16 +51,45 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_
 # =========================================================
 # 3. EXPENSE INPUTS (ALWAYS SHOW)
 # =========================================================
-st.header("Expense Inputs")
-expense_cols = st.columns(6)
-sell_price = expense_cols[0].number_input("Sell Price ($/bu)", value=0.0, step=0.1)
-chemicals = expense_cols[1].number_input("Chemicals", value=0.0, step=1.0)
-fertilizer = expense_cols[2].number_input("Fertilizer", value=0.0, step=1.0)
-seed = expense_cols[3].number_input("Seed", value=0.0, step=1.0)
-machinery = expense_cols[4].number_input("Machinery", value=0.0, step=1.0)
-labor = expense_cols[5].number_input("Labor", value=0.0, step=1.0)
+st.header("Expense Inputs (Per Acre $)")
 
-expenses_per_acre = chemicals + fertilizer + seed + machinery + labor
+cols = st.columns(6)
+
+sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
+chemicals = cols[1].number_input("Chemicals ($/ac)", min_value=0.0, value=0.0, step=0.1)
+insurance = cols[2].number_input("Insurance ($/ac)", min_value=0.0, value=0.0, step=0.1)
+insecticide = cols[3].number_input("Insect/Fungicide ($/ac)", min_value=0.0, value=0.0, step=0.1)
+fertilizer = cols[4].number_input("Fertilizer ($/ac)", min_value=0.0, value=0.0, step=0.1)
+machinery = cols[5].number_input("Machinery ($/ac)", min_value=0.0, value=0.0, step=0.1)
+
+cols2 = st.columns(6)
+
+seed = cols2[0].number_input("Seed ($/ac)", min_value=0.0, value=0.0, step=0.1)
+cost_of_living = cols2[1].number_input("Cost of Living ($/ac)", min_value=0.0, value=0.0, step=0.1)
+extra_fuel = cols2[2].number_input("Extra Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
+extra_interest = cols2[3].number_input("Extra Interest ($/ac)", min_value=0.0, value=0.0, step=0.1)
+truck_fuel = cols2[4].number_input("Truck Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
+labor = cols2[5].number_input("Labor ($/ac)", min_value=0.0, value=0.0, step=0.1)
+
+cols3 = st.columns(1)
+cash_rent = cols3[0].number_input("Cash Rent ($/ac)", min_value=0.0, value=0.0, step=0.1)
+
+# Store expenses in a dict for later calculations
+expenses = {
+    "Chemicals": chemicals,
+    "Insurance": insurance,
+    "Insecticide/Fungicide": insecticide,
+    "Fertilizer": fertilizer,
+    "Machinery": machinery,
+    "Seed": seed,
+    "Cost of Living": cost_of_living,
+    "Extra Fuel": extra_fuel,
+    "Extra Interest": extra_interest,
+    "Truck Fuel": truck_fuel,
+    "Labor": labor,
+    "Cash Rent": cash_rent
+}
+expenses_per_acre = sum(expenses.values())
 
 # =========================================================
 # 4. CREATE MAP (ALWAYS SHOW BASE MAP)
