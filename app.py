@@ -142,16 +142,19 @@ if uploaded_files:
                 show=False,
                 order_priority=2
             )
-
             # ---------------- Zone Upload ----------------
             st.markdown("---")
             st.header("Zone Map Upload")
-            zone_file = st.file_uploader("Upload Zone Map (GeoJSON or zipped Shapefile)",
-                                         type=["geojson", "json", "zip"], key=f"{file.name}_zone")
+            zone_file = st.file_uploader(
+                "Upload Zone Map (GeoJSON or zipped Shapefile)",
+                type=["geojson", "json", "zip"],
+                key=f"{file.name}_zone"
+            )
 
             if zone_file is not None:
                 zones_gdf = None
 
+                # --- Load GeoJSON or Shapefile ---
                 if zone_file.name.endswith(".geojson") or zone_file.name.endswith(".json"):
                     zones_gdf = gpd.read_file(zone_file)
 
@@ -167,14 +170,20 @@ if uploaded_files:
                             zones_gdf = gpd.read_file(shp_path)
                             break
 
+                    # --- Cleanup temporary files ---
                     os.remove("temp.zip")
                     import shutil
                     shutil.rmtree("temp_shp", ignore_errors=True)
 
+                else:
+                    st.error("Unsupported file format. Please upload a GeoJSON or zipped Shapefile.")
+
+                # --- Display Zones on Map ---
                 if zones_gdf is not None:
                     st.success("Zone map loaded successfully")
                     zone_layer = folium.FeatureGroup(name="Zones", show=True)
 
+                    # Pick the correct zone column
                     zone_col = None
                     for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
                         if candidate in zones_gdf.columns:
@@ -184,6 +193,7 @@ if uploaded_files:
                         zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
                         zone_col = "ZoneIndex"
 
+                    # Static zone color scheme
                     static_zone_colors = {
                         1: "#FF0000",  # Red
                         2: "#FF8000",  # Orange
@@ -192,13 +202,14 @@ if uploaded_files:
                         5: "#008000"   # Dark Green
                     }
 
+                    # Add polygons
                     for _, row in zones_gdf.iterrows():
                         try:
                             zone_value = int(row[zone_col])
                         except:
-                            zone_value = row[zone_col]
+                            zone_value = row[zone_col]  # fallback if not numeric
 
-                        zone_color = static_zone_colors.get(zone_value, "#0000FF")
+                        zone_color = static_zone_colors.get(zone_value, "#0000FF")  # fallback blue
 
                         folium.GeoJson(
                             row["geometry"],
@@ -213,7 +224,7 @@ if uploaded_files:
 
                     zone_layer.add_to(m)
 
-                    # --- Collapsible Zone Legend (bottom-right) ---
+                    # --- Static Zone Legend (bottom-right, collapsible) ---
                     zone_legend_html = """
                     <div id="zone-legend" style="position: fixed; 
                                 bottom: 30px; right: 30px; width: 180px; 
@@ -236,6 +247,7 @@ if uploaded_files:
                     """
                     m.get_root().html.add_child(folium.Element(zone_legend_html))
 
+        
             folium.LayerControl(collapsed=False).add_to(m)
             st_folium(m, width=700, height=500)
 
