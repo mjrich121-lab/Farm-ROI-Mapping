@@ -1,5 +1,5 @@
 # =========================================================
-# Farm ROI Tool V2
+# Farm ROI Tool V2.1
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -12,8 +12,8 @@ import zipfile
 import os
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Farm ROI Tool V2", layout="wide")
-st.title("Farm Profit Mapping Tool V2")
+st.set_page_config(page_title="Farm ROI Tool V2.1", layout="wide")
+st.title("Farm Profit Mapping Tool V2.1")
 
 # =========================================================
 # 1. ZONE MAP UPLOAD
@@ -52,7 +52,6 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_
 # 3. PRESCRIPTION MAP UPLOADS
 # =========================================================
 st.header("Prescription Map Uploads")
-
 fert_file = st.file_uploader("Upload Fertilizer Prescription Map", 
                              type=["csv", "geojson", "json", "zip"], key="fert")
 seed_file = st.file_uploader("Upload Seed Prescription Map", 
@@ -61,14 +60,10 @@ seed_file = st.file_uploader("Upload Seed Prescription Map",
 fertilizer_costs_per_acre = 0
 seed_costs_per_acre = 0
 
-# (placeholder until we process prescription files into actual costs)
-# later we'll merge rates with user-input product prices
 if fert_file:
     st.success("Fertilizer prescription uploaded")
-    # TODO: process fertilizer costs here
 if seed_file:
     st.success("Seed prescription uploaded")
-    # TODO: process seed costs here
 
 # =========================================================
 # 4. EXPENSE INPUTS (ALWAYS SHOW)
@@ -76,7 +71,6 @@ if seed_file:
 st.header("Expense Inputs (Per Acre $)")
 
 cols = st.columns(6)
-
 sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
 chemicals = cols[1].number_input("Chemicals", min_value=0.0, value=0.0, step=0.1)
 insurance = cols[2].number_input("Insurance", min_value=0.0, value=0.0, step=0.1)
@@ -85,7 +79,6 @@ fertilizer = cols[4].number_input("Fertilizer (Flat)", min_value=0.0, value=0.0,
 machinery = cols[5].number_input("Machinery", min_value=0.0, value=0.0, step=0.1)
 
 cols2 = st.columns(6)
-
 seed = cols2[0].number_input("Seed (Flat)", min_value=0.0, value=0.0, step=0.1)
 cost_of_living = cols2[1].number_input("Cost of Living", min_value=0.0, value=0.0, step=0.1)
 extra_fuel = cols2[2].number_input("Extra Fuel", min_value=0.0, value=0.0, step=0.1)
@@ -93,7 +86,7 @@ extra_interest = cols2[3].number_input("Extra Interest", min_value=0.0, value=0.
 truck_fuel = cols2[4].number_input("Truck Fuel", min_value=0.0, value=0.0, step=0.1)
 labor = cols2[5].number_input("Labor", min_value=0.0, value=0.0, step=0.1)
 
-cols3 = st.columns(1)
+cols3 = st.columns(6)
 cash_rent = cols3[0].number_input("Cash Rent", min_value=0.0, value=0.0, step=0.1)
 
 expenses = {
@@ -169,7 +162,7 @@ if uploaded_files:
             m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
             m.zoom_start = 15
 
-            # Revenue & Profit (flexible calc)
+            # Revenue & Profit
             df["Revenue_per_acre"] = df["Yield"] * sell_price
             df["NetProfit_per_acre"] = (
                 df["Revenue_per_acre"]
@@ -199,9 +192,15 @@ if uploaded_files:
             ).add_to(m)
 
 # =========================================================
-# 8. SUMMARY TABLE (ALWAYS SHOW)
+# 8. DISPLAY MAP (ON TOP OF SUMMARY)
 # =========================================================
-st.header("Summary")
+folium.LayerControl(collapsed=False).add_to(m)
+st_folium(m, width=800, height=600)
+
+# =========================================================
+# 9. PROFIT SUMMARY (ALWAYS SHOW BELOW MAP)
+# =========================================================
+st.header("Profit Summary")
 if df is not None:
     revenue_per_acre = df["Revenue_per_acre"].mean()
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
@@ -215,10 +214,4 @@ if df is not None:
         subset=["Profit"]
     ))
 else:
-    st.write("Upload a yield map to see summary results.")
-
-# =========================================================
-# 9. DISPLAY MAP
-# =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=800, height=600)
+    st.write("Upload a yield map to see profit results.")
