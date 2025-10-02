@@ -49,30 +49,52 @@ st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
 
 # =========================================================
-# 3. PRESCRIPTION MAP UPLOADS
+# 3. PRESCRIPTION MAP UPLOADS (multi-product supported)
 # =========================================================
 st.header("Prescription Map Uploads")
 fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv"], key="fert")
 seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv"], key="seed")
 
-fert_products = pd.DataFrame()
-seed_products = pd.DataFrame()
-
-def process_prescription(file, label):
+def process_prescription(file):
     if file is None:
         return pd.DataFrame()
     df = pd.read_csv(file)
-    if {"Product","Acres","CostTotal"}.issubset(df.columns):
-        df["CostPerAcre"] = df["CostTotal"] / df["Acres"]
-    return df
 
-if fert_file:
-    fert_products = process_prescription(fert_file, "Fertilizer")
-    st.success("Fertilizer prescription uploaded")
+    # Normalize column names
+    df.columns = [c.strip().lower() for c in df.columns]
 
-if seed_file:
-    seed_products = process_prescription(seed_file, "Seed")
-    st.success("Seed prescription uploaded")
+    # We’ll accept a few schema variations
+    # Must have product and acres_applied
+    if "product" not in df.columns or "acres" not in df.columns:
+        st.error("CSV must include columns: Product, Acres, [CostTotal or Price/Unit + Units]")
+        return pd.DataFrame()
+
+    # Derive total cost if not provided
+    if "costtotal" in df.columns:
+        df["cost_total"] = df["costtotal"]
+    elif "price_per_unit" in df.columns and "units" in df.columns:
+        df["cost_total"] = df["price_per_unit"] * df["units"]
+    else:
+        st.error("CSV must have either CostTotal OR Price_per_unit + Units")
+        return pd.DataFrame()
+
+    # Group by product
+    grouped = df.groupby("product", as_index=False).agg(
+        Acres=("acres", "sum"),
+        CostTotal=("cost_total", "sum")
+    )
+    grouped["CostPerAcre"] = grouped["CostTotal"] / grouped["Acres"]
+    return grouped
+
+fert_products = process_prescription(fert_file)
+seed_products = process_prescription(seed_file)
+
+if not fert_products.empty:
+    st.success("Fertilizer prescription uploaded and processed")
+if not seed_products.empty:
+    st.success("Seed prescription uploaded and processed")
+
+
 
 # =========================================================
 # 4. EXPENSE INPUTS
