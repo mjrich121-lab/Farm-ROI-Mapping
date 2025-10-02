@@ -239,33 +239,38 @@ for _, row in df.iterrows():
         tooltip=f"Yield: {row['Yield']:.1f}, Profit: {row['NetProfit_per_acre']:.2f}"
     ).add_to(m)
 
-# Heatmap overlay (Net Profit per acre)
+# === FIXED HEATMAP OVERLAY ===
 try:
-    # Build grid for interpolation (lon on X axis, lat on Y axis)
     grid_lon, grid_lat = np.meshgrid(
         np.linspace(df["Longitude"].min(), df["Longitude"].max(), 200),
         np.linspace(df["Latitude"].min(), df["Latitude"].max(), 200)
     )
 
-    # Interpolate profit values
     grid_profit = griddata(
         (df["Longitude"], df["Latitude"]),
         df["NetProfit_per_acre"],
         (grid_lon, grid_lat),
-        method="cubic"   # smoother than linear
+        method="cubic"
     )
 
-    # Normalize to colormap
+    # Handle NaNs + flat range
     vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+    if vmin == vmax:
+        vmax = vmin + 1
+    grid_profit = np.nan_to_num(grid_profit, nan=(vmin + vmax) / 2)
+
+    # Colormap
     cmap = plt.cm.get_cmap("RdYlGn")
     rgba_img = cmap((grid_profit - vmin) / (vmax - vmin))
     rgba_img = np.nan_to_num(rgba_img, nan=0.0)
 
-    # Overlay on folium map
+    # Correct folium bounds order (lat, lon)
+    bounds = [[df["Latitude"].min(), df["Longitude"].min()],
+              [df["Latitude"].max(), df["Longitude"].max()]]
+
     folium.raster_layers.ImageOverlay(
         image=(rgba_img * 255).astype(np.uint8),
-        bounds=[[df["Latitude"].min(), df["Longitude"].min()],
-                [df["Latitude"].max(), df["Longitude"].max()]],
+        bounds=bounds,
         opacity=0.6,
         name="Net Profit ($/ac)",
         show=True
