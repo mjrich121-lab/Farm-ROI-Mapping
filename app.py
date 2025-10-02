@@ -204,7 +204,6 @@ if zones_gdf is not None:
             tooltip=f"Zone: {zone_value}"
         ).add_to(zone_layer)
     zone_layer.add_to(m)
-
 # =========================================================
 # 7. YIELD + PROFIT
 # =========================================================
@@ -213,29 +212,49 @@ if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
         if {"Latitude","Longitude","Yield"}.issubset(df.columns):
+            # Auto-zoom map
             m.location = [df["Latitude"].mean(), df["Longitude"].mean()]
             m.zoom_start = 15
+
+            # Revenue per acre
             df["Revenue_per_acre"] = df["Yield"] * sell_price
+
+            # --- FIXED COST CALCULATIONS ---
             fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
             seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
-            df["NetProfit_per_acre"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
 
-            # Heatmap overlay
+            # Net profit per acre
+            df["NetProfit_per_acre"] = (
+                df["Revenue_per_acre"]
+                - base_expenses_per_acre
+                - fert_costs
+                - seed_costs
+            )
+
+            # Profit Heatmap overlay
             grid_x, grid_y = np.mgrid[
                 df["Longitude"].min():df["Longitude"].max():200j,
                 df["Latitude"].min():df["Latitude"].max():200j
             ]
-            grid_z = griddata((df["Longitude"],df["Latitude"]), df["NetProfit_per_acre"], (grid_x,grid_y), method="linear")
-            vmin,vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+            grid_z = griddata(
+                (df["Longitude"], df["Latitude"]),
+                df["NetProfit_per_acre"],
+                (grid_x, grid_y),
+                method="linear"
+            )
+
+            vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
             cmap = plt.cm.get_cmap("RdYlGn")
-            rgba_img = cmap((grid_z-vmin)/(vmax-vmin))
+            rgba_img = cmap((grid_z - vmin) / (vmax - vmin))
             rgba_img = np.nan_to_num(rgba_img, nan=0.0)
+
             folium.raster_layers.ImageOverlay(
-                image=np.uint8(rgba_img*255),
+                image=np.uint8(rgba_img * 255),
                 bounds=[[df["Latitude"].min(), df["Longitude"].min()],
                         [df["Latitude"].max(), df["Longitude"].max()]],
                 opacity=0.6, name="Net Profit ($/ac)", show=True
             ).add_to(m)
+
 
 # =========================================================
 # 8. DISPLAY MAP
