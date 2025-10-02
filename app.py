@@ -227,11 +227,11 @@ if uploaded_files:
             )
 
             # --- Auto-zoom to data bounds ---
-            bounds = [[df["Latitude"].min(), df["Longitude"].min()],
-                      [df["Latitude"].max(), df["Longitude"].max()]]
-            m.fit_bounds(bounds)
+            south, north = df["Latitude"].min(), df["Latitude"].max()
+            west, east = df["Longitude"].min(), df["Longitude"].max()
+            m.fit_bounds([[south, west], [north, east]])
 
-            # --- Plot raw points (blue dots) ---
+            # --- Plot raw points ---
             for _, row in df.iterrows():
                 folium.CircleMarker(
                     location=[row["Latitude"], row["Longitude"]],
@@ -242,32 +242,33 @@ if uploaded_files:
                     tooltip=f"Yield: {row['Yield']:.1f}, Profit: {row['NetProfit_per_acre']:.2f}"
                 ).add_to(m)
 
-            # --- Heatmap raster overlay (guaranteed fill) ---
+            # --- Heatmap raster overlay ---
             try:
-                # Regular grid covering field
+                # Regular grid
                 n = 200
-                lon_lin = np.linspace(df["Longitude"].min(), df["Longitude"].max(), n)
-                lat_lin = np.linspace(df["Latitude"].min(), df["Latitude"].max(), n)
+                lon_lin = np.linspace(west, east, n)
+                lat_lin = np.linspace(south, north, n)
                 lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-                # Fill by nearest neighbor lookup
+                # Nearest neighbor fill
                 from scipy.spatial import cKDTree
                 tree = cKDTree(df[["Longitude", "Latitude"]].values)
                 _, idx = tree.query(np.c_[lon_grid.ravel(), lat_grid.ravel()])
                 grid_profit = df["NetProfit_per_acre"].values[idx].reshape(lat_grid.shape)
 
-                # Normalize values
+                # Normalize to colormap
                 vmin, vmax = np.min(grid_profit), np.max(grid_profit)
-                if vmin == vmax:  # avoid flat scale
+                if vmin == vmax:  # flat safeguard
                     vmax = vmin + 1
                 cmap = plt.cm.get_cmap("RdYlGn")
                 rgba_img = cmap((grid_profit - vmin) / (vmax - vmin))
+                rgba_img = np.flipud(rgba_img)   # flip vertically for folium
                 rgba_img = (rgba_img * 255).astype(np.uint8)
 
-                # Overlay
+                # Overlay with correct bounds
                 folium.raster_layers.ImageOverlay(
                     image=rgba_img,
-                    bounds=bounds,
+                    bounds=[[south, west], [north, east]],
                     opacity=0.6,
                     name="Net Profit ($/ac)",
                     show=True
