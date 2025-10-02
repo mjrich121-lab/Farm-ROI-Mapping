@@ -14,7 +14,7 @@ st.set_page_config(page_title="Farm ROI Tool", layout="wide")
 st.title("🌱 Farm Profit Mapping Tool")
 
 # ==================================================
-# SECTION 1: Zone Upload
+# SECTION 1: Zone Map Upload
 # ==================================================
 st.header("Zone Map Upload")
 zone_file = st.file_uploader("Upload Zone Map (GeoJSON or zipped Shapefile)",
@@ -43,29 +43,52 @@ if zone_file is not None:
         st.error(f"Error loading zone file: {e}")
 
 # ==================================================
-# SECTION 2: Yield Upload
+# SECTION 2: Expenses Input (Always Visible)
+# ==================================================
+st.header("Expense Inputs (Per Acre)")
+sell_price = st.number_input("Sell Price ($/bu)", min_value=0.0, value=5.0, step=0.1)
+
+st.markdown("### Expenses per Acre ($)")
+chemicals = st.number_input("Chemicals", value=0.0)
+insurance = st.number_input("Crop & Hail Insurance", value=0.0)
+insecticide = st.number_input("Insecticide/Fungicide", value=0.0)
+fertilizer = st.number_input("Fertilizer", value=0.0)
+machinery = st.number_input("Machinery", value=0.0)
+seed = st.number_input("Seed", value=0.0)
+cost_of_living = st.number_input("Cost of Living", value=0.0)
+extra_fuel = st.number_input("Extra Fuel for Corn", value=0.0)
+extra_interest = st.number_input("Extra Interest", value=0.0)
+truck_fuel = st.number_input("Truck Fuel", value=0.0)
+labor = st.number_input("Labor", value=0.0)
+cash_rent = st.number_input("Cash Rent", value=0.0)
+
+expenses_per_acre = sum([
+    chemicals, insurance, insecticide, fertilizer, machinery,
+    seed, cost_of_living, extra_fuel, extra_interest,
+    truck_fuel, labor, cash_rent
+])
+
+# ==================================================
+# SECTION 3: Yield Upload
 # ==================================================
 st.header("Yield Map Upload")
 uploaded_files = st.file_uploader("Upload Yield Map CSV(s)",
                                   type="csv", accept_multiple_files=True)
 
 # ==================================================
-# SECTION 3: Map Setup
+# SECTION 4: Map Setup
 # ==================================================
 if uploaded_files or zones_gdf is not None:
-    # default map center
     center = [40, -95]
     zoom = 5
 
-    # If zones uploaded, zoom to bounds
     if zones_gdf is not None:
-        bounds = zones_gdf.total_bounds  # [minx, miny, maxx, maxy]
+        bounds = zones_gdf.total_bounds
         center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         zoom = 14
 
     m = folium.Map(location=center, zoom_start=zoom, tiles=None)
 
-    # Satellite base
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -76,16 +99,16 @@ if uploaded_files or zones_gdf is not None:
     ).add_to(m)
 
     # ==================================================
-    # SECTION 4: Zones
+    # SECTION 5: Zones
     # ==================================================
     if zones_gdf is not None:
         zone_layer = folium.FeatureGroup(name="Zones", show=True)
         static_zone_colors = {
-            1: "#FF0000",  # Red
-            2: "#FF8000",  # Orange
-            3: "#FFFF00",  # Yellow
-            4: "#80FF00",  # Light Green
-            5: "#008000"   # Dark Green
+            1: "#FF0000",
+            2: "#FF8000",
+            3: "#FFFF00",
+            4: "#80FF00",
+            5: "#008000"
         }
 
         zone_col = None
@@ -117,10 +140,8 @@ if uploaded_files or zones_gdf is not None:
 
         zone_layer.add_to(m)
 
-        # Zone Legend (bottom-right)
         zone_legend_html = """
-        <div style="position: fixed; 
-                    bottom: 30px; right: 30px; width: 180px; 
+        <div style="position: fixed; bottom: 30px; right: 30px; width: 180px; 
                     background-color: white; z-index:9999; 
                     font-size:14px; border:2px solid grey; border-radius:5px;
                     padding: 10px;">
@@ -135,15 +156,15 @@ if uploaded_files or zones_gdf is not None:
         m.get_root().html.add_child(folium.Element(zone_legend_html))
 
     # ==================================================
-    # SECTION 5: Yield / Profit Heatmaps
+    # SECTION 6: Yield / Profit Heatmaps
     # ==================================================
     if uploaded_files:
         for file in uploaded_files:
             df = pd.read_csv(file)
             if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
-                df["NetProfit_per_acre"] = df["Yield"] * 5  # Placeholder until linked to expenses
+                df["Revenue"] = df["Yield"] * sell_price
+                df["NetProfit_per_acre"] = df["Revenue"] - expenses_per_acre
 
-                # Create grid
                 grid_x, grid_y = np.mgrid[
                     df["Longitude"].min():df["Longitude"].max():200j,
                     df["Latitude"].min():df["Latitude"].max():200j
@@ -161,7 +182,6 @@ if uploaded_files or zones_gdf is not None:
                     method="linear"
                 )
 
-                # Profit heatmap
                 vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
                 cmap = plt.cm.get_cmap("RdYlGn")
                 rgba_img = cmap((grid_z_profit - vmin) / (vmax - vmin))
@@ -174,10 +194,8 @@ if uploaded_files or zones_gdf is not None:
                     show=True
                 ).add_to(m)
 
-                # Profit legend (bottom-left)
                 profit_legend_html = f"""
-                <div style="position: fixed; 
-                            bottom: 30px; left: 30px; width: 200px; 
+                <div style="position: fixed; bottom: 30px; left: 30px; width: 200px; 
                             background-color: white; z-index:9999; 
                             font-size:14px; border:2px solid grey; border-radius:5px;
                             padding: 10px;">
@@ -187,7 +205,6 @@ if uploaded_files or zones_gdf is not None:
                 """
                 m.get_root().html.add_child(folium.Element(profit_legend_html))
 
-                # Yield heatmap (toggleable)
                 vmin_y, vmax_y = np.nanmin(df["Yield"]), np.nanmax(df["Yield"])
                 rgba_yield = cmap((grid_z_yield - vmin_y) / (vmax_y - vmin_y))
                 folium.raster_layers.ImageOverlay(
@@ -199,10 +216,8 @@ if uploaded_files or zones_gdf is not None:
                     show=False
                 ).add_to(m)
 
-                # Yield legend (bottom-left, under profit legend)
                 yield_legend_html = f"""
-                <div style="position: fixed; 
-                            bottom: 100px; left: 30px; width: 200px; 
+                <div style="position: fixed; bottom: 100px; left: 30px; width: 200px; 
                             background-color: white; z-index:9999; 
                             font-size:14px; border:2px solid grey; border-radius:5px;
                             padding: 10px;">
@@ -213,7 +228,8 @@ if uploaded_files or zones_gdf is not None:
                 m.get_root().html.add_child(folium.Element(yield_legend_html))
 
     # ==================================================
-    # SECTION 6: Final Render
+    # SECTION 7: Render
     # ==================================================
     folium.LayerControl(collapsed=False).add_to(m)
     st_folium(m, width=900, height=600)
+
