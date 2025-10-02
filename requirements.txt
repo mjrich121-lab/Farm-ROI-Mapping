@@ -2,4 +2,11 @@ streamlit
 pandas
 folium
 streamlit-folium
-branca
+numpy
+scipy
+matplotlib
+geopandas
+shapely
+fiona
+pyproj
+rtree
