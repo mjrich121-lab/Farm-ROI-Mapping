@@ -1,5 +1,5 @@
 # =========================================================
-# Farm Profit Mapping Tool (Always Show Expenses + Summary)
+# Farm Profit Mapping Tool (Base Framework v1)
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -54,7 +54,6 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_
 st.header("Expense Inputs (Per Acre $)")
 
 cols = st.columns(6)
-
 sell_price = cols[0].number_input("Sell Price ($/bu)", min_value=0.0, value=0.0, step=0.1)
 chemicals = cols[1].number_input("Chemicals ($/ac)", min_value=0.0, value=0.0, step=0.1)
 insurance = cols[2].number_input("Insurance ($/ac)", min_value=0.0, value=0.0, step=0.1)
@@ -63,7 +62,6 @@ fertilizer = cols[4].number_input("Fertilizer ($/ac)", min_value=0.0, value=0.0,
 machinery = cols[5].number_input("Machinery ($/ac)", min_value=0.0, value=0.0, step=0.1)
 
 cols2 = st.columns(6)
-
 seed = cols2[0].number_input("Seed ($/ac)", min_value=0.0, value=0.0, step=0.1)
 cost_of_living = cols2[1].number_input("Cost of Living ($/ac)", min_value=0.0, value=0.0, step=0.1)
 extra_fuel = cols2[2].number_input("Extra Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
@@ -71,10 +69,10 @@ extra_interest = cols2[3].number_input("Extra Interest ($/ac)", min_value=0.0, v
 truck_fuel = cols2[4].number_input("Truck Fuel ($/ac)", min_value=0.0, value=0.0, step=0.1)
 labor = cols2[5].number_input("Labor ($/ac)", min_value=0.0, value=0.0, step=0.1)
 
-cols3 = st.columns(1)
+cols3 = st.columns(6)
 cash_rent = cols3[0].number_input("Cash Rent ($/ac)", min_value=0.0, value=0.0, step=0.1)
 
-# Store expenses in a dict for later calculations
+# Store expenses
 expenses = {
     "Chemicals": chemicals,
     "Insurance": insurance,
@@ -173,7 +171,13 @@ if uploaded_files:
             ).add_to(m)
 
 # =========================================================
-# 7. SUMMARY TABLE (ALWAYS SHOW)
+# 7. DISPLAY MAP
+# =========================================================
+folium.LayerControl(collapsed=False).add_to(m)
+st_folium(m, width=800, height=600)
+
+# =========================================================
+# 8. SUMMARY TABLE (ALWAYS SHOW BELOW MAP)
 # =========================================================
 st.header("Summary")
 if df is not None:
@@ -190,9 +194,3 @@ if df is not None:
     ))
 else:
     st.write("Upload a yield map to see summary results.")
-
-# =========================================================
-# 8. DISPLAY MAP
-# =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=800, height=600)
