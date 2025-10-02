@@ -85,183 +85,120 @@ expenses_per_acre = sum([
 ])
 
 # ==================================================
-# SECTION 4: Map Setup
+# SECTION 4: Map Setup (always visible)
 # ==================================================
-if uploaded_files or zones_gdf is not None:
-    center = [40, -95]
-    zoom = 5
+center = [40, -95]   # Default center on US
+zoom = 5
 
-    if zones_gdf is not None:
-        bounds = zones_gdf.total_bounds
-        center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
-        zoom = 14
+# If zones uploaded, adjust center/zoom
+if zones_gdf is not None:
+    bounds = zones_gdf.total_bounds
+    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+    zoom = 14
 
-    m = folium.Map(location=center, zoom_start=zoom, tiles=None)
+m = folium.Map(location=center, zoom_start=zoom, tiles=None)
 
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Satellite", overlay=False, control=False
-    ).add_to(m)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Labels", overlay=True, control=False
-    ).add_to(m)
+# Base layers
+folium.TileLayer(
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri", name="Esri Satellite", overlay=False, control=False
+).add_to(m)
+folium.TileLayer(
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    attr="Esri", name="Labels", overlay=True, control=False
+).add_to(m)
 
-    # ==================================================
-    # SECTION 5: Zones
-    # ==================================================
-    if zones_gdf is not None:
-        zone_layer = folium.FeatureGroup(name="Zones", show=True)
-        static_zone_colors = {
-            1: "#FF0000",
-            2: "#FF8000",
-            3: "#FFFF00",
-            4: "#80FF00",
-            5: "#008000"
-        }
-
-        zone_col = None
-        for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
-            if candidate in zones_gdf.columns:
-                zone_col = candidate
-                break
-        if zone_col is None:
-            zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
-            zone_col = "ZoneIndex"
-
-        for _, row in zones_gdf.iterrows():
-            try:
-                zone_value = int(row[zone_col])
-            except:
-                zone_value = row[zone_col]
-
-            zone_color = static_zone_colors.get(zone_value, "#0000FF")
-            folium.GeoJson(
-                row["geometry"],
-                name=f"Zone {zone_value}",
-                style_function=lambda x, c=zone_color: {
-                    "fillOpacity": 0.3,
-                    "color": c,
-                    "weight": 3
-                },
-                tooltip=f"Zone: {zone_value}"
-            ).add_to(zone_layer)
-
-        zone_layer.add_to(m)
-
-        zone_legend_html = """
-        <div style="position: fixed; bottom: 30px; right: 30px; width: 180px; 
-                    background-color: white; z-index:9999; 
-                    font-size:14px; border:2px solid grey; border-radius:5px;
-                    padding: 10px;">
-        <b>Zone Legend</b><br>
-        <i style="background:#FF0000;width:20px;height:10px;display:inline-block;"></i> Zone 1<br>
-        <i style="background:#FF8000;width:20px;height:10px;display:inline-block;"></i> Zone 2<br>
-        <i style="background:#FFFF00;width:20px;height:10px;display:inline-block;"></i> Zone 3<br>
-        <i style="background:#80FF00;width:20px;height:10px;display:inline-block;"></i> Zone 4<br>
-        <i style="background:#008000;width:20px;height:10px;display:inline-block;"></i> Zone 5<br>
-        </div>
-        """
-        m.get_root().html.add_child(folium.Element(zone_legend_html))
-
-    # ==================================================
-    # SECTION 6: Yield / Profit Heatmaps
-    # ==================================================
-    if uploaded_files:
-        for file in uploaded_files:
-            df = pd.read_csv(file)
-            if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
-                df["Revenue"] = df["Yield"] * sell_price
-                df["NetProfit_per_acre"] = df["Revenue"] - expenses_per_acre
-
-                grid_x, grid_y = np.mgrid[
-                    df["Longitude"].min():df["Longitude"].max():200j,
-                    df["Latitude"].min():df["Latitude"].max():200j
-                ]
-                grid_z_profit = griddata(
-                    (df["Longitude"], df["Latitude"]),
-                    df["NetProfit_per_acre"],
-                    (grid_x, grid_y),
-                    method="linear"
-                )
-                grid_z_yield = griddata(
-                    (df["Longitude"], df["Latitude"]),
-                    df["Yield"],
-                    (grid_x, grid_y),
-                    method="linear"
-                )
-
-                vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
-                cmap = plt.cm.get_cmap("RdYlGn")
-                rgba_img = cmap((grid_z_profit - vmin) / (vmax - vmin))
-                folium.raster_layers.ImageOverlay(
-                    image=np.uint8(rgba_img * 255),
-                    bounds=[[df["Latitude"].min(), df["Longitude"].min()],
-                            [df["Latitude"].max(), df["Longitude"].max()]],
-                    opacity=0.7,
-                    name="Net Profit ($/ac)",
-                    show=True
-                ).add_to(m)
-
-                profit_legend_html = f"""
-                <div style="position: fixed; bottom: 30px; left: 30px; width: 200px; 
-                            background-color: white; z-index:9999; 
-                            font-size:14px; border:2px solid grey; border-radius:5px;
-                            padding: 10px;">
-                <b>Net Profit ($/ac)</b><br>
-                Low: {vmin:.1f} &nbsp;&nbsp; High: {vmax:.1f}
-                </div>
-                """
-                m.get_root().html.add_child(folium.Element(profit_legend_html))
-
-                vmin_y, vmax_y = np.nanmin(df["Yield"]), np.nanmax(df["Yield"])
-                rgba_yield = cmap((grid_z_yield - vmin_y) / (vmax_y - vmin_y))
-                folium.raster_layers.ImageOverlay(
-                    image=np.uint8(rgba_yield * 255),
-                    bounds=[[df["Latitude"].min(), df["Longitude"].min()],
-                            [df["Latitude"].max(), df["Longitude"].max()]],
-                    opacity=0.5,
-                    name="Yield (bu/ac)",
-                    show=False
-                ).add_to(m)
-
-                yield_legend_html = f"""
-                <div style="position: fixed; bottom: 100px; left: 30px; width: 200px; 
-                            background-color: white; z-index:9999; 
-                            font-size:14px; border:2px solid grey; border-radius:5px;
-                            padding: 10px;">
-                <b>Yield (bu/ac)</b><br>
-                Low: {vmin_y:.1f} &nbsp;&nbsp; High: {vmax_y:.1f}
-                </div>
-                """
-                m.get_root().html.add_child(folium.Element(yield_legend_html))
-
-    # ==================================================
-    # SECTION 7: Render
-    # ==================================================
-    folium.LayerControl(collapsed=False).add_to(m)
-    st_folium(m, width=900, height=600)
 # ==================================================
-# SECTION 8: Summary Table (shown after map)
+# SECTION 5: Zones (optional)
 # ==================================================
+if zones_gdf is not None:
+    zone_layer = folium.FeatureGroup(name="Zones", show=True)
+    static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
+    zone_col = None
+    for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
+        if candidate in zones_gdf.columns:
+            zone_col = candidate
+            break
+    if zone_col is None:
+        zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+        zone_col = "ZoneIndex"
+
+    for _, row in zones_gdf.iterrows():
+        try:
+            zone_value = int(row[zone_col])
+        except:
+            zone_value = row[zone_col]
+        zone_color = static_zone_colors.get(zone_value, "#0000FF")
+        folium.GeoJson(
+            row["geometry"],
+            name=f"Zone {zone_value}",
+            style_function=lambda x, c=zone_color: {
+                "fillOpacity": 0.3,
+                "color": c,
+                "weight": 3
+            },
+            tooltip=f"Zone: {zone_value}"
+        ).add_to(zone_layer)
+    zone_layer.add_to(m)
+
+# ==================================================
+# SECTION 6: Yield / Profit Heatmaps (if yield file exists)
+# ==================================================
+avg_yield = 0
+revenue_per_acre = 0
+net_profit_per_acre = 0
+roi_percent = 0
+
 if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
-        if "Yield" in df.columns:
+        if "Latitude" in df.columns and "Longitude" in df.columns and "Yield" in df.columns:
+            df["Revenue"] = df["Yield"] * sell_price
+            df["NetProfit_per_acre"] = df["Revenue"] - expenses_per_acre
+
             avg_yield = df["Yield"].mean()
             revenue_per_acre = avg_yield * sell_price
             net_profit_per_acre = revenue_per_acre - expenses_per_acre
             roi_percent = (net_profit_per_acre / expenses_per_acre * 100) if expenses_per_acre > 0 else 0
 
-            summary_df = pd.DataFrame({
-                "Metric": ["Revenue/acre ($)", "Expenses/acre ($)", "Net Profit/acre ($)", "ROI (%)"],
-                "Value": [
-                    round(revenue_per_acre, 2),
-                    round(expenses_per_acre, 2),
-                    round(net_profit_per_acre, 2),
-                    round(roi_percent, 2)
-                ]
-            })
+            # Profit map
+            grid_x, grid_y = np.mgrid[
+                df["Longitude"].min():df["Longitude"].max():200j,
+                df["Latitude"].min():df["Latitude"].max():200j
+            ]
+            grid_z_profit = griddata(
+                (df["Longitude"], df["Latitude"]),
+                df["NetProfit_per_acre"],
+                (grid_x, grid_y),
+                method="linear"
+            )
+            vmin, vmax = np.nanmin(df["NetProfit_per_acre"]), np.nanmax(df["NetProfit_per_acre"])
+            cmap = plt.cm.get_cmap("RdYlGn")
+            rgba_img = cmap((grid_z_profit - vmin) / (vmax - vmin))
+            folium.raster_layers.ImageOverlay(
+                image=np.uint8(rgba_img * 255),
+                bounds=[[df["Latitude"].min(), df["Longitude"].min()],
+                        [df["Latitude"].max(), df["Longitude"].max()]],
+                opacity=0.7,
+                name="Net Profit ($/ac)",
+                show=True
+            ).add_to(m)
 
-            st.subheader("Profitability Summary")
-            st.table(summary_df)
+# ==================================================
+# SECTION 7: Render Map + Summary Table
+# ==================================================
+folium.LayerControl(collapsed=False).add_to(m)
+st_map = st_folium(m, width=900, height=600)
+
+summary_df = pd.DataFrame({
+    "Metric": ["Revenue/acre ($)", "Expenses/acre ($)", "Net Profit/acre ($)", "ROI (%)"],
+    "Value": [
+        round(revenue_per_acre, 2),
+        round(expenses_per_acre, 2),
+        round(net_profit_per_acre, 2),
+        round(roi_percent, 2)
+    ]
+})
+
+st.subheader("Profitability Summary")
+st.table(summary_df)
