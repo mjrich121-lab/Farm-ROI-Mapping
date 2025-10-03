@@ -630,15 +630,21 @@ with col_right:
     total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    # Dynamically calculate height so it always fits
-    row_height = 32  # pixels per row (approx)
-    buffer_height = 40  # top padding
-    table_height = len(fixed_df) * row_height + buffer_height
-
-    st.dataframe(
-        fixed_df.style.format({"$/ac": "${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
-        use_container_width=True,
-        hide_index=True,
-        height=table_height  # 👈 force full expansion
+    # --- Style ---
+    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"})
+    styled_fixed = styled_fixed.apply(
+        lambda row: ["font-weight: bold;" if row["Expense"] == "Total Fixed Costs" else "" for _ in row],
+        axis=1
     )
 
+    # --- Force height expansion ---
+    row_height = 35   # bump per-row pixel height up a bit
+    header_buffer = 60
+    table_height = len(fixed_df) * row_height + header_buffer
+
+    st.dataframe(
+        styled_fixed,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height   # dynamically expands so no vertical scroll
+    )
