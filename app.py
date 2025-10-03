@@ -455,6 +455,44 @@ with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False)
         value=st.session_state.get("bean_price", 12.0), 
         step=0.1
     )
+# --- Preview chart with same highlighting as Section 9 ---
+preview_df = pd.DataFrame({
+    "Crop": ["Corn", "Soybeans"],
+    "Yield Goal (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+    "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
+    "Revenue ($/ac)": [
+        st.session_state["corn_yield"] * st.session_state["corn_price"],
+        st.session_state["bean_yield"] * st.session_state["bean_price"]
+    ],
+    "Fixed Inputs ($/ac)": [base_expenses_per_acre, base_expenses_per_acre],
+    "Breakeven Budget ($/ac)": [
+        (st.session_state["corn_yield"] * st.session_state["corn_price"]) - base_expenses_per_acre,
+        (st.session_state["bean_yield"] * st.session_state["bean_price"]) - base_expenses_per_acre
+    ]
+})
+
+def highlight_budget(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return "color: green; font-weight: bold;"
+        elif val < 0:
+            return "color: red; font-weight: bold;"
+    return "font-weight: bold;"
+
+st.dataframe(
+    preview_df.style.applymap(
+        highlight_budget,
+        subset=["Breakeven Budget ($/ac)"]
+    ).format({
+        "Yield Goal (bu/ac)": "{:,.1f}",
+        "Sell Price ($/bu)": "${:,.2f}",
+        "Revenue ($/ac)": "${:,.2f}",
+        "Fixed Inputs ($/ac)": "${:,.2f}",
+        "Breakeven Budget ($/ac)": "${:,.2f}"
+    }),
+    use_container_width=True,
+    hide_index=True
+)
 
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
@@ -721,12 +759,21 @@ with col_left:
     })
 
     # --- Editable chart to allow two-way sync ---
-    edited = st.data_editor(
-        breakeven_df,
-        use_container_width=True,
-        hide_index=True,
-        key="breakeven_editor"
-    )
+ st.dataframe(
+    breakeven_df.style.applymap(
+        highlight_budget,
+        subset=["Breakeven Budget ($/ac)"]
+    ).format({
+        "Yield Goal (bu/ac)": "{:,.1f}",
+        "Sell Price ($/bu)": "${:,.2f}",
+        "Revenue ($/ac)": "${:,.2f}",
+        "Fixed Inputs ($/ac)": "${:,.2f}",
+        "Breakeven Budget ($/ac)": "${:,.2f}"
+    }),
+    use_container_width=True,
+    hide_index=True
+)
+
 
     # --- Push edits back into session_state so 4D updates too ---
     if not edited.empty:
