@@ -496,7 +496,7 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import MacroElement, Template
+from branca.element import MacroElement, Template, Element
 
 def make_base_map():
     m = folium.Map(
@@ -519,7 +519,7 @@ def make_base_map():
         attr="Esri", overlay=True, control=False
     ).add_to(m)
 
-    # ✅ Correct way: wrap Template in a MacroElement
+    # ✅ Click-to-enable scroll wheel (disable again on mouseout)
     template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
@@ -542,19 +542,11 @@ def make_base_map():
 m = make_base_map()
 
 # =========================================================
-# 8. DISPLAY MAP
-# =========================================================
-# No LayerControl since base layers are locked
-st_folium(m, use_container_width=True, height=600)
-
-# =========================================================
 # 6. ZONES
 # =========================================================
 if zones_gdf is not None:
-    # Save into session state
     st.session_state["zones_gdf"] = zones_gdf
 
-# Draw from session state if available
 if st.session_state["zones_gdf"] is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
     static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
@@ -566,6 +558,7 @@ if st.session_state["zones_gdf"] is not None:
     if zone_col is None:
         st.session_state["zones_gdf"]["ZoneIndex"] = range(1, len(st.session_state["zones_gdf"])+1)
         zone_col = "ZoneIndex"
+
     for _, row in st.session_state["zones_gdf"].iterrows():
         try:
             zone_value = int(row[zone_col])
@@ -584,8 +577,6 @@ if st.session_state["zones_gdf"] is not None:
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
 df = None
-
-# --- Ensure session state defaults ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 if "seed_products" not in st.session_state:
@@ -595,95 +586,64 @@ if "yield_df" not in st.session_state:
 if "fixed_products" not in st.session_state:
     st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
 
-# --- Work with yield data if available ---
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
-
-    # Revenue from yield * sell price
     df["Revenue_per_acre"] = df["Yield"] * sell_price
 
-    # --------------------------
-    # VARIABLE RATE PROFIT
-    # --------------------------
+    # Variable rate profit
     fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
     seed_costs_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
     df["NetProfit_per_acre_variable"] = (
         df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_var - seed_costs_var
     )
 
-    # --------------------------
-    # FIXED RATE PROFIT
-    # --------------------------
+    # Fixed rate profit
     fixed_costs = 0
     if not st.session_state["fixed_products"].empty:
-        # calculate $/ac for each fixed input if rate & cost/unit are given
         fixed_df = st.session_state["fixed_products"].copy()
         fixed_df["$/ac"] = fixed_df.apply(
             lambda x: x["Rate"] * x["CostPerUnit"] if x["Rate"] > 0 and x["CostPerUnit"] > 0 else 0, axis=1
         )
         fixed_costs = fixed_df["$/ac"].sum()
+    df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - base_expenses_per_acre - fixed_costs
 
-    df["NetProfit_per_acre_fixed"] = (
-        df["Revenue_per_acre"] - base_expenses_per_acre - fixed_costs
-    )
-
-    # --------------------------
     # Auto-zoom map to data
-    # --------------------------
     south, north = df["Latitude"].min(), df["Latitude"].max()
-    west,  east  = df["Longitude"].min(), df["Longitude"].max()
+    west, east = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # --------------------------
-    # Heatmap overlay helper
-    # --------------------------
+    # Heatmap helper
     def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-
         pts = (df["Longitude"].values, df["Latitude"].values)
         grid_lin = griddata(pts, values, (lon_grid, lat_grid), method="linear")
-        grid_nn  = griddata(pts, values, (lon_grid, lat_grid), method="nearest")
-        grid     = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
-
+        grid_nn = griddata(pts, values, (lon_grid, lat_grid), method="nearest")
+        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
         vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
-        if vmin == vmax:
-            vmax = vmin + 1
+        if vmin == vmax: vmax = vmin + 1
         cmap = plt.cm.get_cmap("RdYlGn")
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
-
         folium.raster_layers.ImageOverlay(
-            image=rgba,
-            bounds=[[south, west], [north, east]],
-            opacity=0.5,
-            name=name,
-            show=show_default
+            image=rgba, bounds=[[south, west], [north, east]], opacity=0.5, name=name, show=show_default
         ).add_to(m)
-
         return (vmin, vmax)
 
-    # --------------------------
-    # Add layers: Yield + Profit maps
-    # --------------------------
+    # Add overlays
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
     v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-    # --------------------------
-    # Legend (stacked for all layers)
-    # --------------------------
-    from branca.element import Element
+    # Legend
     def rgba_to_hex(rgba_tuple):
         r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
         return f"#{r:02x}{g:02x}{b:02x}"
-
     stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
-
     legend_html = f"""
     <div style="position: fixed; bottom: 20px; left: 20px; z-index: 9999;
                 display: flex; flex-direction: column; gap: 6px; font-family: sans-serif; font-size: 12px;">
@@ -715,17 +675,8 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
-# No LayerControl since base layers are locked
 st_folium(m, use_container_width=True, height=600)
-# --- Initialize session state defaults (safety net) ---
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "zones_gdf" not in st.session_state:
-    st.session_state["zones_gdf"] = None
-if "yield_df" not in st.session_state:
-    st.session_state["yield_df"] = None
+
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
