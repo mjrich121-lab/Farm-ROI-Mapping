@@ -624,18 +624,54 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 # --- Layout (two columns) ---
 col_left, col_right = st.columns([2, 2])
-
 # --------------------------
-# LEFT SIDE = Profit + Variable Rate Inputs
+# LEFT SIDE = Profit Comparison
 # --------------------------
 with col_left:
-    # --- Profit Metrics ---
-    st.subheader("Profit Metrics")
-    summary = pd.DataFrame({
+    st.subheader("Profit Metrics Comparison")
+
+    # --- Variable Rate Profit ---
+    var_profit = 0.0
+    if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
+        df = st.session_state["yield_df"]
+
+        fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
+        seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+
+        if "Revenue_per_acre" in df.columns:
+            revenue_var = df["Revenue_per_acre"].mean()
+        else:
+            revenue_var = 0.0
+
+        expenses_var = base_expenses_per_acre + fert_costs + seed_costs
+        var_profit = revenue_var - expenses_var
+    else:
+        revenue_var = 0.0
+        expenses_var = 0.0
+
+    # --- Fixed Rate Profit (from Section 4B inputs) ---
+    fixed_profit = 0.0
+    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
+        fert_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
+        seed_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
+        revenue_fixed = revenue_var  # yield stays the same
+        expenses_fixed = base_expenses_per_acre + fert_fixed_costs + seed_fixed_costs
+        fixed_profit = revenue_fixed - expenses_fixed
+    else:
+        revenue_fixed = 0.0
+        expenses_fixed = 0.0
+
+    # --- Overall Profit (default snapshot) ---
+    revenue_overall = revenue_per_acre
+    expenses_overall = expenses_per_acre
+    profit_overall = net_profit_per_acre
+
+    # --- Build comparison table ---
+    comparison = pd.DataFrame({
         "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Value": [round(revenue_per_acre, 2),
-                  round(expenses_per_acre, 2),
-                  round(net_profit_per_acre, 2)]
+        "Overall": [round(revenue_overall,2), round(expenses_overall,2), round(profit_overall,2)],
+        "Variable Rate": [round(revenue_var,2), round(expenses_var,2), round(var_profit,2)],
+        "Fixed Rate": [round(revenue_fixed,2), round(expenses_fixed,2), round(fixed_profit,2)]
     })
 
     def highlight_profit(val):
@@ -647,45 +683,19 @@ with col_left:
         return "font-weight: bold;"
 
     st.dataframe(
-        summary.style.applymap(highlight_profit, subset=["Value"]).format({"Value": "${:,.2f}"}),
+        comparison.style.applymap(
+            highlight_profit,
+            subset=["Overall","Variable Rate","Fixed Rate"]
+        ).format({
+            "Overall":"${:,.2f}",
+            "Variable Rate":"${:,.2f}",
+            "Fixed Rate":"${:,.2f}"
+        }),
         use_container_width=True,
         hide_index=True
     )
 
-    # --- Variable Rate Input Costs ---
-    st.subheader("Variable Rate Input Costs")
 
-    # Pre-populated placeholder
-    default_var = pd.DataFrame({
-        "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3"],
-        "$/ac": [0.0, 0.0, 0.0, 0.0]
-    })
-
-    # Merge in uploaded prescriptions
-    fert_df = st.session_state["fert_products"].copy()
-    seed_df = st.session_state["seed_products"].copy()
-
-    combined = default_var.copy()
-
-    # Replace defaults if prescription data exists
-    if not seed_df.empty:
-        combined.loc[combined["Product"] == "Seed", "$/ac"] = seed_df["CostPerAcre"].sum()
-
-    if not fert_df.empty:
-        fert_list = fert_df["CostPerAcre"].tolist()
-        for i, val in enumerate(fert_list, start=1):
-            if i <= 3:
-                combined.loc[combined["Product"] == f"Fertilizer {i}", "$/ac"] = val
-
-    # Add Total row
-    total_var = pd.DataFrame([{"Product":"Total Variable Costs", "$/ac":combined["$/ac"].sum()}])
-    combined = pd.concat([combined, total_var], ignore_index=True)
-
-    st.dataframe(
-        combined.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
-        use_container_width=True,
-        hide_index=True
-    )
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
 # --------------------------
