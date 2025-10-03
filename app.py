@@ -159,44 +159,28 @@ df = None
 if yield_file is not None:
     if yield_file.name.endswith(".csv"):
         df = pd.read_csv(yield_file)
+        # check standard column names
         if {"Latitude","Longitude","Yield"}.issubset(df.columns):
-            st.success("Yield CSV loaded successfully")
+            st.success("✅ Yield CSV loaded successfully")
         else:
-            st.error("CSV must include Latitude, Longitude, and Yield columns")
-    elif yield_file.name.endswith(".zip"):
-        # Save zip temporarily
-        with open("temp_yield.zip", "wb") as f:
-            f.write(yield_file.getbuffer())
-
-        # Extract and read shapefile
-        import zipfile, os, shutil
-        with zipfile.ZipFile("temp_yield.zip", "r") as zip_ref:
-            zip_ref.extractall("temp_yield")
-
-        shp_file = [f for f in os.listdir("temp_yield") if f.endswith(".shp")]
-        if shp_file:
-            gdf = gpd.read_file(os.path.join("temp_yield", shp_file[0]))
+            st.error("❌ CSV must include Latitude, Longitude, and Yield columns")
+    else:
+        gdf = load_vector_file(yield_file)
+        if gdf is not None and not gdf.empty:
             gdf["Longitude"] = gdf.geometry.centroid.x
             gdf["Latitude"] = gdf.geometry.centroid.y
 
-            # Prefer "DryYield" if present, else look for yield
-            yield_col = None
-            for candidate in ["dry_yield", "DryYield", "Yld_Vol_Dry", "yield"]:
-                for col in gdf.columns:
-                    if candidate.lower() in col.lower():
-                        yield_col = col
-                        break
-                if yield_col: break
-
-            if yield_col:
-                gdf.rename(columns={yield_col: "Yield"}, inplace=True)
+            # --- Flexible yield column detection (Dry Yield, Yield, etc.) ---
+            yield_candidates = [c for c in gdf.columns if "yield" in c.lower()]
+            if yield_candidates:
+                chosen_col = yield_candidates[0]
+                gdf.rename(columns={chosen_col: "Yield"}, inplace=True)
                 df = pd.DataFrame(gdf.drop(columns="geometry"))
-                st.success(f"Yield shapefile loaded successfully (using '{yield_col}')")
+                st.success(f"✅ Yield shapefile/geojson loaded successfully (using column: {chosen_col})")
             else:
-                st.error("No yield column found in uploaded file")
-
-        os.remove("temp_yield.zip")
-        shutil.rmtree("temp_yield", ignore_errors=True)
+                st.error("❌ No yield column found in uploaded file")
+        else:
+            st.error("❌ Could not read uploaded file")       shutil.rmtree("temp_yield", ignore_errors=True)
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
@@ -570,6 +554,7 @@ m = make_base_map()
 if zones_gdf is not None:
     st.session_state["zones_gdf"] = zones_gdf
 
+# Draw from session state if available
 if st.session_state["zones_gdf"] is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
     static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
@@ -594,7 +579,15 @@ if st.session_state["zones_gdf"] is not None:
             style_function=lambda x, c=zone_color: {"fillOpacity":0.3,"color":c,"weight":3},
             tooltip=f"Zone: {zone_value}"
         ).add_to(zone_layer)
+
     zone_layer.add_to(m)
+
+    # --- Auto zoom to zone extents ---
+    try:
+        minx, miny, maxx, maxy = st.session_state["zones_gdf"].total_bounds
+        m.fit_bounds([[miny, minx], [maxy, maxx]])
+    except Exception as e:
+        st.warning(f"⚠️ Could not auto-zoom zones: {e}")
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
