@@ -157,9 +157,10 @@ if zone_file is not None:
 
                 # --- Fix blanks: default Override Acres back to Calculated Acres ---
                 edited["Override Acres"] = edited.apply(
-                    lambda row: row["Calculated Acres"] if pd.isna(row["Override Acres"]) else row["Override Acres"],
+                    lambda row: row["Calculated Acres"] 
+                    if (pd.isna(row["Override Acres"]) or str(row["Override Acres"]).strip() == "") 
+                    else row["Override Acres"],
                     axis=1
-                )
 
                 # Add total row below the editable table
                 total_calc = edited["Calculated Acres"].sum()
