@@ -610,14 +610,20 @@ st.header("Zone Map")
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # Always use EPSG:4326 for map rendering
-    if gdf.crs is None or gdf.crs.to_string() != "EPSG:4326":
-        gdf = gdf.to_crs(epsg=4326)
+    # Ensure correct CRS for map display
+    try:
+        if gdf.crs is None:
+            gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84
+        elif gdf.crs.to_string() != "EPSG:4326":
+            gdf = gdf.to_crs(epsg=4326)
+    except Exception as e:
+        st.warning(f"⚠️ Could not set CRS: {e}")
 
-    # Create folium map
-    m = folium.Map(location=[gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()], zoom_start=14)
+    # Create folium map centered on zones
+    centroid = gdf.geometry.centroid
+    m = folium.Map(location=[centroid.y.mean(), centroid.x.mean()], zoom_start=14)
 
-    # Add zone polygons with labels
+    # Add polygons with tooltip
     folium.GeoJson(
         gdf,
         name="Zones",
@@ -625,16 +631,26 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             "fillColor": "#3186cc",
             "color": "black",
             "weight": 1,
-            "fillOpacity": 0.5,
+            "fillOpacity": 0.4,
         },
-        tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
+        tooltip=folium.GeoJsonTooltip(
+            fields=["Zone", "Calculated Acres", "Override Acres"],
+            aliases=["Zone", "Calculated Acres", "Override Acres"],
+            localize=True
+        )
     ).add_to(m)
 
-    # Fit map to zones
-    bounds = gdf.total_bounds
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    # Fit map to zone bounds
+    try:
+        bounds = gdf.total_bounds
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception as e:
+        st.warning(f"⚠️ Could not fit bounds: {e}")
 
+    # Render map
     st_folium(m, width=800, height=500)
+else:
+    st.info("ℹ️ Upload a Zone Map in Section 1 to see zones here.")
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
