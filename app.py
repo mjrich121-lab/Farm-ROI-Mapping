@@ -644,9 +644,9 @@ with col_right:
 
     table_height = len(fixed_df) * row_height + header_buffer + scroll_buffer
 
-        st.dataframe(
-        styled_fixed,
-        use_container_width=True,
-        hide_index=True,
-        height=table_height  # always a touch taller than needed
+    st.dataframe(
+    styled_fixed,
+    use_container_width=True,
+    hide_index=True,
+    height=table_height  # always a touch taller than needed
     )
