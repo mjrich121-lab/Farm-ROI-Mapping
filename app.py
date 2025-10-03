@@ -479,7 +479,14 @@ if st.session_state["yield_df"] is not None:
 # 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, use_container_width=True, height=700)
+st_folium(m, use_container_width=True, height=650)
+
+# --- Ensure session state keys exist ---
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
 # =========================================================
 # 9. PROFIT SUMMARY
