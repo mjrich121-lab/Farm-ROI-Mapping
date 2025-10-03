@@ -172,34 +172,47 @@ if yield_file is not None:
                 st.success("Yield shapefile/geojson loaded successfully")
             else:
                 st.error("No yield column found in uploaded file")
-
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
 # =========================================================
 st.header("Prescription Map Uploads")
 
-fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv","geojson","json","zip"], key="fert")
-seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv","geojson","json","zip"], key="seed")
+fert_file = st.file_uploader(
+    "Upload Fertilizer Prescription Map",
+    type=["csv", "geojson", "json", "zip"],
+    key="fert"
+)
+seed_file = st.file_uploader(
+    "Upload Seed Prescription Map",
+    type=["csv", "geojson", "json", "zip"],
+    key="seed"
+)
 
 def process_prescription(file, prescrip_type="fertilizer"):
+    """Process fertilizer/seed prescription maps safely."""
     if file is None:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
     # --- Load CSV or shapefile ---
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
-    else:
-        gdf = load_vector_file(file)
-        if gdf is None:
-            return pd.DataFrame()
-        gdf["Longitude"] = gdf.geometry.centroid.x
-        gdf["Latitude"] = gdf.geometry.centroid.y
+    try:
+        if file.name.endswith(".csv"):
+            df = pd.read_csv(file)
+        else:
+            gdf = load_vector_file(file)
+            if gdf is None or gdf.empty:
+                return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-        # Auto-calc acres if not provided
-        if "acres" not in gdf.columns:
-            gdf["acres"] = gdf.geometry.area * 0.000247105  # m² → acres
+            gdf["Longitude"] = gdf.geometry.centroid.x
+            gdf["Latitude"] = gdf.geometry.centroid.y
 
-        df = pd.DataFrame(gdf.drop(columns="geometry"))
+            # Auto-calc acres if not provided
+            if "acres" not in gdf.columns:
+                gdf["acres"] = gdf.geometry.area * 0.000247105  # m² → acres
+
+            df = pd.DataFrame(gdf.drop(columns="geometry"))
+    except Exception as e:
+        st.error(f"❌ Error processing {prescrip_type} map: {e}")
+        return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
     # --- Normalize column names ---
     df.columns = [c.strip().lower() for c in df.columns]
@@ -213,11 +226,11 @@ def process_prescription(file, prescrip_type="fertilizer"):
         else:
             df["product"] = prescrip_type.capitalize()
 
-    # --- Ensure acres column exists and allow manual override ---
+    # --- Ensure acres column exists ---
     if "acres" not in df.columns:
-        df["acres"] = 0.0  # placeholder if missing
+        df["acres"] = 0.0
 
-    # Manual override (per-upload average acres input)
+    # --- Manual override (per-upload acres) ---
     avg_acres_override = st.number_input(
         f"Override Acres Per Polygon for {prescrip_type.capitalize()} Map",
         min_value=0.0, value=0.0, step=0.1
@@ -226,35 +239,44 @@ def process_prescription(file, prescrip_type="fertilizer"):
         df["acres"] = avg_acres_override
 
     # --- Calculate costs ---
-    if "product" in df.columns and "acres" in df.columns:
-        if "costtotal" not in df.columns:
-            if "price_per_unit" in df.columns and "units" in df.columns:
-                df["costtotal"] = df["price_per_unit"] * df["units"]
-            elif "rate" in df.columns and "price" in df.columns:
-                df["costtotal"] = df["rate"] * df["price"]
-            else:
-                df["costtotal"] = 0
+    if "costtotal" not in df.columns:
+        if "price_per_unit" in df.columns and "units" in df.columns:
+            df["costtotal"] = df["price_per_unit"] * df["units"]
+        elif "rate" in df.columns and "price" in df.columns:
+            df["costtotal"] = df["rate"] * df["price"]
+        else:
+            df["costtotal"] = 0
 
+    if not df.empty:
         grouped = df.groupby("product", as_index=False).agg(
             Acres=("acres","sum"),
             CostTotal=("costtotal","sum")
         )
-        grouped["CostPerAcre"] = grouped["CostTotal"] / grouped["Acres"]
+        grouped["CostPerAcre"] = grouped.apply(
+            lambda x: x["CostTotal"] / x["Acres"] if x["Acres"] > 0 else 0, axis=1
+        )
         return grouped
 
-    return pd.DataFrame()
+    return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-# Store into session state
+# --- Store results in session state safely ---
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+
 if fert_file is not None:
     st.session_state["fert_products"] = process_prescription(fert_file, "fertilizer")
+
 if seed_file is not None:
     st.session_state["seed_products"] = process_prescription(seed_file, "seed")
 
-# Feedback
+# --- Feedback (safe checks) ---
 if not st.session_state["fert_products"].empty:
-    st.success("Fertilizer prescription uploaded successfully")
+    st.success("✅ Fertilizer prescription uploaded successfully")
+
 if not st.session_state["seed_products"].empty:
-    st.success("Seed prescription uploaded successfully")
+    st.success("✅ Seed prescription uploaded successfully")
 
 
 # =========================================================
