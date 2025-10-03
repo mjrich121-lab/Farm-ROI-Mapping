@@ -426,36 +426,34 @@ with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
 # =========================================================
 # 4D. OPTIONAL: Compare Crop Profitability Before Mapping
 # =========================================================
-with st.expander("Compare Crop Profitability (Optional)", expanded=False):
+st.header("Compare Crop Profitability (Optional)")
+
+with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False):
     st.markdown("_Any values you enter here will also be reflected in the Profit Summary section below._")
 
     st.session_state["corn_yield"] = st.number_input(
         "Corn Yield Goal (bu/ac)", 
         min_value=0.0, 
         value=st.session_state.get("corn_yield", 200.0), 
-        step=1.0,
-        key="corn_yield_input_top"
+        step=1.0
     )
     st.session_state["corn_price"] = st.number_input(
         "Corn Sell Price ($/bu)", 
         min_value=0.0, 
         value=st.session_state.get("corn_price", 5.0), 
-        step=0.1,
-        key="corn_price_input_top"
+        step=0.1
     )
     st.session_state["bean_yield"] = st.number_input(
         "Soybean Yield Goal (bu/ac)", 
         min_value=0.0, 
         value=st.session_state.get("bean_yield", 60.0), 
-        step=1.0,
-        key="bean_yield_input_top"
+        step=1.0
     )
     st.session_state["bean_price"] = st.number_input(
         "Soybean Sell Price ($/bu)", 
         min_value=0.0, 
         value=st.session_state.get("bean_price", 12.0), 
-        step=0.1,
-        key="bean_price_input_top"
+        step=0.1
     )
 
 # =========================================================
@@ -700,7 +698,7 @@ with col_left:
 
     st.markdown("_These values are linked to the 'Compare Crop Profitability' section above the map._")
 
-    # --- Pull values directly from session_state (set in 4D) ---
+    # --- Pull values from session_state (set in 4D or fallback defaults) ---
     corn_yield = st.session_state.get("corn_yield", 200.0)
     corn_price = st.session_state.get("corn_price", 5.0)
     bean_yield = st.session_state.get("bean_yield", 60.0)
@@ -722,65 +720,22 @@ with col_left:
         "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
     })
 
-    def highlight_budget(val):
-        if isinstance(val, (int, float)):
-            if val > 0:
-                return "color: green; font-weight: bold;"
-            elif val < 0:
-                return "color: red; font-weight: bold;"
-        return "font-weight: bold;"
-
-    st.dataframe(
-        breakeven_df.style.applymap(
-            highlight_budget,
-            subset=["Breakeven Budget ($/ac)"]
-        ).format({
-            "Yield Goal (bu/ac)": "{:,.1f}",
-            "Sell Price ($/bu)": "${:,.2f}",
-            "Revenue ($/ac)": "${:,.2f}",
-            "Fixed Inputs ($/ac)": "${:,.2f}",
-            "Breakeven Budget ($/ac)": "${:,.2f}"
-        }),
+    # --- Editable chart to allow two-way sync ---
+    edited = st.data_editor(
+        breakeven_df,
         use_container_width=True,
-        hide_index=True
-    )
-    # --- Calculate breakeven budgets ---
-    corn_revenue = corn_yield * corn_price
-    bean_revenue = bean_yield * bean_price
-
-    corn_budget = corn_revenue - expenses_per_acre
-    bean_budget = bean_revenue - expenses_per_acre
-
-    breakeven_df = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
-        "Revenue ($/ac)": [corn_revenue, bean_revenue],
-        "Fixed Inputs ($/ac)": [expenses_per_acre, expenses_per_acre],
-        "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
-    })
-
-    def highlight_budget(val):
-        if isinstance(val, (int, float)):
-            if val > 0:
-                return "color: green; font-weight: bold;"
-            elif val < 0:
-                return "color: red; font-weight: bold;"
-        return "font-weight: bold;"
-
-    st.dataframe(
-        breakeven_df.style.applymap(highlight_budget, subset=["Breakeven Budget ($/ac)"]).format({
-            "Yield Goal (bu/ac)": "{:,.1f}",
-            "Sell Price ($/bu)": "${:,.2f}",
-            "Revenue ($/ac)": "${:,.2f}",
-            "Fixed Inputs ($/ac)": "${:,.2f}",
-            "Breakeven Budget ($/ac)": "${:,.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        key="breakeven_editor"
     )
 
-    # --- Profit Metrics Comparison ---
+    # --- Push edits back into session_state so 4D updates too ---
+    if not edited.empty:
+        st.session_state["corn_yield"] = float(edited.loc[0, "Yield Goal (bu/ac)"])
+        st.session_state["corn_price"] = float(edited.loc[0, "Sell Price ($/bu)"])
+        st.session_state["bean_yield"] = float(edited.loc[1, "Yield Goal (bu/ac)"])
+        st.session_state["bean_price"] = float(edited.loc[1, "Sell Price ($/bu)"])
+
+    # --- Profit Metrics Comparison (kept as-is) ---
     st.subheader("Profit Metrics Comparison")
 
     # Variable Rate Profit
