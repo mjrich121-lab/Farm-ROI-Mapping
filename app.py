@@ -148,35 +148,55 @@ if zone_file is not None:
 st.header("Yield Map Upload")
 yield_file = st.file_uploader(
     "Upload Yield Map",
-    type=["csv","geojson","json","zip"],
+    type=["csv", "geojson", "json", "zip"],
     key="yield"
 )
 st.markdown(
     "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
-
 df = None
 if yield_file is not None:
     if yield_file.name.endswith(".csv"):
         df = pd.read_csv(yield_file)
         if {"Latitude","Longitude","Yield"}.issubset(df.columns):
-            st.success("Yield CSV loaded successfully")
+            st.success("✅ Yield CSV loaded successfully")
         else:
-            st.error("CSV must include Latitude, Longitude, and Yield columns")
-    else:
-        gdf = load_vector_file(yield_file)
-        if gdf is not None:
+            st.error("❌ CSV must include Latitude, Longitude, and Yield columns")
+
+    elif yield_file.name.endswith(".zip"):
+        try:
+            gdf = gpd.read_file(f"zip://{yield_file.name}")
             gdf["Longitude"] = gdf.geometry.centroid.x
             gdf["Latitude"] = gdf.geometry.centroid.y
-            # Try to find yield column
-            yield_col = [c for c in gdf.columns if "yield" in c.lower()]
+
+            # Show user what columns exist
+            st.write("📋 Columns detected in Yield Shapefile:", list(gdf.columns))
+
+            # Try to detect a yield column
+            yield_col = None
+            for c in gdf.columns:
+                if "yield" in c.lower():   # matches "Yield", "Dry_Yield", etc
+                    yield_col = c
+                    break
+
             if yield_col:
-                gdf.rename(columns={yield_col[0]: "Yield"}, inplace=True)
+                gdf.rename(columns={yield_col: "Yield"}, inplace=True)
                 df = pd.DataFrame(gdf.drop(columns="geometry"))
-                st.success("Yield shapefile/geojson loaded successfully")
+                st.success(f"✅ Yield shapefile loaded using column: **{yield_col}**")
             else:
-                st.error("No yield column found in uploaded file")
+                st.error("❌ No yield column found in uploaded shapefile. Please ensure one column contains 'yield' in its name.")
+
+        except Exception as e:
+            st.error(f"❌ Error reading shapefile: {e}")
+
+    else:
+        st.error("❌ Unsupported file type for yield map")
+
+# Save into session state if successfully loaded
+if df is not None:
+    st.session_state["yield_df"] = df
+
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
 # =========================================================
@@ -206,8 +226,8 @@ def process_prescription(file, prescrip_type="fertilizer"):
     if file is None:
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-    # --- Load CSV or shapefile ---
     try:
+        # --- Load CSV or shapefile ---
         if file.name.endswith(".csv"):
             df = pd.read_csv(file)
         else:
@@ -223,16 +243,10 @@ def process_prescription(file, prescrip_type="fertilizer"):
                 gdf["acres"] = gdf.geometry.area * 0.000247105  # m² → acres
 
             df = pd.DataFrame(gdf.drop(columns="geometry"))
+
     except Exception as e:
         st.error(f"❌ Error processing {prescrip_type} map: {e}")
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-      
-    if yield_file is not None:
-    if yield_file.name.endswith(".zip"):
-        gdf = gpd.read_file(f"zip://{yield_file.name}")
-        st.write("📋 Columns detected in Yield Shapefile:", list(gdf.columns))
-    else:
-        st.warning("Upload must be a .zip shapefile containing .shp, .shx, .dbf, .prj")
 
     # --- Normalize column names ---
     df.columns = [c.strip().lower() for c in df.columns]
@@ -278,6 +292,7 @@ def process_prescription(file, prescrip_type="fertilizer"):
         return grouped
 
     return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+
 
 # --- Store results in session state safely ---
 if "fert_products" not in st.session_state:
