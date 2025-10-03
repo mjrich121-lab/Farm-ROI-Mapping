@@ -639,14 +639,14 @@ with col_right:
         subset=["$/ac"]
     )
 
-    # --- Height: rows * row_height + header ---
-    row_height = 32        # consistent row height
-    header_buffer = 40     # just enough for header
+    # --- Height: row count × row height + just enough buffer ---
+    row_height = 34       # per-row height in pixels
+    header_buffer = 50    # header & footer allowance
     table_height = len(fixed_df) * row_height + header_buffer
 
     st.dataframe(
         styled_fixed,
         use_container_width=True,
         hide_index=True,
-        height=table_height
+        height=table_height  # 👈 exact fit, prevents scroll & gap
     )
