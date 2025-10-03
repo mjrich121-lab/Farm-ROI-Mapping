@@ -497,9 +497,6 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import MacroElement
-from jinja2 import Template
-
 def make_base_map():
     m = folium.Map(
         location=[39.5, -98.35],  # Center of continental US
@@ -508,7 +505,6 @@ def make_base_map():
         prefer_canvas=True
     )
 
-    # Base layers
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -518,22 +514,6 @@ def make_base_map():
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
-
-    # --- Simple scroll lock injection ---
-    scroll_js = Template("""
-        {% macro script(this, kwargs) %}
-        var map = {{this._parent.get_name()}};
-        if (map.scrollWheelZoom) {
-            map.scrollWheelZoom.disable();
-            map.once('click', function() {
-                map.scrollWheelZoom.enable();
-            });
-        }
-        {% endmacro %}
-    """)
-    macro = MacroElement()
-    macro._template = scroll_js
-    m.get_root().add_child(macro)
 
     return m
 
