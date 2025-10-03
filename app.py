@@ -11,48 +11,39 @@ import geopandas as gpd
 import zipfile
 import os
 import matplotlib.pyplot as plt
+import shutil
 
 st.set_page_config(page_title="Farm ROI Tool V3", layout="wide")
 st.title("Farm Profit Mapping Tool V3")
-# Make the app responsive to screen size
+
+# --- Initialize session state defaults once here ---
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "zones_gdf" not in st.session_state:
+    st.session_state["zones_gdf"] = None
+if "yield_df" not in st.session_state:
+    st.session_state["yield_df"] = None
+if "fixed_products" not in st.session_state:
+    st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
+
+# =========================================================
+# STYLING
+# =========================================================
 st.markdown(
     """
     <style>
-    /* Force all Streamlit containers to be responsive */
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-    }
-
-    /* Dataframes and tables fit screen width */
-    .dataframe {
-        width: 100% !important;
-        overflow-x: auto !important;
-    }
-
-    /* Compact table styling */
-    .compact-table td, .compact-table th {
-        padding: 4px 8px !important;
-        font-size: 12px !important;
-        white-space: nowrap;
-    }
-
-    /* Map responsiveness */
-    iframe[title="st_folium"] {
-        width: 100% !important;
-        height: 70vh !important;
-    }
-
-    /* Make headers tighter */
-    h1, h2, h3 {
-        margin-top: 0.5rem;
-        margin-bottom: 0.5rem;
-    }
+    .block-container { max-width: 100% !important; padding-left: 1rem !important; padding-right: 1rem !important; }
+    .dataframe { width: 100% !important; overflow-x: auto !important; }
+    .compact-table td, .compact-table th { padding: 4px 8px !important; font-size: 12px !important; white-space: nowrap; }
+    iframe[title="st_folium"] { width: 100% !important; height: 70vh !important; }
+    h1, h2, h3 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
     </style>
     """,
     unsafe_allow_html=True
 )
+
 # =========================================================
 # HELPER FUNCTION: Load Shapefiles or GeoJSON
 # =========================================================
@@ -432,6 +423,36 @@ with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
 
     if (fert_df is None or fert_df.empty) and (seed_df is None or seed_df.empty):
         st.info("No variable rate prescription maps uploaded yet.")
+# =========================================================
+# 4D. OPTIONAL: Compare Crop Profitability Before Mapping
+# =========================================================
+with st.expander("Compare Crop Profitability (Optional)", expanded=False):
+    st.markdown("_Any values you enter here will also be reflected in the Profit Summary section below._")
+
+    st.session_state["corn_yield"] = st.number_input(
+        "Corn Yield Goal (bu/ac)", 
+        min_value=0.0, 
+        value=st.session_state.get("corn_yield", 200.0), 
+        step=1.0
+    )
+    st.session_state["corn_price"] = st.number_input(
+        "Corn Sell Price ($/bu)", 
+        min_value=0.0, 
+        value=st.session_state.get("corn_price", 5.0), 
+        step=0.1
+    )
+    st.session_state["bean_yield"] = st.number_input(
+        "Soybean Yield Goal (bu/ac)", 
+        min_value=0.0, 
+        value=st.session_state.get("bean_yield", 60.0), 
+        step=1.0
+    )
+    st.session_state["bean_price"] = st.number_input(
+        "Soybean Sell Price ($/bu)", 
+        min_value=0.0, 
+        value=st.session_state.get("bean_price", 12.0), 
+        step=0.1
+    )
 
 
 # =========================================================
@@ -674,13 +695,33 @@ col_left, col_right = st.columns([2, 2])
 with col_left:
     st.subheader("Breakeven Budget Tool (Corn vs Beans)")
 
-    # --- User inputs ---
-    st.markdown("Enter yield goals and sell prices to see breakeven budgets per acre.")
+    st.markdown("_These values are linked to the 'Compare Crop Profitability' section above the map._")
 
-    corn_yield = st.number_input("Corn Yield Goal (bu/ac)", min_value=0.0, value=200.0, step=1.0)
-    corn_price = st.number_input("Corn Sell Price ($/bu)", min_value=0.0, value=5.0, step=0.1)
-    bean_yield = st.number_input("Soybean Yield Goal (bu/ac)", min_value=0.0, value=60.0, step=1.0)
-    bean_price = st.number_input("Soybean Sell Price ($/bu)", min_value=0.0, value=12.0, step=0.1)
+    # --- User inputs (session_state synced with 4D) ---
+    corn_yield = st.number_input(
+        "Corn Yield Goal (bu/ac)", 
+        min_value=0.0, 
+        value=st.session_state.get("corn_yield", 200.0), 
+        step=1.0
+    )
+    corn_price = st.number_input(
+        "Corn Sell Price ($/bu)", 
+        min_value=0.0, 
+        value=st.session_state.get("corn_price", 5.0), 
+        step=0.1
+    )
+    bean_yield = st.number_input(
+        "Soybean Yield Goal (bu/ac)", 
+        min_value=0.0, 
+        value=st.session_state.get("bean_yield", 60.0), 
+        step=1.0
+    )
+    bean_price = st.number_input(
+        "Soybean Sell Price ($/bu)", 
+        min_value=0.0, 
+        value=st.session_state.get("bean_price", 12.0), 
+        step=0.1
+    )
 
     # --- Calculate breakeven budgets ---
     corn_revenue = corn_yield * corn_price
@@ -824,4 +865,3 @@ with col_right:
         hide_index=True,
         height=table_height
     )
-
