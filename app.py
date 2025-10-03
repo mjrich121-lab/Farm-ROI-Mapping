@@ -777,51 +777,56 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
         y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
         v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
         f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+# =========================================================
+# Profit Legend (Yield + Variable Profit + Fixed Profit)
+# =========================================================
+if all(v is not None for v in [y_min, y_max, v_min, v_max, f_min, f_max]):
+    def rgba_to_hex(rgba_tuple):
+        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+        return f"#{r:02x}{g:02x}{b:02x}"
+    stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0,101,10)]
+    gradient_css = ", ".join(stops)
 
-        # Unified profit legend (top-left, transparent)
-        if all(v is not None for v in [y_min, y_max, v_min, v_max, f_min, f_max]):
-            def rgba_to_hex(rgba_tuple):
-                r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
-                return f"#{r:02x}{g:02x}{b:02x}"
-            stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0,101,10)]
-            gradient_css = ", ".join(stops)
+    profit_legend_html = f"""
+    <div style="position:absolute; top:90px; left:10px; z-index:9999;
+                display:flex; flex-direction:column; gap:16px;
+                font-family:sans-serif; font-size:12px; color:white;
+                background-color: rgba(0,0,0,0.6);
+                padding:8px 12px; border-radius:6px;">
 
-            profit_legend_html = f"""
-            <div style="position:absolute; top:70px; left:10px; z-index:9999;
-                        display:flex; flex-direction:column; gap:12px;
-                        font-family:sans-serif; font-size:12px; color:white; pointer-events:none;">
+      <!-- Yield Legend -->
+      <div>
+        <div style="font-weight:600;">Yield (bu/ac)</div>
+        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
+        <div style="display:flex; justify-content:space-between; margin-top:2px;">
+          <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+        </div>
+      </div>
 
-              <div>
-                <div style="font-weight:600; margin-bottom:2px;">Yield (bu/ac)</div>
-                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-                <div style="display:flex; justify-content:space-between; margin-top:2px;">
-                  <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
-                </div>
-              </div>
+      <!-- Variable Rate Profit Legend -->
+      <div>
+        <div style="font-weight:600;">Variable Rate Profit ($/ac)</div>
+        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
+        <div style="display:flex; justify-content:space-between; margin-top:2px;">
+          <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
+        </div>
+      </div>
 
-              <div>
-                <div style="font-weight:600; margin-bottom:2px;">Variable Rate Profit ($/ac)</div>
-                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-                <div style="display:flex; justify-content:space-between; margin-top:2px;">
-                  <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
-                </div>
-              </div>
+      <!-- Fixed Rate Profit Legend -->
+      <div>
+        <div style="font-weight:600;">Fixed Rate Profit ($/ac)</div>
+        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
+        <div style="display:flex; justify-content:space-between; margin-top:2px;">
+          <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
+        </div>
+      </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(profit_legend_html))
 
-              <div>
-                <div style="font-weight:600; margin-bottom:2px;">Fixed Rate Profit ($/ac)</div>
-                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-                <div style="display:flex; justify-content:space-between; margin-top:2px;">
-                  <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
-                </div>
-              </div>
-            </div>
-            """
-            m.get_root().html.add_child(folium.Element(profit_legend_html))
+# ✅ Always refresh LayerControl (so toggles never vanish on rerun)
+folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
-# ✅ LayerControl at the very end (only once)
-if not st.session_state.get("layer_control_added", False):
-    folium.LayerControl(collapsed=False, position="topright").add_to(m)
-    st.session_state["layer_control_added"] = True
 
 # =========================================================
 # 8. DISPLAY MAP
