@@ -686,8 +686,6 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
-
-st.markdown("_Click the map once to enable zoom with your mouse wheel._")
 st_folium(m, use_container_width=True, height=600)
 
 # --- Initialize session state defaults (safety net) ---
