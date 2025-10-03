@@ -500,16 +500,15 @@ from branca.element import MacroElement
 from jinja2 import Template
 
 def make_base_map():
-    # Start centered on US, scroll wheel disabled initially
     m = folium.Map(
         location=[39.5, -98.35],
-        zoom_start=5,           # default US view
+        zoom_start=5,           # default zoom
         tiles=None,
-        scrollWheelZoom=False,  # OFF at load (page scroll stays smooth)
+        scrollWheelZoom=False,  # disabled by default
         prefer_canvas=True
     )
 
-    # Always-on Esri Satellite + Labels (no user toggles)
+    # Always-on satellite + labels
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -519,67 +518,37 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # JS: click to enable wheel zoom; disable when pointer leaves the map.
-    # Also set minZoom=7 AFTER the map is ready so it doesn't override your initial zoom_start=5 or fit_bounds.
-    scroll_lock_js = Template("""
+    # JS: click to enable wheel zoom; disable again when mouse leaves map
+    scroll_js = Template("""
         {% macro script(this, kwargs) %}
-        (function() {
-          var map = {{ this._parent.get_name() }};
-          function setup() {
-            try {
-              var container = map.getContainer();
-              // Make sure container can receive focus if needed
-              if (container && !container.hasAttribute('tabindex')) {
-                container.setAttribute('tabindex', '0');
-              }
+        var map = {{ this._parent.get_name() }};
 
-              // Disable wheel zoom at start
-              map.scrollWheelZoom.disable();
+        // Disable wheel zoom at start
+        map.scrollWheelZoom.disable();
 
-              // Enable wheel zoom after a click (focus-like behavior)
-              container.addEventListener('click', function() {
-                map.scrollWheelZoom.enable();
-                try { container.focus({preventScroll:true}); } catch(e) {}
-              });
+        // Enable on click inside map
+        map.on('click', function() {
+            map.scrollWheelZoom.enable();
+        });
 
-              // Disable wheel zoom when pointer leaves the map area
-              container.addEventListener('mouseleave', function() {
-                map.scrollWheelZoom.disable();
-              });
+        // Disable when mouse leaves map area
+        map.on('mouseout', function() {
+            map.scrollWheelZoom.disable();
+        });
 
-              // As an extra guard, if the page is scrolled while not hovering the map, keep it disabled
-              window.addEventListener('scroll', function() {
-                if (!container.matches(':hover')) {
-                  map.scrollWheelZoom.disable();
-                }
-              }, {passive:true});
-
-              // Apply minZoom AFTER map is ready (so your zoom_start=5 and any fit_bounds still work)
-              map.whenReady(function() {
-                setTimeout(function() { map.setMinZoom(7); }, 0);
-              });
-            } catch (e) {
-              console && console.warn && console.warn('Scroll lock setup failed:', e);
-            }
-          }
-
-          // Run when Leaflet map is ready
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function(){ map.whenReady(setup); });
-          } else {
-            map.whenReady(setup);
-          }
-        })();
+        // Keep minZoom=7 AFTER ready, but don't override initial zoom=5
+        map.whenReady(function() {
+            setTimeout(function() {
+                map.setMinZoom(7);
+            }, 0);
+        });
         {% endmacro %}
     """)
     macro = MacroElement()
-    macro._template = scroll_lock_js
+    macro._template = scroll_js
     m.get_root().add_child(macro)
 
     return m
-
-# Always start with a fresh map each run
-m = make_base_map()
 
 
 # =========================================================
