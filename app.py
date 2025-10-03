@@ -375,6 +375,41 @@ with st.expander("⚙️ Fixed Rate Inputs (Seed & Fertilizer)", expanded=False)
     st.session_state["fixed_products"] = (
         fixed_entries.copy().reset_index(drop=True)
     )
+# =========================================================
+# 4C. VARIABLE RATE INPUTS (Summary Tables)
+# =========================================================
+st.header("Variable Rate Prescription Inputs")
+
+with st.expander("📊 Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
+    fert_df = st.session_state["fert_products"]
+    seed_df = st.session_state["seed_products"]
+
+    if fert_df is not None and not fert_df.empty:
+        st.subheader("Fertilizer Products (Variable Rate)")
+        st.dataframe(
+            fert_df.style.format({
+                "Acres": "{:,.1f}",
+                "CostTotal": "${:,.2f}",
+                "CostPerAcre": "${:,.2f}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    if seed_df is not None and not seed_df.empty:
+        st.subheader("Seed Products (Variable Rate)")
+        st.dataframe(
+            seed_df.style.format({
+                "Acres": "{:,.1f}",
+                "CostTotal": "${:,.2f}",
+                "CostPerAcre": "${:,.2f}"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+    if (fert_df is None or fert_df.empty) and (seed_df is None or seed_df.empty):
+        st.info("No variable rate prescription maps uploaded yet.")
 
 
 # =========================================================
