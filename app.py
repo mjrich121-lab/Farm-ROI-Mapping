@@ -637,14 +637,16 @@ with col_right:
         axis=1
     )
 
-    # --- Force height expansion ---
-    row_height = 32   # bump per-row pixel height up a bit
-    header_buffer = 45
-    table_height = len(fixed_df) * row_height + header_buffer
+   # --- Force height expansion (no scrolling, slight buffer) ---
+row_height = 35        # keep a comfortable row height
+header_buffer = 60     # allow for header + bottom padding
+scroll_buffer = 20     # extra space to prevent clipping
 
-    st.dataframe(
-        styled_fixed,
-        use_container_width=True,
-        hide_index=True,
-        height=table_height   # dynamically expands so no vertical scroll
-    )
+table_height = len(fixed_df) * row_height + header_buffer + scroll_buffer
+
+st.dataframe(
+    styled_fixed,
+    use_container_width=True,
+    hide_index=True,
+    height=table_height  # always a touch taller than needed
+)
