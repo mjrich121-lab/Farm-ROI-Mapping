@@ -497,17 +497,47 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
+from branca.element import MacroElement, Template
+
 def make_base_map():
-    return folium.Map(
+    # Create base map (center US, scroll disabled initially)
+    m = folium.Map(
         location=[39.5, -98.35],  # Center of continental US
-        zoom_start=5,             # Nice US zoom
-        tiles="CartoDB positron", # simple clean basemap
+        zoom_start=5,             # Zoom tighter into US
+        tiles=None,
+        scrollWheelZoom=False,    # Disable scroll wheel by default
         prefer_canvas=True
     )
 
+    # Esri Satellite imagery
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="Esri Satellite", overlay=False, control=True
+    ).add_to(m)
+
+    # Esri Boundaries & Labels
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="Labels", overlay=True, control=True
+    ).add_to(m)
+
+    # 🔹 Custom JS: enable scroll after user clicks the map
+    template = Template("""
+        {% macro script(this, kwargs) %}
+        var map = {{this._parent.get_name()}};
+        map.once('click', function() {
+            map.scrollWheelZoom.enable();
+        });
+        {% endmacro %}
+    """)
+    macro = MacroElement()
+    macro._template = template
+    m.get_root().add_child(macro)
+
+    return m
+
 # Always start with a fresh map each run
 m = make_base_map()
-
 
 # =========================================================
 # 6. ZONES
