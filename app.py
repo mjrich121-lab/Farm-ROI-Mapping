@@ -651,14 +651,14 @@ st.subheader("Profit Metrics Comparison")
     # Variable Rate Profit
     var_profit = 0.0
     if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
-        df = st.session_state["yield_df"]
+     df = st.session_state["yield_df"]
 
-        fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-        seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+    fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
+    seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
 
-        revenue_var = df["Revenue_per_acre"].mean() if "Revenue_per_acre" in df.columns else 0.0
-        expenses_var = base_expenses_per_acre + fert_costs + seed_costs
-        var_profit = revenue_var - expenses_var
+    revenue_var = df["Revenue_per_acre"].mean() if "Revenue_per_acre" in df.columns else 0.0
+    expenses_var = base_expenses_per_acre + fert_costs + seed_costs
+    var_profit = revenue_var - expenses_var
     else:
         revenue_var, expenses_var = 0.0, 0.0
 
