@@ -686,7 +686,6 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     # Display map
     st_folium(m, width=1000, height=600)
 
-
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
@@ -704,8 +703,6 @@ if "fixed_products" not in st.session_state:
 # --- Work with yield data if available ---
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
-
-    # 🚫 Removed debug: st.write("📋 Columns in uploaded file:", list(df.columns))
 
     # 🔍 Detect yield column (prefer Dry Yield variants)
     yield_col_priority = ["Dry_Yield", "DryYield", "DryYld", "Yld_Dry",
@@ -756,7 +753,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     west, east = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # Heatmap helper
+    # ✅ Heatmap helper (now adds overlays with names so they appear in LayerControl)
     def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
@@ -772,12 +769,19 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
+
         folium.raster_layers.ImageOverlay(
-            image=rgba, bounds=[[south, west], [north, east]], opacity=0.5, name=name, show=show_default
+            image=rgba,
+            bounds=[[south, west], [north, east]],
+            opacity=0.5,
+            name=name,        # ✅ visible in LayerControl
+            overlay=True,     # ✅ mark as overlay
+            show=show_default
         ).add_to(m)
+
         return (vmin, vmax)
 
-    # Add overlays
+    # Add overlays (toggleable in LayerControl)
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
     v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
