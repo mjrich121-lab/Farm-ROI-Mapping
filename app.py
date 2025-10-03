@@ -435,70 +435,63 @@ if st.session_state["zones_gdf"] is not None:
     zone_layer.add_to(m)
 
 # =========================================================
-# 7. YIELD + PROFIT (Variable + Fixed)
+# 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
 df = None
 
-# --- Ensure session state keys exist ---
+# --- Ensure session state defaults ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 if "seed_products" not in st.session_state:
     st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "fixed_seed" not in st.session_state:
-    st.session_state["fixed_seed"] = pd.DataFrame(columns=["Variety","Rate (units/ac)","Cost per Unit ($)","Cost/acre"])
-if "fixed_fert" not in st.session_state:
-    st.session_state["fixed_fert"] = pd.DataFrame(columns=["Fertilizer Type","Rate (lbs/ac)","Cost per lb ($)","Cost/acre"])
 if "yield_df" not in st.session_state:
     st.session_state["yield_df"] = None
+if "fixed_products" not in st.session_state:
+    st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
 
-# --- Load yield data into session state ---
-if yield_file is not None:
-    if yield_file.name.endswith(".csv"):
-        df = pd.read_csv(yield_file)
-        if {"Latitude", "Longitude", "Yield"}.issubset(df.columns):
-            st.session_state["yield_df"] = df
-    else:
-        gdf = load_vector_file(yield_file)
-        if gdf is not None:
-            gdf["Longitude"] = gdf.geometry.centroid.x
-            gdf["Latitude"] = gdf.geometry.centroid.y
-            yield_col = [c for c in gdf.columns if "yield" in c.lower()]
-            if yield_col:
-                gdf.rename(columns={yield_col[0]: "Yield"}, inplace=True)
-                df = pd.DataFrame(gdf.drop(columns="geometry"))
-                st.session_state["yield_df"] = df
+# --- Work with yield data if available ---
+if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
+    df = st.session_state["yield_df"].copy()
 
-# --- Work with yield data ---
-if st.session_state["yield_df"] is not None:
-    df = st.session_state["yield_df"]
-
-    # Revenue
+    # Revenue from yield * sell price
     df["Revenue_per_acre"] = df["Yield"] * sell_price
 
-    # -------------------------
-    # Variable Rate Profit
-    # -------------------------
+    # --------------------------
+    # VARIABLE RATE PROFIT
+    # --------------------------
     fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
     seed_costs_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
-    df["VariableRateProfit"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_var - seed_costs_var
+    df["NetProfit_per_acre_variable"] = (
+        df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_var - seed_costs_var
+    )
 
-    # -------------------------
-    # Fixed Rate Profit
-    # -------------------------
-    fert_costs_fixed = st.session_state["fixed_fert"]["Cost/acre"].sum() if not st.session_state["fixed_fert"].empty else 0
-    seed_costs_fixed = st.session_state["fixed_seed"]["Cost/acre"].sum() if not st.session_state["fixed_seed"].empty else 0
-    df["FixedRateProfit"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_fixed - seed_costs_fixed
+    # --------------------------
+    # FIXED RATE PROFIT
+    # --------------------------
+    fixed_costs = 0
+    if not st.session_state["fixed_products"].empty:
+        # calculate $/ac for each fixed input if rate & cost/unit are given
+        fixed_df = st.session_state["fixed_products"].copy()
+        fixed_df["$/ac"] = fixed_df.apply(
+            lambda x: x["Rate"] * x["CostPerUnit"] if x["Rate"] > 0 and x["CostPerUnit"] > 0 else 0, axis=1
+        )
+        fixed_costs = fixed_df["$/ac"].sum()
 
-    if sell_price == 0:
-        st.warning("⚠️ Sell Price is 0 — profit heatmaps will be flat. Set a non-zero $/bu.")
+    df["NetProfit_per_acre_fixed"] = (
+        df["Revenue_per_acre"] - base_expenses_per_acre - fixed_costs
+    )
 
-    # --- Auto-zoom ---
+    # --------------------------
+    # Auto-zoom map to data
+    # --------------------------
     south, north = df["Latitude"].min(), df["Latitude"].max()
     west,  east  = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # --- Heatmap overlay helper ---
-    def add_heatmap_overlay(values, name, show_default, cmap_name="RdYlGn"):
+    # --------------------------
+    # Heatmap overlay helper
+    # --------------------------
+    def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
@@ -512,7 +505,7 @@ if st.session_state["yield_df"] is not None:
         vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
         if vmin == vmax:
             vmax = vmin + 1
-        cmap = plt.cm.get_cmap(cmap_name)
+        cmap = plt.cm.get_cmap("RdYlGn")
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
@@ -527,16 +520,21 @@ if st.session_state["yield_df"] is not None:
 
         return (vmin, vmax)
 
-    # --- Add overlays ---
+    # --------------------------
+    # Add layers: Yield + Profit maps
+    # --------------------------
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
-    v_min, v_max = add_heatmap_overlay(df["VariableRateProfit"].values, "Variable Rate Profit ($/ac)", show_default=True)
-    f_min, f_max = add_heatmap_overlay(df["FixedRateProfit"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+    v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
+    f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-    # --- Legends (bottom left) ---
+    # --------------------------
+    # Legend (stacked for all layers)
+    # --------------------------
     from branca.element import Element
     def rgba_to_hex(rgba_tuple):
         r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
         return f"#{r:02x}{g:02x}{b:02x}"
+
     stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
 
