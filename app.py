@@ -602,50 +602,39 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
-
 # =========================================================
-# 6. ZONES
+# 6. ZONE MAP DISPLAY (Map Only)
 # =========================================================
-st.header("Zone Acre Overrides")
+st.header("Zone Map")
 
-if zones_gdf is not None:
-    # Save into session state
-    st.session_state["zones_gdf"] = zones_gdf
-
-# Draw from session state if available
-if st.session_state["zones_gdf"] is not None:
+if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # ✅ Reproject to equal-area projection for accurate acre calculation
-    try:
-        if gdf.crs is not None and gdf.crs.is_geographic:
-            gdf = gdf.to_crs(epsg=5070)  # Albers Equal Area (USA)
-    except Exception as e:
-        st.warning(f"Could not reproject zones: {e}")
+    # Always use EPSG:4326 for map rendering
+    if gdf.crs is None or gdf.crs.to_string() != "EPSG:4326":
+        gdf = gdf.to_crs(epsg=4326)
 
-    # Calculate acres
-    gdf["Calculated Acres"] = gdf.geometry.area * 0.000247105  # m² → acres
-    gdf["Override Acres"] = gdf["Calculated Acres"]
+    # Create folium map
+    m = folium.Map(location=[gdf.geometry.centroid.y.mean(), gdf.geometry.centroid.x.mean()], zoom_start=14)
 
-    # Compact display table
-    zone_acres_df = gdf[["Zone", "Calculated Acres", "Override Acres"]] if "Zone" in gdf.columns else pd.DataFrame({
-        "Zone": range(1, len(gdf) + 1),
-        "Calculated Acres": gdf["Calculated Acres"],
-        "Override Acres": gdf["Calculated Acres"]
-    })
+    # Add zone polygons with labels
+    folium.GeoJson(
+        gdf,
+        name="Zones",
+        style_function=lambda feature: {
+            "fillColor": "#3186cc",
+            "color": "black",
+            "weight": 1,
+            "fillOpacity": 0.5,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
+    ).add_to(m)
 
-    st.dataframe(
-        zone_acres_df.style.format({"Calculated Acres": "{:,.2f}", "Override Acres": "{:,.2f}"}),
-        use_container_width=False,  # compact table
-        height=220
-    )
+    # Fit map to zones
+    bounds = gdf.total_bounds
+    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # ✅ Auto-zoom map to zone bounds
-    try:
-        bounds = gdf.to_crs(epsg=4326).total_bounds  # back to lat/lon
-        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-    except Exception as e:
-        st.warning(f"Could not auto-zoom to zones: {e}")
+    st_folium(m, width=800, height=500)
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
