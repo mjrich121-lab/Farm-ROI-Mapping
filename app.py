@@ -143,62 +143,60 @@ if zone_file is not None:
         st.session_state["zones_gdf"] = zones_gdf
 
 # =========================================================
-# 2. YIELD UPLOAD
+# 2. YIELD MAP UPLOAD
 # =========================================================
-st.header("Yield Upload")
-
-uploaded_file = st.file_uploader(
-    "Upload your yield data (CSV, GeoJSON, JSON, or ZIP)",
-    type=["csv", "geojson", "json", "zip"]
+st.header("Yield Map Upload")
+yield_file = st.file_uploader(
+    "Upload Yield Map",
+    type=["csv", "geojson", "json", "zip"],
+    key="yield"
+)
+st.markdown(
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
+    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
-if uploaded_file is not None:
+df = None
+if yield_file is not None:
     try:
-        df = None
-
-        # --- Handle ZIP (extract first CSV) ---
-        if uploaded_file.name.endswith(".zip"):
-            import zipfile, io
-            with zipfile.ZipFile(uploaded_file) as z:
-                csv_files = [f for f in z.namelist() if f.endswith(".csv")]
-                if csv_files:
-                    with z.open(csv_files[0]) as f:
-                        df = pd.read_csv(f)
-                else:
-                    st.error("❌ No CSV found inside the ZIP file.")
-
-        # --- Handle CSV ---
-        elif uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-
-        # --- Handle JSON ---
-        elif uploaded_file.name.endswith(".json"):
-            df = pd.read_json(uploaded_file)
-
-        # --- Handle GeoJSON ---
-        elif uploaded_file.name.endswith(".geojson"):
-            import geopandas as gpd
-            gdf = gpd.read_file(uploaded_file)
-            df = pd.DataFrame(gdf)
-
-        # --- Normalize columns & detect yield ---
-        if df is not None:
-            df.columns = df.columns.str.strip()
-            yield_col = None
-            for col in df.columns:
-                if col.lower() in ["yield", "yld", "yields", "grain_yield", "harvest_yield"]:
-                    yield_col = col
-                    break
-
-            if yield_col:
-                df.rename(columns={yield_col: "Yield"}, inplace=True)
-                st.success("✅ Yield column detected and renamed to 'Yield'")
-                st.session_state["yield_data"] = df
+        if yield_file.name.endswith(".csv"):
+            df = pd.read_csv(yield_file)
+            # Normalize columns
+            df.columns = [c.strip().lower() for c in df.columns]
+            yield_candidates = [c for c in df.columns if "yield" in c or "yld" in c]
+            if yield_candidates:
+                df.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
+                st.success(f"✅ Yield CSV loaded successfully (using column '{yield_candidates[0]}').")
             else:
-                st.error("❌ No 'Yield' column found. Please check your file.")
+                st.error("❌ CSV must include a yield column (e.g., 'Yield', 'Dry_Yield').")
+        else:
+            gdf = load_vector_file(yield_file)
+            if gdf is not None and not gdf.empty:
+                # Normalize columns
+                gdf.columns = [c.strip().lower() for c in gdf.columns]
 
+                gdf["Longitude"] = gdf.geometry.centroid.x
+                gdf["Latitude"] = gdf.geometry.centroid.y
+
+                # Look for yield column
+                yield_candidates = [c for c in gdf.columns if "yield" in c or "yld" in c]
+                if yield_candidates:
+                    gdf.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
+                    df = pd.DataFrame(gdf.drop(columns="geometry"))
+                    st.success(f"✅ Yield shapefile loaded successfully (using column '{yield_candidates[0]}').")
+                else:
+                    st.error("❌ No yield column found in uploaded file. "
+                             "Please ensure a field like 'Yield' or 'Dry_Yield' exists.")
+            else:
+                st.error("❌ Could not read shapefile/geojson")
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        st.error(f"❌ Error processing yield file: {e}")
+
+# Save to session state
+if df is not None:
+    st.session_state["yield_df"] = df
+    # st.write("📋 Columns in uploaded file:", list(df.columns))  # removed
+
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
