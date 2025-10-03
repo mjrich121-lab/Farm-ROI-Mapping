@@ -799,7 +799,7 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
                 gradient_css = ", ".join(stops)
 
                 profit_legend_html = f"""
-                <div style="position:absolute; top:800px; left:10px; z-index:9999;
+                <div style="position:absolute; top:80px; left:17px; z-index:9999;
                             display:flex; flex-direction:column; gap:10px;
                             font-family:sans-serif; font-size:12px; color:white; pointer-events:none;">
                   <div>
