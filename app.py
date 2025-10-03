@@ -231,52 +231,37 @@ if uploaded_files:
             west, east = df["Longitude"].min(), df["Longitude"].max()
             m.fit_bounds([[south, west], [north, east]])
 
-            # --- Plot raw points ---
-            for _, row in df.iterrows():
-                folium.CircleMarker(
-                    location=[row["Latitude"], row["Longitude"]],
-                    radius=2,
-                    color="blue",
-                    fill=True,
-                    fill_opacity=0.5,
-                    tooltip=f"Yield: {row['Yield']:.1f}, Profit: {row['NetProfit_per_acre']:.2f}"
-                ).add_to(m)
-
-            # --- Heatmap raster overlay ---
-            try:
-                # Regular grid
+            # --- Helper function to overlay heatmap ---
+            def add_heatmap_overlay(values, name, cmap_name="RdYlGn"):
                 n = 200
                 lon_lin = np.linspace(west, east, n)
                 lat_lin = np.linspace(south, north, n)
                 lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-                # Nearest neighbor fill
                 from scipy.spatial import cKDTree
                 tree = cKDTree(df[["Longitude", "Latitude"]].values)
                 _, idx = tree.query(np.c_[lon_grid.ravel(), lat_grid.ravel()])
-                grid_profit = df["NetProfit_per_acre"].values[idx].reshape(lat_grid.shape)
+                grid_vals = values[idx].reshape(lat_grid.shape)
 
-                # Normalize to colormap
-                vmin, vmax = np.min(grid_profit), np.max(grid_profit)
-                if vmin == vmax:  # flat safeguard
+                vmin, vmax = np.min(grid_vals), np.max(grid_vals)
+                if vmin == vmax:
                     vmax = vmin + 1
-                cmap = plt.cm.get_cmap("RdYlGn")
-                rgba_img = cmap((grid_profit - vmin) / (vmax - vmin))
-                rgba_img = np.flipud(rgba_img)   # flip vertically for folium
+                cmap = plt.cm.get_cmap(cmap_name)
+                rgba_img = cmap((grid_vals - vmin) / (vmax - vmin))
+                rgba_img = np.flipud(rgba_img)  # orient correctly for folium
                 rgba_img = (rgba_img * 255).astype(np.uint8)
 
-                # Overlay with correct bounds
                 folium.raster_layers.ImageOverlay(
                     image=rgba_img,
                     bounds=[[south, west], [north, east]],
                     opacity=0.6,
-                    name="Net Profit ($/ac)",
-                    show=True
+                    name=name,
+                    show=True if name == "Net Profit ($/ac)" else False  # profit shown by default
                 ).add_to(m)
 
-            except Exception as e:
-                st.warning(f"Heatmap overlay failed: {e}")
-
+            # --- Add Yield and Profit overlays ---
+            add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", cmap_name="YlGnBu")
+            add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", cmap_name="RdYlGn")
 
 # =========================================================
 # 8. DISPLAY MAP
