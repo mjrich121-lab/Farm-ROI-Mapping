@@ -781,6 +781,9 @@ with col_left:
         hide_index=True
     )
 
+    # --- Note to direct users back to 4D ---
+    st.caption("ℹ️ To adjust Corn and Soybean assumptions, edit values in the **Compare Crop Profitability (Optional)** section above the map.")
+
     # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
 
@@ -859,7 +862,6 @@ with col_left:
             (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
         </div>
         """, unsafe_allow_html=True)
-
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
