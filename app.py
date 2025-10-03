@@ -160,22 +160,29 @@ expenses = {
 base_expenses_per_acre = sum(expenses.values())
 
 # =========================================================
-# 5. BASE MAP
+# 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-if "farm_map" not in st.session_state:
-    st.session_state["farm_map"] = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
+def make_base_map():
+    m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="Esri Satellite", overlay=False, control=False
+    ).add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="Labels", overlay=True, control=False
+    ).add_to(m)
+    return m
 
-m = st.session_state["farm_map"]
+# Initialize session state storage if not already there
+if "zones_gdf" not in st.session_state:
+    st.session_state["zones_gdf"] = None
+if "yield_df" not in st.session_state:
+    st.session_state["yield_df"] = None
 
-folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri", name="Esri Satellite", overlay=False, control=False
-).add_to(m)
+# Always start with a fresh map each run
+m = make_base_map()
 
-folium.TileLayer(
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri", name="Labels", overlay=True, control=False
-).add_to(m)
 
 # =========================================================
 # 6. ZONES
