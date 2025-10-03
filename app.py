@@ -597,7 +597,7 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 # =========================================================
-# 6. ZONE MAP DISPLAY (Satellite + Dynamic Legend, no scale bar)
+# 6. ZONE MAP DISPLAY
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"].copy()
@@ -611,115 +611,56 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Color scheme (1 → red, 5 → dark green)
+    # Zone colors
     zone_colors = {
-        1: "#e41a1c",  # red
-        2: "#ff7f00",  # orange
-        3: "#ffff33",  # yellow
-        4: "#4daf4a",  # light green
-        5: "#006400",  # dark green
+        1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"
     }
-
     def color_for_zone(z):
         try:
             return zone_colors.get(int(z), "#3186cc")
         except Exception:
             return "#3186cc"
 
-    # Bounds & center
-    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
-    center = [(bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0]
+    # Map bounds
+    bounds = gdf.total_bounds
+    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
 
-    # Make the map (tiles=None so we control layers; control_scale=False to remove distance bar)
+    # Folium map
     m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Basemap: Satellite + labels
+    # Basemaps
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri World Imagery",
-        name="Esri Satellite",
-        overlay=False,
-        control=True,
+        name="Satellite",
+        overlay=False
     ).add_to(m)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri Boundaries & Labels",
         name="Labels",
-        overlay=True,
-        control=True,
+        overlay=True
     ).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
 
-    # Add zones layer (only needed fields + geometry)
-    layer_gdf = gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]].copy()
-
+    # Zones
     folium.GeoJson(
-        layer_gdf,
-        name="Zones",
-        style_function=lambda feature: {
-            "fillColor": color_for_zone(feature["properties"].get("Zone")),
-            "color": "black",
-            "weight": 1,
-            "fillOpacity": 0.45,  # see satellite beneath
+        gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
+        style_function=lambda f: {
+            "fillColor": color_for_zone(f["properties"].get("Zone")),
+            "color": "black", "weight": 1, "fillOpacity": 0.45,
         },
         tooltip=folium.GeoJsonTooltip(
             fields=["Zone", "Calculated Acres", "Override Acres"],
-            aliases=["Zone", "Calculated Acres", "Override Acres"],
-            localize=True,
-        ),
+            aliases=["Zone", "Calculated Acres", "Override Acres"]
+        )
     ).add_to(m)
 
-    # Auto-zoom to field
+    # Fit to bounds
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Dynamic legend based on actual Zone values
-    def _zone_label(z):
-        try:
-            return str(int(z))
-        except Exception:
-            return str(z)
-
-    # Sort numerically if possible
-    try:
-        unique_zones = sorted(layer_gdf["Zone"].unique(), key=lambda v: int(v))
-    except Exception:
-        unique_zones = sorted(layer_gdf["Zone"].unique(), key=lambda v: str(v))
-
-    legend_items = ""
-    for z in unique_zones:
-        label = _zone_label(z)
-        col = color_for_zone(z)
-        legend_items += (
-            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
-            f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
-            f'<span style="color:#000;">Zone {label}</span>'
-            f'</div>'
-        )
-
-    legend_html = f"""
-     <div style="
-         position: fixed;
-         top: 20px; right: 20px;    /* moved to top-right, away from controls */
-         background: rgba(255,255,255,0.95);
-         border: 1px solid #888;
-         border-radius: 6px;
-         padding: 8px 10px;
-         font-size: 14px;
-         z-index: 9999;
-         box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-     ">
-       <div style="font-weight:600;margin-bottom:6px;color:#000;">Zone Colors</div>
-       {legend_items}
-     </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-    # IMPORTANT: let CSS control the size so it fills the container
-    st_folium(m)
-else:
-    # No header/text — map-only section
-    pass
+    # ✅ Force map render
+    st_folium(m, width=1000, height=650)
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
