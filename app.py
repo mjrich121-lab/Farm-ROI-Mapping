@@ -226,6 +226,12 @@ def process_prescription(file, prescrip_type="fertilizer"):
     except Exception as e:
         st.error(f"❌ Error processing {prescrip_type} map: {e}")
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+      
+        if yield_file is not None:
+    if yield_file.name.endswith(".zip"):
+        gdf = gpd.read_file(f"zip://{yield_file.name}")
+        st.write("📋 Columns detected in Yield Shapefile:", list(gdf.columns))
+
 
     # --- Normalize column names ---
     df.columns = [c.strip().lower() for c in df.columns]
