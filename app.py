@@ -724,16 +724,31 @@ with col_left:
     else:
         revenue_fixed, expenses_fixed = 0.0, 0.0
 
-    # Overall (Budget Snapshot from Yield Map)
+    # Breakeven Budget (was Overall)
     revenue_overall = revenue_per_acre
     expenses_overall = expenses_per_acre
     profit_overall = net_profit_per_acre
 
     comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Overall": [round(revenue_overall,2), round(expenses_overall,2), round(profit_overall,2)],
-        "Variable Rate": [round(revenue_var,2), round(expenses_var,2), round(var_profit,2)],
-        "Fixed Rate": [round(revenue_fixed,2), round(expenses_fixed,2), round(fixed_profit,2)]
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)", "Formula"],
+        "Breakeven Budget": [
+            round(revenue_overall, 2),
+            round(expenses_overall, 2),
+            round(profit_overall, 2),
+            "(Target Yield × Sell Price) − Fixed Inputs"
+        ],
+        "Variable Rate": [
+            round(revenue_var, 2),
+            round(expenses_var, 2),
+            round(var_profit, 2),
+            "(Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)"
+        ],
+        "Fixed Rate": [
+            round(revenue_fixed, 2),
+            round(expenses_fixed, 2),
+            round(fixed_profit, 2),
+            "(Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)"
+        ]
     })
 
     def highlight_profit(val):
@@ -747,12 +762,12 @@ with col_left:
     st.dataframe(
         comparison.style.applymap(
             highlight_profit,
-            subset=["Overall","Variable Rate","Fixed Rate"]
+            subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
         ).format({
-            "Overall":"${:,.2f}",
+            "Breakeven Budget":"${:,.2f}",
             "Variable Rate":"${:,.2f}",
             "Fixed Rate":"${:,.2f}"
-        }),
+        }, na_rep=""),
         use_container_width=True,
         hide_index=True
     )
@@ -784,4 +799,3 @@ with col_right:
         hide_index=True,
         height=table_height
     )
-
