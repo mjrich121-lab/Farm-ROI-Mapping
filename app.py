@@ -616,7 +616,6 @@ m = make_base_map()
 # =========================================================
 st.header("Field Map Display")
 
-# Create base map if we have at least one dataset
 datasets = []
 if "yield_gdf" in st.session_state and st.session_state["yield_gdf"] is not None:
     datasets.append(st.session_state["yield_gdf"])
@@ -628,7 +627,7 @@ if "fert_gdf" in st.session_state and st.session_state.get("fert_gdf") is not No
     datasets.append(st.session_state["fert_gdf"])
 
 if datasets:
-    # Calculate map center from all datasets
+    # --- Auto-zoom to combined bounds ---
     combined_bounds = datasets[0].total_bounds
     for gdf in datasets[1:]:
         b = gdf.total_bounds
@@ -641,18 +640,20 @@ if datasets:
     center_lat = (combined_bounds[1] + combined_bounds[3]) / 2
     center_lon = (combined_bounds[0] + combined_bounds[2]) / 2
 
-    # Base map (fixed to satellite imagery)
+    # Base map (fixed satellite)
     m = folium.Map(location=[center_lat, center_lon], zoom_start=15, tiles=None)
     folium.TileLayer("Esri.WorldImagery", name="Satellite", control=False).add_to(m)
 
     # --- Yield Layer ---
     if "yield_gdf" in st.session_state and st.session_state["yield_gdf"] is not None:
-        yield_gdf = st.session_state["yield_gdf"]
+        yield_gdf = st.session_state["yield_gdf"].copy()
+        yield_gdf["id"] = yield_gdf.index.astype(str)  # unique id
+
         folium.Choropleth(
             geo_data=yield_gdf.to_json(),
             data=yield_gdf,
-            columns=["obj__id", "Yield"],
-            key_on="feature.properties.obj__id",
+            columns=["id", "Yield"],
+            key_on="feature.id",
             fill_color="YlGn",
             fill_opacity=0.6,
             line_opacity=0.1,
@@ -663,27 +664,55 @@ if datasets:
     # --- Zones Layer ---
     if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
         zones_gdf = st.session_state["zones_gdf"]
-        zone_colors = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400"]
+
+        # Fixed zone color scheme
+        zone_colors = {
+            1: "#FF0000",   # Red
+            2: "#FF8C00",   # Orange
+            3: "#FFFF00",   # Yellow
+            4: "#32CD32",   # Light Green
+            5: "#006400"    # Dark Green
+        }
+
         folium.GeoJson(
             zones_gdf,
             name="Zones",
             style_function=lambda feature: {
-                "fillColor": zone_colors[(feature["properties"]["Zone"] - 1) % len(zone_colors)],
-                "color": zone_colors[(feature["properties"]["Zone"] - 1) % len(zone_colors)],
-                "weight": 2,
+                "fillColor": zone_colors.get(int(feature["properties"]["Zone"]), "#808080"),
+                "color": "black",
+                "weight": 1,
                 "fillOpacity": 0.25
             },
             tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres"])
         ).add_to(m)
 
+        # Auto-build legend only for zones present
+        unique_zones = sorted(zones_gdf["Zone"].unique())
+        legend_items = ""
+        for z in unique_zones:
+            color = zone_colors.get(int(z), "#808080")
+            legend_items += f'<i style="background:{color}; width:15px; height:15px; float:left; margin-right:5px;"></i> Zone {z}<br>'
+
+        legend_html = f"""
+        <div style="position: fixed; 
+                    bottom: 40px; left: 40px; width: 160px; 
+                    background-color: white; border:2px solid grey; z-index:9999; 
+                    font-size:14px; padding: 10px;">
+        <b>Zone Colors</b><br>
+        {legend_items}
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
+
     # --- Prescription Seeding Layer ---
-    if "seed_gdf" in st.session_state and st.session_state["seed_gdf"] is not None:
-        seed_gdf = st.session_state["seed_gdf"]
+    if "seed_gdf" in st.session_state and st.session_state.get("seed_gdf") is not None:
+        seed_gdf = st.session_state["seed_gdf"].copy()
+        seed_gdf["id"] = seed_gdf.index.astype(str)
         folium.Choropleth(
             geo_data=seed_gdf.to_json(),
             data=seed_gdf,
-            columns=["obj__id", "SeedRate"],
-            key_on="feature.properties.obj__id",
+            columns=["id", "SeedRate"],
+            key_on="feature.id",
             fill_color="PuBu",
             fill_opacity=0.5,
             line_opacity=0.2,
@@ -692,13 +721,14 @@ if datasets:
         ).add_to(m)
 
     # --- Prescription Fertilizer Layer ---
-    if "fert_gdf" in st.session_state and st.session_state["fert_gdf"] is not None:
-        fert_gdf = st.session_state["fert_gdf"]
+    if "fert_gdf" in st.session_state and st.session_state.get("fert_gdf") is not None:
+        fert_gdf = st.session_state["fert_gdf"].copy()
+        fert_gdf["id"] = fert_gdf.index.astype(str)
         folium.Choropleth(
             geo_data=fert_gdf.to_json(),
             data=fert_gdf,
-            columns=["obj__id", "FertRate"],
-            key_on="feature.properties.obj__id",
+            columns=["id", "FertRate"],
+            key_on="feature.id",
             fill_color="OrRd",
             fill_opacity=0.5,
             line_opacity=0.2,
@@ -706,10 +736,10 @@ if datasets:
             name="Prescription Fertilizer"
         ).add_to(m)
 
-    # Layer toggles for all uploaded layers
+    # Layer toggles
     folium.LayerControl(collapsed=False).add_to(m)
 
-    # Display map
+    # Show map
     st_folium(m, width=1000, height=650)
 
 else:
