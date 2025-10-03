@@ -206,7 +206,7 @@ if zones_gdf is not None:
     if not uploaded_files:
         m = auto_zoom_map(m, gdf=zones_gdf)
 # =========================================================
-# 7. YIELD + PROFIT
+# 7. YIELD + PROFIT (smooth heatmaps + stacked legends)
 # =========================================================
 df = None
 if uploaded_files:
@@ -214,82 +214,110 @@ if uploaded_files:
         df = pd.read_csv(file)
 
         if {"Latitude", "Longitude", "Yield"}.issubset(df.columns):
-            # --- Revenue & Profit ---
+            # --- Compute Revenue & Profit ---
             df["Revenue_per_acre"] = df["Yield"] * sell_price
             fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
             seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
             df["NetProfit_per_acre"] = (
-                df["Revenue_per_acre"]
-                - base_expenses_per_acre
-                - fert_costs
-                - seed_costs
+                df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
             )
 
-            # --- Auto-zoom to data bounds ---
+            # Warn if sell price is zero (prevents flat red heatmap)
+            if sell_price == 0:
+                st.warning("⚠️ Sell Price is 0 — profit heatmap will be flat. Set a non-zero $/bu.")
+
+            # --- Fit map to data bounds ---
             south, north = df["Latitude"].min(), df["Latitude"].max()
-            west, east = df["Longitude"].min(), df["Longitude"].max()
+            west,  east  = df["Longitude"].min(), df["Longitude"].max()
             m.fit_bounds([[south, west], [north, east]])
 
-            # --- Helper to add heatmap overlay ---
-            def add_heatmap_overlay(values, name, cmap_name="RdYlGn", show_default=False):
-                n = 200
+            # --- Helper: smooth heatmap overlay (linear + nearest fallback) ---
+            import matplotlib.pyplot as plt
+            from scipy.interpolate import griddata
+            from scipy.spatial import cKDTree
+            import numpy as np
+            import folium
+
+            def add_heatmap_overlay(values, name, show_default):
+                # Grid covering the field
+                n = 220
                 lon_lin = np.linspace(west, east, n)
                 lat_lin = np.linspace(south, north, n)
                 lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-                from scipy.spatial import cKDTree
-                tree = cKDTree(df[["Longitude", "Latitude"]].values)
-                _, idx = tree.query(np.c_[lon_grid.ravel(), lat_grid.ravel()])
-                grid_vals = values[idx].reshape(lat_grid.shape)
+                # Interpolate (linear) with nearest fallback to fill NaNs
+                pts = (df["Longitude"].values, df["Latitude"].values)
+                v   = values.astype(float)
+                grid_lin = griddata(pts, v, (lon_grid, lat_grid), method="linear")
+                grid_nn  = griddata(pts, v, (lon_grid, lat_grid), method="nearest")
+                grid     = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
 
-                vmin, vmax = np.min(grid_vals), np.max(grid_vals)
-                if vmin == vmax:
-                    vmax = vmin + 1
-
-                cmap = plt.cm.get_cmap(cmap_name)
-                rgba_img = cmap((grid_vals - vmin) / (vmax - vmin))
-                rgba_img = np.flipud(rgba_img)  # orient correctly
-                rgba_img = (rgba_img * 255).astype(np.uint8)
+                # Normalize to RdYlGn (red=low, green=high)
+                vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
+                if vmin == vmax:  # avoid a flat palette
+                    vmax = vmin + 1.0
+                cmap = plt.cm.get_cmap("RdYlGn")
+                rgba = cmap((grid - vmin) / (vmax - vmin))
+                rgba = np.flipud(rgba)                     # correct north/south for Folium
+                rgba = (rgba * 255).astype(np.uint8)
 
                 folium.raster_layers.ImageOverlay(
-                    image=rgba_img,
-                    bounds=[[south, west], [north, east]],
-                    opacity=0.6,
+                    image=rgba,
+                    bounds=[[south, west], [north, east]],   # [ [S,W], [N,E] ]
+                    opacity=0.60,
                     name=name,
                     show=show_default
                 ).add_to(m)
 
-                # --- Add legend ---
-                legend_html = f"""
-                <div style="
-                    position: fixed;
-                    bottom: 20px;
-                    left: 20px;
-                    width: 150px;
-                    height: 60px;
-                    background-color: white;
-                    border:2px solid grey;
-                    z-index:9999;
-                    font-size:12px;
-                    padding: 5px;
-                    margin-bottom:5px;
-                ">
-                <b>{name}</b><br>
-                <i style="background:{cmap(0)};width:20px;height:10px;display:inline-block;"></i>
-                {round(vmin,1)} &nbsp;–&nbsp; {round(vmax,1)}
-                </div>
-                """
-                from branca.element import MacroElement
-                from jinja2 import Template
-                class Legend(MacroElement):
-                    def __init__(self, html):
-                        super().__init__()
-                        self._template = Template(html)
-                m.get_root().add_child(Legend(legend_html))
+                return (vmin, vmax)
 
-            # --- Add Yield and Profit overlays ---
-            add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", cmap_name="RdYlGn", show_default=False)
-            add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", cmap_name="RdYlGn", show_default=True)
+            # Add layers (Yield off by default, Profit on)
+            y_min, y_max = add_heatmap_overlay(df["Yield"].values,            "Yield (bu/ac)",       show_default=False)
+            p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values,"Net Profit ($/ac)",  show_default=True)
+
+            # --- Stacked legends (bottom-left) using the same colormap ---
+            # Build CSS gradient stops from the colormap
+            def rgba_to_hex(rgba_tuple):
+                r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+                return f"#{r:02x}{g:02x}{b:02x}"
+
+            stops = []
+            for i in range(0, 101, 10):
+                color = plt.cm.get_cmap("RdYlGn")(i/100.0)
+                stops.append(f"{rgba_to_hex(color)} {i}%")
+            gradient_css = ", ".join(stops)
+
+            legend_html = f"""
+            <div style="
+                position: fixed; bottom: 20px; left: 20px; z-index: 9999;
+                display: flex; flex-direction: column; gap: 8px;
+                font-family: sans-serif; font-size: 12px;">
+              
+              <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
+                <div style="font-weight: 600; margin-bottom: 6px;">Yield (bu/ac)</div>
+                <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
+                <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+                  <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+                </div>
+              </div>
+
+              <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
+                <div style="font-weight: 600; margin-bottom: 6px;">Net Profit ($/ac)</div>
+                <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
+                <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+                  <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
+                </div>
+              </div>
+            </div>
+            """
+
+            from branca.element import MacroElement
+            from jinja2 import Template
+            class _Legend(MacroElement):
+                def __init__(self, html):
+                    super().__init__()
+                    self._template = Template(html)
+            m.get_root().add_child(_Legend(legend_html))
 
 
 # =========================================================
