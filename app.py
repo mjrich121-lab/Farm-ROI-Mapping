@@ -162,18 +162,47 @@ def process_prescription(file, prescrip_type="fertilizer"):
             return pd.DataFrame()
         gdf["Longitude"] = gdf.geometry.centroid.x
         gdf["Latitude"] = gdf.geometry.centroid.y
+
+        # Auto-calc acres if not provided
+        if "acres" not in gdf.columns:
+            gdf["acres"] = gdf.geometry.area * 0.000247105  # m² → acres
+
         df = pd.DataFrame(gdf.drop(columns="geometry"))
 
-    # --- Normalize ---
+    # --- Normalize column names ---
     df.columns = [c.strip().lower() for c in df.columns]
 
-    # --- Must have product + acres ---
+    # --- Detect product column ---
+    if "product" not in df.columns:
+        for candidate in ["variety","hybrid","type","name","material"]:
+            if candidate in df.columns:
+                df.rename(columns={candidate: "product"}, inplace=True)
+                break
+        else:
+            df["product"] = prescrip_type.capitalize()
+
+    # --- Ensure acres column exists and allow manual override ---
+    if "acres" not in df.columns:
+        df["acres"] = 0.0  # placeholder if missing
+
+    # Manual override (per-upload average acres input)
+    avg_acres_override = st.number_input(
+        f"Override Acres Per Polygon for {prescrip_type.capitalize()} Map",
+        min_value=0.0, value=0.0, step=0.1
+    )
+    if avg_acres_override > 0:
+        df["acres"] = avg_acres_override
+
+    # --- Calculate costs ---
     if "product" in df.columns and "acres" in df.columns:
         if "costtotal" not in df.columns:
             if "price_per_unit" in df.columns and "units" in df.columns:
                 df["costtotal"] = df["price_per_unit"] * df["units"]
+            elif "rate" in df.columns and "price" in df.columns:
+                df["costtotal"] = df["rate"] * df["price"]
             else:
                 df["costtotal"] = 0
+
         grouped = df.groupby("product", as_index=False).agg(
             Acres=("acres","sum"),
             CostTotal=("costtotal","sum")
