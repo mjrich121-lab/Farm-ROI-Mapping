@@ -274,51 +274,47 @@ if uploaded_files:
             # Add layers (Yield off by default, Profit on)
             y_min, y_max = add_heatmap_overlay(df["Yield"].values,            "Yield (bu/ac)",       show_default=False)
             p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values,"Net Profit ($/ac)",  show_default=True)
+# --- Stacked legends (bottom-left) ---
+from branca.element import Element
 
-            # --- Stacked legends (bottom-left) using the same colormap ---
-            # Build CSS gradient stops from the colormap
-            def rgba_to_hex(rgba_tuple):
-                r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
-                return f"#{r:02x}{g:02x}{b:02x}"
+def rgba_to_hex(rgba_tuple):
+    r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
-            stops = []
-            for i in range(0, 101, 10):
-                color = plt.cm.get_cmap("RdYlGn")(i/100.0)
-                stops.append(f"{rgba_to_hex(color)} {i}%")
-            gradient_css = ", ".join(stops)
+stops = []
+for i in range(0, 101, 10):
+    color = plt.cm.get_cmap("RdYlGn")(i/100.0)
+    stops.append(f"{rgba_to_hex(color)} {i}%")
+gradient_css = ", ".join(stops)
 
-            legend_html = f"""
-            <div style="
-                position: fixed; bottom: 20px; left: 20px; z-index: 9999;
-                display: flex; flex-direction: column; gap: 8px;
-                font-family: sans-serif; font-size: 12px;">
-              
-              <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
-                <div style="font-weight: 600; margin-bottom: 6px;">Yield (bu/ac)</div>
-                <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
-                <div style="display:flex; justify-content: space-between; margin-top: 4px;">
-                  <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
-                </div>
-              </div>
+legend_html = f"""
+<div style="
+    position: fixed; bottom: 20px; left: 20px; z-index: 9999;
+    display: flex; flex-direction: column; gap: 8px;
+    font-family: sans-serif; font-size: 12px;">
+  
+  <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
+    <div style="font-weight: 600; margin-bottom: 6px;">Yield (bu/ac)</div>
+    <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
+    <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+      <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+    </div>
+  </div>
 
-              <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
-                <div style="font-weight: 600; margin-bottom: 6px;">Net Profit ($/ac)</div>
-                <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
-                <div style="display:flex; justify-content: space-between; margin-top: 4px;">
-                  <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
-                </div>
-              </div>
-            </div>
-            """
+  <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
+    <div style="font-weight: 600; margin-bottom: 6px;">Net Profit ($/ac)</div>
+    <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
+    <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+      <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
+    </div>
+  </div>
+</div>
+"""
 
-            from branca.element import MacroElement
-            from jinja2 import Template
-            class _Legend(MacroElement):
-                def __init__(self, html):
-                    super().__init__()
-                    self._template = Template(html)
-            m.get_root().add_child(_Legend(legend_html))
+legend_element = Element(legend_html)
+m.get_root().html.add_child(legend_element)
 
+         
 
 # =========================================================
 # 8. DISPLAY MAP
