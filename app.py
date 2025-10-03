@@ -91,7 +91,6 @@ st.markdown(
     "⚠️ Uploading just a single .shp file will not work._"
 )
 
-# --- callback to clean overrides ---
 def _sanitize_zone_overrides():
     df = st.session_state.get("zone_acres_editor")
     if df is None:
@@ -133,20 +132,19 @@ if zone_file is not None:
                 zone_col = "ZoneIndex"
 
             # --- Reproject to equal-area CRS for acre calculation ---
-            try:
-                if zones_gdf.crs is None:
-                    zones_gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84 if missing
-                if zones_gdf.crs.is_geographic:
-                    zones_gdf = zones_gdf.to_crs(epsg=5070)  # Albers Equal Area
-            except Exception as e:
-                st.warning(f"⚠️ Could not reproject zones: {e}")
+            gdf_area = zones_gdf.copy()
+            if gdf_area.crs is None:
+                gdf_area.set_crs(epsg=4326, inplace=True)  # assume WGS84 if missing
+            if gdf_area.crs.is_geographic:
+                gdf_area = gdf_area.to_crs(epsg=5070)  # Albers Equal Area
 
-            # --- Calculate acres ---
-            zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105
+            # --- Calculate acres on projected copy ---
+            zones_gdf["Calculated Acres"] = gdf_area.geometry.area * 0.000247105
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Reproject back to EPSG:4326 for mapping ---
-            zones_gdf = zones_gdf.to_crs(epsg=4326)
+            # --- Always keep zones_gdf in EPSG:4326 for mapping ---
+            if zones_gdf.crs != "EPSG:4326":
+                zones_gdf = zones_gdf.to_crs(epsg=4326)
 
             # --- Display editable override table ---
             zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
@@ -169,20 +167,8 @@ if zone_file is not None:
                 edited = st.session_state.get("zone_acres_editor", edited)
 
                 total_calc = float(edited["Calculated Acres"].sum())
-                total_override = float(edited["Override Acres"].sum())
-                st.markdown(
-                    f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**"
-                )
+                total_override = float(edited_
 
-            # --- Save overrides back to gdf ---
-            zones_gdf["Override Acres"] = edited["Override Acres"].values
-            st.session_state["zones_gdf"] = zones_gdf
-
-        else:
-            st.error("❌ Could not load zone map. Please check file format.")
-
-    except Exception as e:
-        st.error(f"❌ Error processing zone map: {e}")
 
 # =========================================================
 # 2. YIELD MAP UPLOAD
