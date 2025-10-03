@@ -193,12 +193,17 @@ if yield_file is not None:
     try:
         if yield_file.name.endswith(".csv"):
             df = pd.read_csv(yield_file)
-            df.columns = [c.strip().replace(" ", "_") for c in df.columns]
 
+            # --- Normalize column names ---
+            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+            # --- Debug: show available columns ---
             with st.expander("📂 Columns detected in uploaded CSV"):
                 st.write(list(df.columns))
 
-            dry_candidates = [c for c in df.columns if "yld" in c.lower() and "vol" in c.lower() and "dr" in c.lower()]
+            # --- Prefer dry yield volume ---
+            dry_candidates = [c for c in df.columns if "yld" in c and "vol" in c and "dr" in c]
+
             if dry_candidates:
                 chosen = dry_candidates[0]
                 df.rename(columns={chosen: "Yield"}, inplace=True)
@@ -206,43 +211,51 @@ if yield_file is not None:
             else:
                 st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dr').")
 
+            # ✅ Check for Lat/Lon
+            if not {"longitude", "latitude"}.issubset(df.columns):
+                st.error("❌ CSV missing Longitude/Latitude columns. Cannot plot yield map.")
+                df = None
+
         else:
+            # --- Shapefile / GeoJSON path ---
             gdf = load_vector_file(yield_file)
             if gdf is not None and not gdf.empty:
-                gdf.columns = [c.strip().replace(" ", "_").lower() for c in gdf.columns]
+                # --- Normalize column names ---
+                gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
 
-                with st.expander("📂 Columns detected in uploaded shapefile"):
+                # --- Debug: show available columns ---
+                with st.expander("📂 Columns detected in uploaded shapefile/geojson"):
                     st.write(list(gdf.columns))
 
+                # ✅ Always generate Latitude/Longitude from centroid
+                if gdf.crs is None:
+                    gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84
+                gdf = gdf.to_crs(epsg=4326)
                 gdf["Longitude"] = gdf.geometry.centroid.x
                 gdf["Latitude"] = gdf.geometry.centroid.y
 
+                # --- Prefer dry yield volume ---
                 dry_candidates = [c for c in gdf.columns if "yld" in c and "vol" in c and "dr" in c]
                 if dry_candidates:
                     chosen = dry_candidates[0]
                     gdf.rename(columns={chosen: "Yield"}, inplace=True)
                     df = pd.DataFrame(gdf.drop(columns="geometry"))
-                    st.success(f"✅ Yield shapefile loaded successfully (using dry yield column '{chosen}').")
+                    st.success(f"✅ Yield shapefile/geojson loaded successfully (using dry yield column '{chosen}').")
                 else:
                     st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dr').")
-
+                    df = None
             else:
                 st.error("❌ Could not read shapefile/geojson")
 
     except Exception as e:
         st.error(f"❌ Error processing yield file: {e}")
+        df = None
 
-# ✅ Guarantee Lon/Lat exist before saving
-if df is not None:
-    if "Longitude" not in df.columns or "Latitude" not in df.columns:
-        if "geometry" in df.columns:
-            df["Longitude"] = df.geometry.centroid.x
-            df["Latitude"] = df.geometry.centroid.y
-            df = df.drop(columns="geometry")
-        else:
-            st.error("❌ Yield data missing Longitude/Latitude and no geometry to compute them.")
+# ✅ Save to session state if valid
+if df is not None and not df.empty:
+    # Standardize column names again for downstream
+    df.columns = [c.strip().replace(" ", "_") for c in df.columns]
     st.session_state["yield_df"] = df
-
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
