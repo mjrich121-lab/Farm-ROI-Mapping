@@ -627,25 +627,27 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         except Exception:
             return "#3186cc"
 
-    # Map setup
+    # Map setup (satellite only, not toggleable)
     bounds = gdf.total_bounds
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
     m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Esri Satellite basemap
+    # Satellite basemap (always on)
     folium.TileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri World Imagery",
         name="Satellite",
-        overlay=False
+        overlay=False,
+        control=False  # ✅ prevents toggling off
     ).add_to(m)
 
-    # Labels overlay
+    # Labels overlay (toggleable)
     folium.TileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri Boundaries & Labels",
         name="Labels",
-        overlay=True
+        overlay=True,
+        control=True
     ).add_to(m)
 
     # Zones
@@ -665,37 +667,29 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.error(f"❌ Zone rendering failed: {e}")
 
-    # Legend as a toggleable overlay
-    legend_items = ""
-    for z, col in zone_colors.items():
-        legend_items += (
-            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
-            f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
-            f'<span style="color:#000;">Zone {z}</span>'
-            f'</div>'
-        )
-
+    # Fixed-position HTML legend (bottom-left)
+    legend_items = "".join(
+        f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
+        f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
+        f'<span style="color:#000;">Zone {z}</span></div>'
+        for z, col in zone_colors.items()
+    )
     legend_html = f"""
      <div style="
+         position: fixed;
+         bottom: 30px; left: 30px;
          background: rgba(255,255,255,0.95);
          border: 1px solid #888;
          border-radius: 6px;
-         padding: 8px 10px;
+         padding: 8px 12px;
          font-size: 14px;
-         ">
-       <div style="font-weight:600;margin-bottom:6px;color:#000;">Zone Colors</div>
+         z-index: 9999;
+     ">
+       <div style="font-weight:600;margin-bottom:4px;color:#000;">Zone Colors</div>
        {legend_items}
      </div>
     """
-
-    # Wrap legend as a "Custom" layer
-    legend = folium.map.Marker(
-        [center[0], center[1]],  # dummy anchor, not shown
-        icon=folium.DivIcon(html=legend_html)
-    )
-    legend_group = folium.FeatureGroup(name="Legend", show=True)
-    legend_group.add_child(legend)
-    m.add_child(legend_group)
+    m.get_root().html.add_child(folium.Element(legend_html))
 
     # Add layer control
     folium.LayerControl(collapsed=False).add_to(m)
@@ -708,6 +702,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 
     # Show map
     st_folium(m, width=1000, height=650)
+
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
