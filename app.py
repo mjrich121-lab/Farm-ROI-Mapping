@@ -337,7 +337,7 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, width=900, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY (stacked vertically, placeholders replaced by uploaded data)
+# 9. PROFIT SUMMARY (two-column layout with totals)
 # =========================================================
 st.header("Profit Summary")
 
@@ -352,41 +352,48 @@ if df is not None:
     })
     summary["Value"] = summary["Value"].map("${:,.2f}".format)
 
-    st.subheader("Profit Metrics")
-    st.table(summary)
-
-    # --- Fixed Input Costs (always shows all inputs) ---
+    # --- Fixed Input Costs (always all expenses) ---
     fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
+    fixed_df.loc["Total"] = ["Total Fixed Costs", sum(expenses.values())]
     fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
-
-    st.subheader("Fixed Input Costs")
-    st.table(fixed_df)
 
     # --- Variable Rate Input Costs ---
     variable_list = []
     if not fert_products.empty:
         fert_display = fert_products[["product", "CostPerAcre"]].copy()
-        fert_display["CostPerAcre"] = fert_display["CostPerAcre"].map("${:,.2f}".format)
         fert_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
         variable_list.append(fert_display)
     if not seed_products.empty:
         seed_display = seed_products[["product", "CostPerAcre"]].copy()
-        seed_display["CostPerAcre"] = seed_display["CostPerAcre"].map("${:,.2f}".format)
         seed_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
         variable_list.append(seed_display)
 
     if variable_list:
-        # Replace placeholders with actual products
         variable_df = pd.concat(variable_list, ignore_index=True)
+        total_var = variable_df["$/ac"].sum()
+        variable_df.loc["Total"] = ["Total Variable Costs", total_var]
     else:
-        # Default placeholder if no prescription data uploaded
         variable_df = pd.DataFrame({
-            "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3"],
-            "$/ac": ["$0.00", "$0.00", "$0.00", "$0.00"]
+            "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3", "Total Variable Costs"],
+            "$/ac": [0, 0, 0, 0, 0]
         })
 
-    st.subheader("Variable Rate Input Costs")
-    st.table(variable_df)
+    # Format variable table with $
+    variable_df["$/ac"] = variable_df["$/ac"].apply(lambda x: f"${x:,.2f}")
+
+    # --- Two-column layout ---
+    left_col, right_col = st.columns([1.2, 1])
+
+    with left_col:
+        st.subheader("Profit Metrics")
+        st.table(summary)
+
+        st.subheader("Variable Rate Input Costs")
+        st.table(variable_df)
+
+    with right_col:
+        st.subheader("Fixed Input Costs")
+        st.table(fixed_df)
 
 else:
     st.write("Upload a yield map (or zone file) to see profit results.")
