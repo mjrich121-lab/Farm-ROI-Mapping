@@ -148,41 +148,50 @@ if zone_file is not None:
 st.header("Yield Map Upload")
 yield_file = st.file_uploader(
     "Upload Yield Map",
-    type=["csv","geojson","json","zip"],
+    type=["csv", "geojson", "json", "zip"],
     key="yield"
 )
 st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
+    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
 df = None
 if yield_file is not None:
-    if yield_file.name.endswith(".csv"):
-        df = pd.read_csv(yield_file)
-        # check standard column names
-        if {"Latitude","Longitude","Yield"}.issubset(df.columns):
-            st.success("✅ Yield CSV loaded successfully")
-        else:
-            st.error("❌ CSV must include Latitude, Longitude, and Yield columns")
-    else:
-        gdf = load_vector_file(yield_file)
-        if gdf is not None and not gdf.empty:
-            gdf["Longitude"] = gdf.geometry.centroid.x
-            gdf["Latitude"] = gdf.geometry.centroid.y
-
-            # --- Flexible yield column detection (Dry Yield, Yield, etc.) ---
-            yield_candidates = [c for c in gdf.columns if "yield" in c.lower()]
+    try:
+        if yield_file.name.endswith(".csv"):
+            df = pd.read_csv(yield_file)
+            # Look for a yield-like column
+            yield_candidates = [c for c in df.columns if "yield" in c.lower()]
             if yield_candidates:
-                chosen_col = yield_candidates[0]
-                gdf.rename(columns={chosen_col: "Yield"}, inplace=True)
-                df = pd.DataFrame(gdf.drop(columns="geometry"))
-                st.success(f"✅ Yield shapefile/geojson loaded successfully (using column: {chosen_col})")
+                df.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
+                st.success(f"Yield CSV loaded successfully (using column '{yield_candidates[0]}').")
             else:
-                st.error("❌ No yield column found in uploaded file")
+                st.error("CSV must include a yield column (e.g., 'Yield', 'Dry_Yield').")
         else:
-            st.error("❌ Could not read uploaded file")
-            import shutil
-            shutil.rmtree("temp_yield", ignore_errors=True)
+            gdf = load_vector_file(yield_file)
+            if gdf is not None and not gdf.empty:
+                gdf["Longitude"] = gdf.geometry.centroid.x
+                gdf["Latitude"] = gdf.geometry.centroid.y
+
+                # Robust yield detection
+                yield_candidates = [c for c in gdf.columns if "yield" in c.lower() or "yld" in c.lower()]
+                if yield_candidates:
+                    gdf.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
+                    df = pd.DataFrame(gdf.drop(columns="geometry"))
+                    st.success(f"Yield shapefile loaded successfully (using column '{yield_candidates[0]}').")
+                else:
+                    st.error("No yield column found in uploaded file. "
+                             "Please ensure a field like 'Yield' or 'Dry_Yield' exists.")
+            else:
+                st.error("❌ Could not read shapefile/geojson")
+    except Exception as e:
+        st.error(f"❌ Error processing yield file: {e}")
+
+# Save to session state
+if df is not None:
+    st.session_state["yield_df"] = df
+
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
@@ -553,43 +562,46 @@ m = make_base_map()
 # =========================================================
 # 6. ZONES
 # =========================================================
+st.header("Zone Acre Overrides")
+
 if zones_gdf is not None:
+    # Save into session state
     st.session_state["zones_gdf"] = zones_gdf
 
 # Draw from session state if available
 if st.session_state["zones_gdf"] is not None:
-    zone_layer = folium.FeatureGroup(name="Zones", show=True)
-    static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
-    zone_col = None
-    for candidate in ["Zone","zone","ZONE","Name","name"]:
-        if candidate in st.session_state["zones_gdf"].columns:
-            zone_col = candidate
-            break
-    if zone_col is None:
-        st.session_state["zones_gdf"]["ZoneIndex"] = range(1, len(st.session_state["zones_gdf"])+1)
-        zone_col = "ZoneIndex"
+    gdf = st.session_state["zones_gdf"]
 
-    for _, row in st.session_state["zones_gdf"].iterrows():
-        try:
-            zone_value = int(row[zone_col])
-        except:
-            zone_value = row[zone_col]
-        zone_color = static_zone_colors.get(zone_value, "#0000FF")
-        folium.GeoJson(
-            row["geometry"],
-            name=f"Zone {zone_value}",
-            style_function=lambda x, c=zone_color: {"fillOpacity":0.3,"color":c,"weight":3},
-            tooltip=f"Zone: {zone_value}"
-        ).add_to(zone_layer)
-
-    zone_layer.add_to(m)
-
-    # --- Auto zoom to zone extents ---
+    # ✅ Reproject to equal-area projection for accurate acre calculation
     try:
-        minx, miny, maxx, maxy = st.session_state["zones_gdf"].total_bounds
-        m.fit_bounds([[miny, minx], [maxy, maxx]])
+        if gdf.crs is not None and gdf.crs.is_geographic:
+            gdf = gdf.to_crs(epsg=5070)  # Albers Equal Area (USA)
     except Exception as e:
-        st.warning(f"⚠️ Could not auto-zoom zones: {e}")
+        st.warning(f"Could not reproject zones: {e}")
+
+    # Calculate acres
+    gdf["Calculated Acres"] = gdf.geometry.area * 0.000247105  # m² → acres
+    gdf["Override Acres"] = gdf["Calculated Acres"]
+
+    # Compact display table
+    zone_acres_df = gdf[["Zone", "Calculated Acres", "Override Acres"]] if "Zone" in gdf.columns else pd.DataFrame({
+        "Zone": range(1, len(gdf) + 1),
+        "Calculated Acres": gdf["Calculated Acres"],
+        "Override Acres": gdf["Calculated Acres"]
+    })
+
+    st.dataframe(
+        zone_acres_df.style.format({"Calculated Acres": "{:,.2f}", "Override Acres": "{:,.2f}"}),
+        use_container_width=False,  # compact table
+        height=220
+    )
+
+    # ✅ Auto-zoom map to zone bounds
+    try:
+        bounds = gdf.to_crs(epsg=4326).total_bounds  # back to lat/lon
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception as e:
+        st.warning(f"Could not auto-zoom to zones: {e}")
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
