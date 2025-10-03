@@ -147,31 +147,60 @@ if zone_file is not None:
 # =========================================================
 st.header("Yield Upload")
 
-uploaded_file = st.file_uploader("Upload your yield data (CSV)", type=["csv"])
+uploaded_file = st.file_uploader(
+    "Upload your yield data (CSV, GeoJSON, JSON, or ZIP)",
+    type=["csv", "geojson", "json", "zip"]
+)
 
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
+        df = None
 
-        # Normalize column names (strip whitespace, lowercase for matching)
-        df.columns = df.columns.str.strip()
+        # --- Handle ZIP (look for first CSV inside) ---
+        if uploaded_file.name.endswith(".zip"):
+            import zipfile
+            import io
+            with zipfile.ZipFile(uploaded_file) as z:
+                csv_files = [f for f in z.namelist() if f.endswith(".csv")]
+                if len(csv_files) == 0:
+                    st.error("❌ No CSV found inside the ZIP file.")
+                else:
+                    with z.open(csv_files[0]) as f:
+                        df = pd.read_csv(f)
 
-        # Look for a column named "Yield" (case-insensitive) or variations
-        yield_col = None
-        for col in df.columns:
-            if col.lower() in ["yield", "yld", "yields", "grain_yield", "harvest_yield"]:
-                yield_col = col
-                break
+        # --- Handle CSV ---
+        elif uploaded_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
 
-        if yield_col:
-            df.rename(columns={yield_col: "Yield"}, inplace=True)
-            st.success("✅ Yield column detected and renamed to 'Yield'")
-            st.session_state["yield_data"] = df
-        else:
-            st.error("❌ No 'Yield' column found. Please check your CSV.")
+        # --- Handle JSON ---
+        elif uploaded_file.name.endswith(".json"):
+            df = pd.read_json(uploaded_file)
+
+        # --- Handle GeoJSON ---
+        elif uploaded_file.name.endswith(".geojson"):
+            import geopandas as gpd
+            gdf = gpd.read_file(uploaded_file)
+            df = pd.DataFrame(gdf)
+
+        # --- Normalize columns & detect yield ---
+        if df is not None:
+            df.columns = df.columns.str.strip()
+            yield_col = None
+            for col in df.columns:
+                if col.lower() in ["yield", "yld", "yields", "grain_yield", "harvest_yield"]:
+                    yield_col = col
+                    break
+
+            if yield_col:
+                df.rename(columns={yield_col: "Yield"}, inplace=True)
+                st.success("✅ Yield column detected and renamed to 'Yield'")
+                st.session_state["yield_data"] = df
+            else:
+                st.error("❌ No 'Yield' column found. Please check your file.")
 
     except Exception as e:
         st.error(f"Error reading file: {e}")
+
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
