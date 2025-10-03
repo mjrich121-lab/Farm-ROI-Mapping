@@ -105,10 +105,10 @@ if zone_file is not None:
                 zones_gdf = gpd.read_file(shp_path)
                 break
         os.remove("temp.zip")
-        import shutil
         shutil.rmtree("temp_shp", ignore_errors=True)
+
     if zones_gdf is not None:
-        st.success("Zone map loaded successfully")
+        st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} zones.")
 
         # --- Add Zone Index if not present ---
         zone_col = None
@@ -125,7 +125,9 @@ if zone_file is not None:
 
         # --- Manual override interface ---
         st.subheader("Zone Acre Overrides")
-        editable = zones_gdf[[zone_col, "Zone_Acres"]].rename(columns={zone_col: "Zone", "Zone_Acres": "Calculated Acres"})
+        editable = zones_gdf[[zone_col, "Zone_Acres"]].rename(
+            columns={zone_col: "Zone", "Zone_Acres": "Calculated Acres"}
+        )
         editable["Override Acres"] = editable["Calculated Acres"]
 
         # Let user adjust overrides
@@ -166,7 +168,7 @@ if yield_file is not None:
             yield_candidates = [c for c in df.columns if "yield" in c or "yld" in c]
             if yield_candidates:
                 df.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
-                st.success(f"✅ Yield CSV loaded successfully (using column '{yield_candidates[0]}').")
+                st.success(f"✅ Yield CSV loaded successfully with {len(df)} records (using column '{yield_candidates[0]}').")
             else:
                 st.error("❌ CSV must include a yield column (e.g., 'Yield', 'Dry_Yield').")
         else:
@@ -183,10 +185,9 @@ if yield_file is not None:
                 if yield_candidates:
                     gdf.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
                     df = pd.DataFrame(gdf.drop(columns="geometry"))
-                    st.success(f"✅ Yield shapefile loaded successfully (using column '{yield_candidates[0]}').")
+                    st.success(f"✅ Yield shapefile loaded successfully with {len(df)} records (using column '{yield_candidates[0]}').")
                 else:
-                    st.error("❌ No yield column found in uploaded file. "
-                             "Please ensure a field like 'Yield' or 'Dry_Yield' exists.")
+                    st.error("❌ No yield column found in uploaded file. Please ensure a field like 'Yield' or 'Dry_Yield' exists.")
             else:
                 st.error("❌ Could not read shapefile/geojson")
     except Exception as e:
@@ -195,8 +196,6 @@ if yield_file is not None:
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
-st.success(f"✅ Zone Acre Overrides file loaded successfully with {len(df)} records.")
-
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
