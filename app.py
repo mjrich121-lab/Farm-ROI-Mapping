@@ -519,18 +519,20 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # --- Inject JS for click-to-enable scroll ---
-    scroll_template = Template("""
+    # --- Simple scroll lock injection ---
+    scroll_js = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
-        map.scrollWheelZoom.disable();
-        map.once('click', function() {
-            map.scrollWheelZoom.enable();
-        });
+        if (map.scrollWheelZoom) {
+            map.scrollWheelZoom.disable();
+            map.once('click', function() {
+                map.scrollWheelZoom.enable();
+            });
+        }
         {% endmacro %}
     """)
     macro = MacroElement()
-    macro._template = scroll_template
+    macro._template = scroll_js
     m.get_root().add_child(macro)
 
     return m
