@@ -611,9 +611,8 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 
-
 # =========================================================
-# 6. MAP DISPLAY (Fixed Esri imagery, no toggle)
+# 6. MAP DISPLAY (Fixed Esri imagery, keep overlay toggle)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
@@ -623,14 +622,19 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
-    # ✅ Fixed Esri imagery, no toggle
+    # ✅ Fixed Esri imagery, not toggleable
     m = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=15,
+        tiles=None
+    )
+    folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri WorldImagery",
-        control_scale=False
-    )
+        name="Esri Imagery",
+        overlay=False,
+        control=False   # 🚫 not in LayerControl
+    ).add_to(m)
 
     # Zone colors
     zone_colors = {
@@ -641,7 +645,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         5: "#006400"    # Dark Green
     }
 
-    # Add zones layer
+    # Add zones as overlay (toggleable)
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -674,11 +678,15 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         legend_html += f"<div style='display:flex; align-items:center; margin:2px 0;'> \
                         <div style='background:{color}; width:14px; height:14px; margin-right:6px;'></div> Zone {z}</div>"
     legend_html += "</div>"
-
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Removed LayerControl – no Esri toggle anymore
+    # ✅ Keep LayerControl for overlays (Zones, Yield, Profit maps, etc.)
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+
+    # Display map
     st_folium(m, width=1000, height=600)
+
+
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
