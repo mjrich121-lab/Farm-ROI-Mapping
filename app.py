@@ -148,7 +148,7 @@ if zone_file is not None:
 st.header("Yield Map Upload")
 yield_file = st.file_uploader(
     "Upload Yield Map",
-    type=["csv", "geojson", "json", "zip"],
+    type=["csv","geojson","json","zip"],
     key="yield"
 )
 st.markdown(
@@ -160,42 +160,43 @@ if yield_file is not None:
     if yield_file.name.endswith(".csv"):
         df = pd.read_csv(yield_file)
         if {"Latitude","Longitude","Yield"}.issubset(df.columns):
-            st.success("✅ Yield CSV loaded successfully")
+            st.success("Yield CSV loaded successfully")
         else:
-            st.error("❌ CSV must include Latitude, Longitude, and Yield columns")
-
+            st.error("CSV must include Latitude, Longitude, and Yield columns")
     elif yield_file.name.endswith(".zip"):
-        try:
-            gdf = gpd.read_file(f"zip://{yield_file.name}")
+        # Save zip temporarily
+        with open("temp_yield.zip", "wb") as f:
+            f.write(yield_file.getbuffer())
+
+        # Extract and read shapefile
+        import zipfile, os, shutil
+        with zipfile.ZipFile("temp_yield.zip", "r") as zip_ref:
+            zip_ref.extractall("temp_yield")
+
+        shp_file = [f for f in os.listdir("temp_yield") if f.endswith(".shp")]
+        if shp_file:
+            gdf = gpd.read_file(os.path.join("temp_yield", shp_file[0]))
             gdf["Longitude"] = gdf.geometry.centroid.x
             gdf["Latitude"] = gdf.geometry.centroid.y
 
-            # Show user what columns exist
-            st.write("📋 Columns detected in Yield Shapefile:", list(gdf.columns))
-
-            # Try to detect a yield column
+            # Prefer "DryYield" if present, else look for yield
             yield_col = None
-            for c in gdf.columns:
-                if "yield" in c.lower():   # matches "Yield", "Dry_Yield", etc
-                    yield_col = c
-                    break
+            for candidate in ["dry_yield", "DryYield", "Yld_Vol_Dry", "yield"]:
+                for col in gdf.columns:
+                    if candidate.lower() in col.lower():
+                        yield_col = col
+                        break
+                if yield_col: break
 
             if yield_col:
                 gdf.rename(columns={yield_col: "Yield"}, inplace=True)
                 df = pd.DataFrame(gdf.drop(columns="geometry"))
-                st.success(f"✅ Yield shapefile loaded using column: **{yield_col}**")
+                st.success(f"Yield shapefile loaded successfully (using '{yield_col}')")
             else:
-                st.error("❌ No yield column found in uploaded shapefile. Please ensure one column contains 'yield' in its name.")
+                st.error("No yield column found in uploaded file")
 
-        except Exception as e:
-            st.error(f"❌ Error reading shapefile: {e}")
-
-    else:
-        st.error("❌ Unsupported file type for yield map")
-
-# Save into session state if successfully loaded
-if df is not None:
-    st.session_state["yield_df"] = df
+        os.remove("temp_yield.zip")
+        shutil.rmtree("temp_yield", ignore_errors=True)
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
