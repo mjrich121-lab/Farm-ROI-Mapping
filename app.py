@@ -198,8 +198,12 @@ if yield_file is not None:
             # --- Normalize column names ---
             df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-            # --- Only prefer dry yield columns that are already in bushels/acre ---
-            dry_candidates = [c for c in df.columns if ("dry" in c and "vol" in c) or c == "dry_yield"]
+            # --- Debug: show available columns ---
+            with st.expander("📂 Columns detected in uploaded file"):
+                st.write(list(df.columns))
+
+            # --- Prefer dry yield ---
+            dry_candidates = [c for c in df.columns if "dry" in c and ("yield" in c or "yld" in c)]
 
             if dry_candidates:
                 chosen = dry_candidates[0]
@@ -211,14 +215,16 @@ if yield_file is not None:
         else:
             gdf = load_vector_file(yield_file)
             if gdf is not None and not gdf.empty:
-                # --- Normalize column names ---
                 gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
+
+                # --- Debug: show available columns ---
+                with st.expander("📂 Columns detected in uploaded shapefile"):
+                    st.write(list(gdf.columns))
 
                 gdf["Longitude"] = gdf.geometry.centroid.x
                 gdf["Latitude"] = gdf.geometry.centroid.y
 
-                # --- Only prefer dry yield columns that are already in bushels/acre ---
-                dry_candidates = [c for c in gdf.columns if ("dry" in c and "vol" in c) or c == "dry_yield"]
+                dry_candidates = [c for c in gdf.columns if "dry" in c and ("yield" in c or "yld" in c)]
 
                 if dry_candidates:
                     chosen = dry_candidates[0]
@@ -237,7 +243,6 @@ if yield_file is not None:
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
-
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
