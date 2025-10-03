@@ -205,7 +205,6 @@ if zones_gdf is not None:
     # Auto-zoom if no yield yet
     if not uploaded_files:
         m = auto_zoom_map(m, gdf=zones_gdf)
-
 # =========================================================
 # 7. YIELD + PROFIT
 # =========================================================
@@ -231,8 +230,8 @@ if uploaded_files:
             west, east = df["Longitude"].min(), df["Longitude"].max()
             m.fit_bounds([[south, west], [north, east]])
 
-            # --- Helper function to overlay heatmap ---
-            def add_heatmap_overlay(values, name, cmap_name="RdYlGn"):
+            # --- Helper to add heatmap overlay ---
+            def add_heatmap_overlay(values, name, cmap_name="RdYlGn", show_default=False):
                 n = 200
                 lon_lin = np.linspace(west, east, n)
                 lat_lin = np.linspace(south, north, n)
@@ -246,9 +245,10 @@ if uploaded_files:
                 vmin, vmax = np.min(grid_vals), np.max(grid_vals)
                 if vmin == vmax:
                     vmax = vmin + 1
+
                 cmap = plt.cm.get_cmap(cmap_name)
                 rgba_img = cmap((grid_vals - vmin) / (vmax - vmin))
-                rgba_img = np.flipud(rgba_img)  # orient correctly for folium
+                rgba_img = np.flipud(rgba_img)  # orient correctly
                 rgba_img = (rgba_img * 255).astype(np.uint8)
 
                 folium.raster_layers.ImageOverlay(
@@ -256,12 +256,41 @@ if uploaded_files:
                     bounds=[[south, west], [north, east]],
                     opacity=0.6,
                     name=name,
-                    show=True if name == "Net Profit ($/ac)" else False  # profit shown by default
+                    show=show_default
                 ).add_to(m)
 
+                # --- Add legend ---
+                legend_html = f"""
+                <div style="
+                    position: fixed;
+                    bottom: 20px;
+                    left: 20px;
+                    width: 150px;
+                    height: 60px;
+                    background-color: white;
+                    border:2px solid grey;
+                    z-index:9999;
+                    font-size:12px;
+                    padding: 5px;
+                    margin-bottom:5px;
+                ">
+                <b>{name}</b><br>
+                <i style="background:{cmap(0)};width:20px;height:10px;display:inline-block;"></i>
+                {round(vmin,1)} &nbsp;–&nbsp; {round(vmax,1)}
+                </div>
+                """
+                from branca.element import MacroElement
+                from jinja2 import Template
+                class Legend(MacroElement):
+                    def __init__(self, html):
+                        super().__init__()
+                        self._template = Template(html)
+                m.get_root().add_child(Legend(legend_html))
+
             # --- Add Yield and Profit overlays ---
-            add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", cmap_name="YlGnBu")
-            add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", cmap_name="RdYlGn")
+            add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", cmap_name="RdYlGn", show_default=False)
+            add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", cmap_name="RdYlGn", show_default=True)
+
 
 # =========================================================
 # 8. DISPLAY MAP
