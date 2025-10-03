@@ -632,7 +632,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone","Calculated Acres","Override Acres"])
     ).add_to(m)
 
-     # ✅ Zone legend in bottom-left
+       # ✅ Zone legend in bottom-left
     unique_zones = sorted(zones_gdf["Zone"].unique())
     zone_legend_html = """
     <div style="
