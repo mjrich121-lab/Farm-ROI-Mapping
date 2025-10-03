@@ -136,13 +136,28 @@ if zone_file is not None:
             zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Display compact override table ---
+            # --- Build display table ---
             zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
-            st.dataframe(
-                zone_acres_df.style.format({"Calculated Acres": "{:,.2f}", "Override Acres": "{:,.2f}"}),
-                use_container_width=True,
-                height=220
-            )
+
+            # Add total row
+            total_row = pd.DataFrame({
+                "Zone": ["Total"],
+                "Calculated Acres": [zone_acres_df["Calculated Acres"].sum()],
+                "Override Acres": [zone_acres_df["Override Acres"].sum()]
+            })
+            zone_acres_df = pd.concat([zone_acres_df, total_row], ignore_index=True)
+
+            # --- Centered compact table ---
+            col1, col2, col3 = st.columns([1,2,1])  # center column wider
+            with col2:
+                st.dataframe(
+                    zone_acres_df.style.format({
+                        "Calculated Acres": "{:,.2f}",
+                        "Override Acres": "{:,.2f}"
+                    }),
+                    use_container_width=False,
+                    height=200
+                )
 
             # --- Save cleaned zones to session state ---
             st.session_state["zones_gdf"] = zones_gdf
