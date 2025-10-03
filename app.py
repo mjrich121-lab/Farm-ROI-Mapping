@@ -498,24 +498,16 @@ st.dataframe(
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
 def make_base_map():
-    m = folium.Map(
+    return folium.Map(
         location=[39.5, -98.35],  # Center of continental US
-        zoom_start=5,             # Tighter zoom on US
-        tiles=None,
+        zoom_start=5,             # Nice US zoom
+        tiles="CartoDB positron", # simple clean basemap
         prefer_canvas=True
     )
 
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Satellite", overlay=False, control=False
-    ).add_to(m)
+# Always start with a fresh map each run
+m = make_base_map()
 
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Labels", overlay=True, control=False
-    ).add_to(m)
-
-    return m
 
 # =========================================================
 # 6. ZONES
