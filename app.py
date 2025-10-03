@@ -630,23 +630,23 @@ with col_right:
     total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    # --- Style ---
-    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"})
-    styled_fixed = styled_fixed.apply(
-        lambda row: ["font-weight: bold;" if row["Expense"] == "Total Fixed Costs" else "" for _ in row],
-        axis=1
+    # --- Style (bold totals only) ---
+    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+        lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
+        subset=["Expense"]
+    ).apply(
+        lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
+        subset=["$/ac"]
     )
 
-   # --- Force height expansion (no scrolling, slight buffer) ---
-    row_height = 35        # keep a comfortable row height
-    header_buffer = 60     # allow for header + bottom padding
-    scroll_buffer = 20     # extra space to prevent clipping
-
-    table_height = len(fixed_df) * row_height + header_buffer + scroll_buffer
+    # --- Height: rows * row_height + header ---
+    row_height = 32        # consistent row height
+    header_buffer = 40     # just enough for header
+    table_height = len(fixed_df) * row_height + header_buffer
 
     st.dataframe(
-    styled_fixed,
-    use_container_width=True,
-    hide_index=True,
-    height=table_height  # always a touch taller than needed
+        styled_fixed,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height
     )
