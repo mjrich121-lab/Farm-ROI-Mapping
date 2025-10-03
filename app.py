@@ -94,7 +94,7 @@ st.markdown(
 zones_gdf = None
 if zone_file is not None:
     try:
-        # --- Load file into GeoDataFrame ---
+        # --- Load into GeoDataFrame ---
         if zone_file.name.endswith((".geojson", ".json")):
             zones_gdf = gpd.read_file(zone_file)
         elif zone_file.name.endswith(".zip"):
@@ -104,8 +104,7 @@ if zone_file is not None:
                 zip_ref.extractall("temp_shp")
             for f_name in os.listdir("temp_shp"):
                 if f_name.endswith(".shp"):
-                    shp_path = os.path.join("temp_shp", f_name)
-                    zones_gdf = gpd.read_file(shp_path)
+                    zones_gdf = gpd.read_file(os.path.join("temp_shp", f_name))
                     break
             os.remove("temp.zip")
             shutil.rmtree("temp_shp", ignore_errors=True)
@@ -113,7 +112,7 @@ if zone_file is not None:
         if zones_gdf is not None and not zones_gdf.empty:
             st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} zones.")
 
-            # --- Identify zone column or assign one ---
+            # --- Find existing zone name column OR make one ---
             zone_col = None
             for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
                 if candidate in zones_gdf.columns:
@@ -123,29 +122,30 @@ if zone_file is not None:
                 zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
                 zone_col = "ZoneIndex"
 
-            # --- Calculate acres (in an equal-area CRS) ---
+            # Ensure we **actually have a 'Zone' column** in the GDF for mapping
+            zones_gdf["Zone"] = zones_gdf[zone_col]
+
+            # --- Acre calculation in equal-area CRS ---
             gdf_area = zones_gdf.copy()
             if gdf_area.crs is None:
                 gdf_area.set_crs(epsg=4326, inplace=True)  # assume WGS84
             if gdf_area.crs.is_geographic:
-                gdf_area = gdf_area.to_crs(epsg=5070)  # Albers Equal Area (USA)
+                gdf_area = gdf_area.to_crs(epsg=5070)       # Albers Equal Area (USA)
 
-            zones_gdf["Calculated Acres"] = gdf_area.geometry.area * 0.000247105  # m² → acres
-            zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
+            zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
+            zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"].astype(float)
 
-            # --- Keep zones for mapping in EPSG:4326 ---
+            # --- Keep geometry in EPSG:4326 for Folium ---
             if zones_gdf.crs is None or zones_gdf.crs.to_string() != "EPSG:4326":
                 zones_gdf = zones_gdf.to_crs(epsg=4326)
 
-            # --- Editable overrides table (centered/compact) ---
-            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(
-                columns={zone_col: "Zone"}
-            )
+            # --- Editable overrides (centered) ---
+            display_df = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
 
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
+            c1, c2, c3 = st.columns([1,2,1])
+            with c2:
                 edited = st.data_editor(
-                    zone_acres_df,
+                    display_df,
                     num_rows="fixed",
                     use_container_width=True,
                     hide_index=True,
@@ -157,17 +157,19 @@ if zone_file is not None:
                     key="zone_acres_editor",
                 )
 
-                # Default blanks/None back to calculated value (and keep numeric)
+                # sanitize: blanks/None -> Calculated
                 edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce")
                 edited["Override Acres"] = edited["Override Acres"].fillna(edited["Calculated Acres"])
 
-                # Totals (stable — 'Calculated Acres' comes from zones_gdf)
-                total_calc = float(zones_gdf["Calculated Acres"].sum())
+                # totals
+                total_calc     = float(zones_gdf["Calculated Acres"].sum())
                 total_override = float(edited["Override Acres"].sum())
                 st.markdown(f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**")
 
-            # --- Save overrides back to session (for mapping and downstream use) ---
-            zones_gdf["Override Acres"] = edited["Override Acres"].values
+            # push overrides back into the GDF (keep columns for tooltip)
+            zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
+
+            # save for downstream
             st.session_state["zones_gdf"] = zones_gdf
 
         else:
@@ -175,6 +177,7 @@ if zone_file is not None:
 
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
+
 
 # =========================================================
 # 2. YIELD MAP UPLOAD
@@ -600,7 +603,7 @@ m = make_base_map()
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # Ensure EPSG:4326 for Folium
+    # Guarantee EPSG:4326 for Folium
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -609,7 +612,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Fixed color scheme (1→red ... 5→dark green)
+    # Fixed colors 1→5
     zone_colors = {
         1: "#e41a1c",  # red
         2: "#ff7f00",  # orange
@@ -617,8 +620,6 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         4: "#4daf4a",  # light green
         5: "#006400",  # dark green
     }
-
-    # Safe color lookup (falls back if Zone isn't an int)
     def _color_for_feature(feat):
         z = feat["properties"].get("Zone")
         try:
@@ -626,13 +627,14 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         except Exception:
             return "#3186cc"
 
-    # Map centered & auto-zoomed to bounds
+    # Bounds & map
     bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
-    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+    center = [(bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0]
     m = folium.Map(location=center, zoom_start=14)
 
+    # GeoJson layer — tooltips require these fields to EXIST in gdf
     folium.GeoJson(
-        gdf,
+        gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
         name="Zones",
         style_function=lambda feature: {
             "fillColor": _color_for_feature(feature),
@@ -647,6 +649,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         ),
     ).add_to(m)
 
+    # Auto-zoom
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
     # Legend
