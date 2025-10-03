@@ -505,7 +505,6 @@ def make_base_map():
         location=[39.5, -98.35],  # Center of continental US
         zoom_start=5,             # Tighter zoom on US
         tiles=None,
-        scrollWheelZoom=False,    # Start with scroll disabled
         prefer_canvas=True
     )
 
@@ -520,7 +519,7 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # 🔹 Add JS for click-to-enable scroll
+    # --- Inject JS for click-to-enable scroll ---
     scroll_template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
@@ -530,10 +529,9 @@ def make_base_map():
         });
         {% endmacro %}
     """)
-
-    scroll_macro = MacroElement()
-    scroll_macro._template = scroll_template
-    m.get_root().add_child(scroll_macro)
+    macro = MacroElement()
+    macro._template = scroll_template
+    m.get_root().add_child(macro)
 
     return m
 
@@ -706,6 +704,8 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
+
+st.markdown("_Click the map once to enable zoom with your mouse wheel._")
 st_folium(m, use_container_width=True, height=600)
 
 # --- Initialize session state defaults (safety net) ---
