@@ -504,30 +504,34 @@ def make_base_map():
         location=[39.5, -98.35],  # Center of continental US
         zoom_start=5,             # Tighter zoom on US
         tiles=None,
-        scrollWheelZoom=False,    # 🔹 start with scroll zoom OFF
+        scrollWheelZoom=False,    # Start with scroll disabled
         prefer_canvas=True
     )
+
+    # Base layers
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
     ).add_to(m)
+
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # 🔹 Add JS: enable scroll zoom after first click
+    # 🔹 Add JS for click-to-enable scroll
     template = Template("""
-        <script>
+        {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
         map.once('click', function() {
             map.scrollWheelZoom.enable();
         });
-        </script>
+        {% endmacro %}
     """)
-    m.get_root().add_child(template)
+    m.get_root().script.add_child(template)
 
     return m
+
 
 # =========================================================
 # 6. ZONES
