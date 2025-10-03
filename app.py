@@ -733,7 +733,6 @@ col_left, col_right = st.columns([2, 2])
 # --------------------------
 with col_left:
     st.subheader("Breakeven Budget Tool (Corn vs Beans)")
-
     st.markdown("_These values are linked to the 'Compare Crop Profitability' section above the map._")
 
     # --- Pull values from session_state (set in 4D or fallback defaults) ---
@@ -758,31 +757,31 @@ with col_left:
         "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
     })
 
-    # --- Editable chart to allow two-way sync ---
- st.dataframe(
-    breakeven_df.style.applymap(
-        highlight_budget,
-        subset=["Breakeven Budget ($/ac)"]
-    ).format({
-        "Yield Goal (bu/ac)": "{:,.1f}",
-        "Sell Price ($/bu)": "${:,.2f}",
-        "Revenue ($/ac)": "${:,.2f}",
-        "Fixed Inputs ($/ac)": "${:,.2f}",
-        "Breakeven Budget ($/ac)": "${:,.2f}"
-    }),
-    use_container_width=True,
-    hide_index=True
-)
+    # --- Styling for color highlight ---
+    def highlight_budget(val):
+        if isinstance(val, (int, float)):
+            if val > 0:
+                return "color: green; font-weight: bold;"
+            elif val < 0:
+                return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
 
+    st.dataframe(
+        breakeven_df.style.applymap(
+            highlight_budget,
+            subset=["Breakeven Budget ($/ac)"]
+        ).format({
+            "Yield Goal (bu/ac)": "{:,.1f}",
+            "Sell Price ($/bu)": "${:,.2f}",
+            "Revenue ($/ac)": "${:,.2f}",
+            "Fixed Inputs ($/ac)": "${:,.2f}",
+            "Breakeven Budget ($/ac)": "${:,.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
 
-    # --- Push edits back into session_state so 4D updates too ---
-    if not edited.empty:
-        st.session_state["corn_yield"] = float(edited.loc[0, "Yield Goal (bu/ac)"])
-        st.session_state["corn_price"] = float(edited.loc[0, "Sell Price ($/bu)"])
-        st.session_state["bean_yield"] = float(edited.loc[1, "Yield Goal (bu/ac)"])
-        st.session_state["bean_price"] = float(edited.loc[1, "Sell Price ($/bu)"])
-
-    # --- Profit Metrics Comparison (kept as-is) ---
+    # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
 
     # Variable Rate Profit
@@ -860,6 +859,7 @@ with col_left:
             (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
         </div>
         """, unsafe_allow_html=True)
+
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
