@@ -621,7 +621,6 @@ with col_left:
         use_container_width=True,
         hide_index=True
     )
-
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
 # --------------------------
@@ -631,8 +630,11 @@ with col_right:
     total_fixed = pd.DataFrame([{"Expense":"Total Fixed Costs", "$/ac":fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
+    # Expand table height so no scrolling is needed
     st.dataframe(
         fixed_df.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        height=(len(fixed_df) * 28 + 40)   # 👈 expands dynamically to fit rows
     )
+
