@@ -344,6 +344,49 @@ expenses = {
     "Cash Rent": cash_rent
 }
 base_expenses_per_acre = sum(expenses.values())
+# =========================================================
+# 4B. MANUAL FIXED-RATE PRESCRIPTIONS
+# =========================================================
+st.header("Manual Fixed-Rate Prescriptions")
+
+# --- Fixed-Rate Seed ---
+st.subheader("Fixed-Rate Seed")
+fixed_seed_data = pd.DataFrame({
+    "Variety": [""],
+    "Rate (units/ac)": [0.0],
+    "Cost per Unit ($)": [0.0]
+})
+fixed_seed_entries = st.data_editor(
+    fixed_seed_data,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="fixed_seed"
+)
+fixed_seed_entries["Cost/acre"] = (
+    fixed_seed_entries["Rate (units/ac)"] * fixed_seed_entries["Cost per Unit ($)"]
+)
+
+# --- Fixed-Rate Fertilizer ---
+st.subheader("Fixed-Rate Fertilizer")
+fixed_fert_data = pd.DataFrame({
+    "Fertilizer Type": [""],
+    "Rate (lbs/ac)": [0.0],
+    "Cost per lb ($)": [0.0]
+})
+fixed_fert_entries = st.data_editor(
+    fixed_fert_data,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="fixed_fert"
+)
+fixed_fert_entries["Cost/acre"] = (
+    fixed_fert_entries["Rate (lbs/ac)"] * fixed_fert_entries["Cost per lb ($)"]
+)
+
+# --- Store in session state for use in Section 7 & 9 ---
+st.session_state["fixed_seed"] = fixed_seed_entries
+st.session_state["fixed_fert"] = fixed_fert_entries
+
 
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
@@ -403,19 +446,23 @@ if st.session_state["zones_gdf"] is not None:
     zone_layer.add_to(m)
 
 # =========================================================
-# 7. YIELD + PROFIT
+# 7. YIELD + PROFIT (Variable + Fixed)
 # =========================================================
 df = None
 
-# --- Make sure session state keys exist before use ---
+# --- Ensure session state keys exist ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 if "seed_products" not in st.session_state:
     st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "fixed_seed" not in st.session_state:
+    st.session_state["fixed_seed"] = pd.DataFrame(columns=["Variety","Rate (units/ac)","Cost per Unit ($)","Cost/acre"])
+if "fixed_fert" not in st.session_state:
+    st.session_state["fixed_fert"] = pd.DataFrame(columns=["Fertilizer Type","Rate (lbs/ac)","Cost per lb ($)","Cost/acre"])
 if "yield_df" not in st.session_state:
     st.session_state["yield_df"] = None
 
-# --- Load Yield Data into session state ---
+# --- Load yield data into session state ---
 if yield_file is not None:
     if yield_file.name.endswith(".csv"):
         df = pd.read_csv(yield_file)
@@ -432,26 +479,37 @@ if yield_file is not None:
                 df = pd.DataFrame(gdf.drop(columns="geometry"))
                 st.session_state["yield_df"] = df
 
-# --- Work with yield data if available ---
+# --- Work with yield data ---
 if st.session_state["yield_df"] is not None:
     df = st.session_state["yield_df"]
 
-    # Revenue & Profit
+    # Revenue
     df["Revenue_per_acre"] = df["Yield"] * sell_price
-    fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-    seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
-    df["NetProfit_per_acre"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
+
+    # -------------------------
+    # Variable Rate Profit
+    # -------------------------
+    fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
+    seed_costs_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+    df["VariableRateProfit"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_var - seed_costs_var
+
+    # -------------------------
+    # Fixed Rate Profit
+    # -------------------------
+    fert_costs_fixed = st.session_state["fixed_fert"]["Cost/acre"].sum() if not st.session_state["fixed_fert"].empty else 0
+    seed_costs_fixed = st.session_state["fixed_seed"]["Cost/acre"].sum() if not st.session_state["fixed_seed"].empty else 0
+    df["FixedRateProfit"] = df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs_fixed - seed_costs_fixed
 
     if sell_price == 0:
-        st.warning("⚠️ Sell Price is 0 — profit heatmap will be flat. Set a non-zero $/bu.")
+        st.warning("⚠️ Sell Price is 0 — profit heatmaps will be flat. Set a non-zero $/bu.")
 
-    # Auto-zoom to data bounds
+    # --- Auto-zoom ---
     south, north = df["Latitude"].min(), df["Latitude"].max()
     west,  east  = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # Heatmap overlay helper
-    def add_heatmap_overlay(values, name, show_default):
+    # --- Heatmap overlay helper ---
+    def add_heatmap_overlay(values, name, show_default, cmap_name="RdYlGn"):
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
@@ -465,7 +523,7 @@ if st.session_state["yield_df"] is not None:
         vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
         if vmin == vmax:
             vmax = vmin + 1
-        cmap = plt.cm.get_cmap("RdYlGn")
+        cmap = plt.cm.get_cmap(cmap_name)
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
@@ -480,11 +538,12 @@ if st.session_state["yield_df"] is not None:
 
         return (vmin, vmax)
 
-    # Add overlays
+    # --- Add overlays ---
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
-    p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", show_default=True)
+    v_min, v_max = add_heatmap_overlay(df["VariableRateProfit"].values, "Variable Rate Profit ($/ac)", show_default=True)
+    f_min, f_max = add_heatmap_overlay(df["FixedRateProfit"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-    # Legends
+    # --- Legends (bottom left) ---
     from branca.element import Element
     def rgba_to_hex(rgba_tuple):
         r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
@@ -503,16 +562,22 @@ if st.session_state["yield_df"] is not None:
         </div>
       </div>
       <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
-        <div style="font-weight: 600; margin-bottom: 2px;">Net Profit ($/ac)</div>
+        <div style="font-weight: 600; margin-bottom: 2px;">Variable Rate Profit ($/ac)</div>
         <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
         <div style="display:flex; justify-content: space-between; margin-top: 2px;">
-          <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
+          <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
+        </div>
+      </div>
+      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+        <div style="font-weight: 600; margin-bottom: 2px;">Fixed Rate Profit ($/ac)</div>
+        <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
+        <div style="display:flex; justify-content: space-between; margin-top: 2px;">
+          <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
         </div>
       </div>
     </div>
     """
     m.get_root().html.add_child(Element(legend_html))
-
 
 # =========================================================
 # 8. DISPLAY MAP
@@ -648,5 +713,5 @@ with col_right:
         styled_fixed,
         use_container_width=True,
         hide_index=True,
-        height=table_height  # 👈 exact fit, prevents scroll & gap
+        height=table_height  # exact fit, prevents scroll & gap
     )
