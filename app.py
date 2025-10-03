@@ -373,7 +373,7 @@ if st.session_state["yield_df"] is not None:
 # 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, width=900, height=600)
+st_folium(m, use_container_width=True, height=700)
 
 # =========================================================
 # 9. PROFIT SUMMARY (always visible, even without yield map)
