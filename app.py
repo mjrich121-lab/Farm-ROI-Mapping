@@ -654,19 +654,30 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 
     # --- Auto legend (toggleable) ---
     unique_zones = sorted(zones_gdf["Zone"].unique())
-    legend_html = "<div style='font-size:14px; line-height:18px; color:white;'>"
-    legend_html += "<b>Zone Colors</b><br>"
+    legend_html = """
+    <div style="
+        position: fixed; 
+        bottom: 50px; left: 50px; 
+        z-index:9999; 
+        background-color: rgba(0,0,0,0.5); 
+        padding: 8px 12px; 
+        border-radius: 6px; 
+        font-size: 13px; 
+        color: white;
+    ">
+    <b>Zone Colors</b><br>
+    """
     for z in unique_zones:
         color = zone_colors.get(int(z), "#808080")
-        legend_html += f"<span style='background:{color}; width:15px; height:15px; display:inline-block; margin-right:6px;'></span> Zone {z}<br>"
+        legend_html += f"<div style='display:flex; align-items:center; margin:2px 0;'> \
+                        <div style='background:{color}; width:15px; height:15px; margin-right:6px;'></div> Zone {z}</div>"
     legend_html += "</div>"
 
-    # Add legend as a FeatureGroup so it can be toggled
     legend_group = folium.FeatureGroup(name="Legend", show=True)
-    folium.map.Marker(
+    legend_group.add_child(folium.map.Marker(
         [center_lat, center_lon],
         icon=folium.DivIcon(html=legend_html)
-    ).add_to(legend_group)
+    ))
     legend_group.add_to(m)
 
     # Add layer control
@@ -677,6 +688,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 
 else:
     st.info("ℹ️ Upload a Zone Map in Section 1 to see zones here.")
+
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
