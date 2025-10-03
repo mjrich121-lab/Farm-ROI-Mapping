@@ -64,6 +64,7 @@ uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_
 # 3. PRESCRIPTION MAP UPLOADS (multi-product supported)
 # =========================================================
 st.header("Prescription Map Uploads")
+
 fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv"], key="fert")
 seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv"], key="seed")
 
@@ -90,8 +91,26 @@ def process_prescription(file):
     grouped["CostPerAcre"] = grouped["CostTotal"] / grouped["Acres"]
     return grouped
 
-fert_products = process_prescription(fert_file)
-seed_products = process_prescription(seed_file)
+# Initialize session state keys if not already there
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame()
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame()
+
+# Process and save into session state
+if fert_file is not None:
+    st.session_state["fert_products"] = process_prescription(fert_file)
+if seed_file is not None:
+    st.session_state["seed_products"] = process_prescription(seed_file)
+
+# Always use session state values
+fert_products = st.session_state["fert_products"]
+seed_products = st.session_state["seed_products"]
+
+if not fert_products.empty:
+    st.success("Fertilizer prescription uploaded and stored")
+if not seed_products.empty:
+    st.success("Seed prescription uploaded and stored")
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
@@ -232,8 +251,8 @@ if st.session_state["yield_df"] is not None:
 
     # --- Revenue & Profit ---
     df["Revenue_per_acre"] = df["Yield"] * sell_price
-    fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
-    seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
+    fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
+seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
     df["NetProfit_per_acre"] = (
         df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
     )
