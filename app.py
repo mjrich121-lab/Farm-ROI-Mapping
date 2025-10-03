@@ -595,78 +595,22 @@ def make_base_map():
 m = make_base_map()
 
 # =========================================================
-# 6. ZONE MAP DISPLAY
+# 6. ZONE MAP DISPLAY (minimal test)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"].copy()
 
-    # --- CRS ---
-    try:
-        if gdf.crs is None:
-            gdf.set_crs(epsg=4326, inplace=True)
-        elif gdf.crs.to_string() != "EPSG:4326":
-            gdf = gdf.to_crs(epsg=4326)
-    except Exception as e:
-        st.warning(f"⚠️ CRS issue: {e}")
-
-    # --- Ensure required columns ---
-    if "Zone" not in gdf.columns:
-        gdf["Zone"] = range(1, len(gdf) + 1)
-    for col in ["Calculated Acres", "Override Acres"]:
-        if col not in gdf.columns:
-            gdf[col] = 0.0
-        gdf[col] = gdf[col].astype(float)
-
-    # --- Drop empties ---
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]
-
-    # --- Color palette ---
-    zone_colors = {1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"}
-    def color_for_zone(z):
-        try:
-            return zone_colors.get(int(z), "#3186cc")
-        except Exception:
-            return "#3186cc"
-
-    # --- Map setup ---
+    # Bounds and center
     bounds = gdf.total_bounds
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
-    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Satellite + labels
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri World Imagery", name="Satellite"
-    ).add_to(m)
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri Boundaries & Labels", name="Labels", overlay=True
-    ).add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
+    # Just make a base map
+    m = folium.Map(location=center, zoom_start=15, tiles="OpenStreetMap")
 
-    # --- Zones ---
-    try:
-        folium.GeoJson(
-            gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
-            style_function=lambda f: {
-                "fillColor": color_for_zone(f["properties"].get("Zone")),
-                "color": "black", "weight": 1, "fillOpacity": 0.45,
-            },
-            tooltip=folium.GeoJsonTooltip(
-                fields=["Zone", "Calculated Acres", "Override Acres"],
-                aliases=["Zone", "Calculated Acres", "Override Acres"]
-            )
-        ).add_to(m)
-    except Exception as e:
-        st.error(f"❌ Zone rendering failed: {e}")
+    # Test marker in center so we *know* it’s rendering
+    folium.Marker(location=center, popup="Center of Field").add_to(m)
 
-    # --- Fit to field ---
-    try:
-        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-    except Exception:
-        pass
-
-    # --- Always render map, even if zones fail ---
+    # Force render
     st_folium(m, width=1000, height=650)
 
 # =========================================================
