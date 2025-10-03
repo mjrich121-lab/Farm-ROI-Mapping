@@ -180,7 +180,9 @@ if yield_file is not None:
             else:
                 st.error("❌ No yield column found in uploaded file")
         else:
-            st.error("❌ Could not read uploaded file")       shutil.rmtree("temp_yield", ignore_errors=True)
+            st.error("❌ Could not read uploaded file")
+            import shutil
+            shutil.rmtree("temp_yield", ignore_errors=True)
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
