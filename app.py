@@ -91,15 +91,6 @@ st.markdown(
     "⚠️ Uploading just a single .shp file will not work._"
 )
 
-# --- callback to clean overrides ---
-def _sanitize_zone_overrides():
-    df = st.session_state.get("zone_acres_editor")
-    if df is None:
-        return
-    df["Override Acres"] = pd.to_numeric(df["Override Acres"], errors="coerce")
-    df["Override Acres"] = df["Override Acres"].fillna(df["Calculated Acres"])
-    st.session_state["zone_acres_editor"] = df
-
 zones_gdf = None
 if zone_file is not None:
     try:
@@ -132,24 +123,26 @@ if zone_file is not None:
                 zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
                 zone_col = "ZoneIndex"
 
-            # --- Reproject to equal-area CRS for acre calculation ---
+            # --- Calculate acres (in an equal-area CRS) ---
             gdf_area = zones_gdf.copy()
             if gdf_area.crs is None:
-                gdf_area.set_crs(epsg=4326, inplace=True)  # assume WGS84 if missing
+                gdf_area.set_crs(epsg=4326, inplace=True)  # assume WGS84
             if gdf_area.crs.is_geographic:
-                gdf_area = gdf_area.to_crs(epsg=5070)  # Albers Equal Area
+                gdf_area = gdf_area.to_crs(epsg=5070)  # Albers Equal Area (USA)
 
-            # --- Calculate acres on projected copy ---
-            zones_gdf["Calculated Acres"] = gdf_area.geometry.area * 0.000247105
+            zones_gdf["Calculated Acres"] = gdf_area.geometry.area * 0.000247105  # m² → acres
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Always keep zones_gdf in EPSG:4326 for mapping ---
-            if zones_gdf.crs != "EPSG:4326":
+            # --- Keep zones for mapping in EPSG:4326 ---
+            if zones_gdf.crs is None or zones_gdf.crs.to_string() != "EPSG:4326":
                 zones_gdf = zones_gdf.to_crs(epsg=4326)
 
-            # --- Display editable override table ---
-            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
-            col1, col2, col3 = st.columns([1,2,1])
+            # --- Editable overrides table (centered/compact) ---
+            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(
+                columns={zone_col: "Zone"}
+            )
+
+            col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
                 edited = st.data_editor(
                     zone_acres_df,
@@ -159,22 +152,21 @@ if zone_file is not None:
                     column_config={
                         "Zone": st.column_config.TextColumn(disabled=True),
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                        "Override Acres": st.column_config.NumberColumn(format="%.2f")
+                        "Override Acres": st.column_config.NumberColumn(format="%.2f"),
                     },
                     key="zone_acres_editor",
-                    on_change=_sanitize_zone_overrides
                 )
 
-                edited = st.session_state.get("zone_acres_editor", edited)
+                # Default blanks/None back to calculated value (and keep numeric)
+                edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce")
+                edited["Override Acres"] = edited["Override Acres"].fillna(edited["Calculated Acres"])
 
-                # --- Totals ---
-                total_calc = float(edited["Calculated Acres"].sum())
+                # Totals (stable — 'Calculated Acres' comes from zones_gdf)
+                total_calc = float(zones_gdf["Calculated Acres"].sum())
                 total_override = float(edited["Override Acres"].sum())
-                st.markdown(
-                    f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**"
-                )
+                st.markdown(f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**")
 
-            # --- Save overrides back to gdf (EPSG:4326 for map) ---
+            # --- Save overrides back to session (for mapping and downstream use) ---
             zones_gdf["Override Acres"] = edited["Override Acres"].values
             st.session_state["zones_gdf"] = zones_gdf
 
@@ -603,12 +595,12 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 # =========================================================
-# 6. ZONE MAP DISPLAY (Colored Zones)
+# 6. ZONE MAP DISPLAY (Colored Zones, Map Only)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # Ensure CRS is EPSG:4326 for map rendering
+    # Ensure EPSG:4326 for Folium
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -617,7 +609,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Define fixed zone colors
+    # Fixed color scheme (1→red ... 5→dark green)
     zone_colors = {
         1: "#e41a1c",  # red
         2: "#ff7f00",  # orange
@@ -626,17 +618,24 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         5: "#006400",  # dark green
     }
 
-    # Create folium map centered on zone bounds
+    # Safe color lookup (falls back if Zone isn't an int)
+    def _color_for_feature(feat):
+        z = feat["properties"].get("Zone")
+        try:
+            return zone_colors.get(int(z), "#3186cc")
+        except Exception:
+            return "#3186cc"
+
+    # Map centered & auto-zoomed to bounds
     bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
     m = folium.Map(location=center, zoom_start=14)
 
-    # Add polygons with unique colors per zone
     folium.GeoJson(
         gdf,
         name="Zones",
         style_function=lambda feature: {
-            "fillColor": zone_colors.get(int(feature["properties"]["Zone"]), "#3186cc"),
+            "fillColor": _color_for_feature(feature),
             "color": "black",
             "weight": 1,
             "fillOpacity": 0.5,
@@ -644,36 +643,30 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(
             fields=["Zone", "Calculated Acres", "Override Acres"],
             aliases=["Zone", "Calculated Acres", "Override Acres"],
-            localize=True
-        )
+            localize=True,
+        ),
     ).add_to(m)
 
-    # Fit map to field bounds
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Add legend manually
+    # Legend
     legend_html = """
      <div style="
          position: fixed; 
          bottom: 30px; left: 30px; width: 150px; height: 160px; 
-         background-color: white; 
-         border:2px solid grey; 
-         z-index:9999; 
-         font-size:14px;
-         ">
-         &nbsp;<b>Zone Colors</b><br>
-         &nbsp;<i style="background:#e41a1c;color:#e41a1c">..</i>&nbsp; Zone 1<br>
-         &nbsp;<i style="background:#ff7f00;color:#ff7f00">..</i>&nbsp; Zone 2<br>
-         &nbsp;<i style="background:#ffff33;color:#ffff33">..</i>&nbsp; Zone 3<br>
-         &nbsp;<i style="background:#4daf4a;color:#4daf4a">..</i>&nbsp; Zone 4<br>
-         &nbsp;<i style="background:#006400;color:#006400">..</i>&nbsp; Zone 5<br>
+         background-color: white; border:2px solid grey; z-index:9999; 
+         font-size:14px; padding:6px;">
+         <b>Zone Colors</b><br>
+         <i style="background:#e41a1c;color:#e41a1c">..</i>&nbsp; Zone 1<br>
+         <i style="background:#ff7f00;color:#ff7f00">..</i>&nbsp; Zone 2<br>
+         <i style="background:#ffff33;color:#ffff33">..</i>&nbsp; Zone 3<br>
+         <i style="background:#4daf4a;color:#4daf4a">..</i>&nbsp; Zone 4<br>
+         <i style="background:#006400;color:#006400">..</i>&nbsp; Zone 5<br>
      </div>
-     """
+    """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Show map
     st_folium(m, width=800, height=500)
-
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
