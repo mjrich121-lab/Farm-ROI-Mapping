@@ -136,7 +136,7 @@ if zone_file is not None:
             zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Build display table (without totals for editing) ---
+            # --- Build display table ---
             zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
 
             # --- Centered editable table ---
@@ -156,15 +156,11 @@ if zone_file is not None:
                 )
 
                 # --- Fix blanks: default Override Acres back to Calculated Acres ---
-                edited["Override Acres"] = edited.apply(
-                    lambda row: row["Calculated Acres"] 
-                    if (row["Override Acres"] is None or pd.isna(row["Override Acres"])) 
-                    else row["Override Acres"],
-                    axis=1
-                )
+                edited["Override Acres"] = pd.to_numeric(
+                    edited["Override Acres"], errors="coerce"
+                ).fillna(edited["Calculated Acres"])
 
-
-                # Add total row below the editable table
+                # --- Totals ---
                 total_calc = edited["Calculated Acres"].sum()
                 total_override = edited["Override Acres"].sum()
                 st.markdown(
@@ -180,6 +176,7 @@ if zone_file is not None:
 
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
+
 
 # =========================================================
 # 2. YIELD MAP UPLOAD
