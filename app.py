@@ -53,6 +53,27 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+# =========================================================
+# HELPER FUNCTION: Load Shapefiles or GeoJSON
+# =========================================================
+def load_vector_file(uploaded_file):
+    """Load shapefile (.zip), GeoJSON, or JSON into a GeoDataFrame"""
+    gdf = None
+    if uploaded_file.name.endswith((".geojson", ".json")):
+        gdf = gpd.read_file(uploaded_file)
+    elif uploaded_file.name.endswith(".zip"):
+        with open("temp.zip", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        with zipfile.ZipFile("temp.zip", "r") as zip_ref:
+            zip_ref.extractall("temp_shp")
+        for f_name in os.listdir("temp_shp"):
+            if f_name.endswith(".shp"):
+                gdf = gpd.read_file(os.path.join("temp_shp", f_name))
+                break
+        os.remove("temp.zip")
+        import shutil
+        shutil.rmtree("temp_shp", ignore_errors=True)
+    return gdf
 
 # =========================================================
 # HELPER: AUTO-ZOOM
@@ -92,64 +113,88 @@ if zone_file is not None:
         shutil.rmtree("temp_shp", ignore_errors=True)
     if zones_gdf is not None:
         st.success("Zone map loaded successfully")
-
 # =========================================================
 # 2. YIELD MAP UPLOAD
 # =========================================================
 st.header("Yield Map Upload")
-uploaded_files = st.file_uploader("Upload Yield Map CSV(s)", type="csv", accept_multiple_files=True)
+yield_file = st.file_uploader("Upload Yield Map", type=["csv","geojson","json","zip"], key="yield")
+
+df = None
+if yield_file is not None:
+    if yield_file.name.endswith(".csv"):
+        df = pd.read_csv(yield_file)
+        if {"Latitude","Longitude","Yield"}.issubset(df.columns):
+            st.success("Yield CSV loaded successfully")
+        else:
+            st.error("CSV must include Latitude, Longitude, and Yield columns")
+    else:
+        gdf = load_vector_file(yield_file)
+        if gdf is not None:
+            gdf["Longitude"] = gdf.geometry.centroid.x
+            gdf["Latitude"] = gdf.geometry.centroid.y
+            # Try to find yield column
+            yield_col = [c for c in gdf.columns if "yield" in c.lower()]
+            if yield_col:
+                gdf.rename(columns={yield_col[0]: "Yield"}, inplace=True)
+                df = pd.DataFrame(gdf.drop(columns="geometry"))
+                st.success("Yield shapefile/geojson loaded successfully")
+            else:
+                st.error("No yield column found in uploaded file")
 
 # =========================================================
-# 3. PRESCRIPTION MAP UPLOADS (multi-product supported)
+# 3. PRESCRIPTION MAP UPLOADS
 # =========================================================
 st.header("Prescription Map Uploads")
 
-fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv"], key="fert")
-seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv"], key="seed")
+fert_file = st.file_uploader("Upload Fertilizer Prescription Map", type=["csv","geojson","json","zip"], key="fert")
+seed_file = st.file_uploader("Upload Seed Prescription Map", type=["csv","geojson","json","zip"], key="seed")
 
-def process_prescription(file):
+def process_prescription(file, prescrip_type="fertilizer"):
     if file is None:
         return pd.DataFrame()
-    df = pd.read_csv(file)
+
+    # --- Load CSV or shapefile ---
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
+    else:
+        gdf = load_vector_file(file)
+        if gdf is None:
+            return pd.DataFrame()
+        gdf["Longitude"] = gdf.geometry.centroid.x
+        gdf["Latitude"] = gdf.geometry.centroid.y
+        df = pd.DataFrame(gdf.drop(columns="geometry"))
+
+    # --- Normalize ---
     df.columns = [c.strip().lower() for c in df.columns]
 
-    if "product" not in df.columns or "acres" not in df.columns:
-        return pd.DataFrame()
+    # --- Must have product + acres ---
+    if "product" in df.columns and "acres" in df.columns:
+        if "costtotal" not in df.columns:
+            if "price_per_unit" in df.columns and "units" in df.columns:
+                df["costtotal"] = df["price_per_unit"] * df["units"]
+            else:
+                df["costtotal"] = 0
+        grouped = df.groupby("product", as_index=False).agg(
+            Acres=("acres","sum"),
+            CostTotal=("costtotal","sum")
+        )
+        grouped["CostPerAcre"] = grouped["CostTotal"] / grouped["Acres"]
+        return grouped
 
-    if "costtotal" in df.columns:
-        df["cost_total"] = df["costtotal"]
-    elif "price_per_unit" in df.columns and "units" in df.columns:
-        df["cost_total"] = df["price_per_unit"] * df["units"]
-    else:
-        return pd.DataFrame()
+    return pd.DataFrame()
 
-    grouped = df.groupby("product", as_index=False).agg(
-        Acres=("acres", "sum"),
-        CostTotal=("cost_total", "sum")
-    )
-    grouped["CostPerAcre"] = grouped["CostTotal"] / grouped["Acres"]
-    return grouped
-
-# Initialize session state keys if not already there
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame()
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame()
-
-# Process and save into session state
+# Store into session state
 if fert_file is not None:
-    st.session_state["fert_products"] = process_prescription(fert_file)
+    st.session_state["fert_products"] = process_prescription(fert_file, "fertilizer")
 if seed_file is not None:
-    st.session_state["seed_products"] = process_prescription(seed_file)
+    st.session_state["seed_products"] = process_prescription(seed_file, "seed")
 
-# Always use session state values
-fert_products = st.session_state["fert_products"]
-seed_products = st.session_state["seed_products"]
+# Feedback
+if not st.session_state["fert_products"].empty:
+    st.success("Fertilizer prescription uploaded successfully")
+if not st.session_state["seed_products"].empty:
+    st.success("Seed prescription uploaded successfully")
 
-if not fert_products.empty:
-    st.success("Fertilizer prescription uploaded and stored")
-if not seed_products.empty:
-    st.success("Seed prescription uploaded and stored")
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
