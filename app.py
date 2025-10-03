@@ -613,9 +613,8 @@ m = make_base_map()
 
 
 # =========================================================
-# 6. MAP DISPLAY
+# 6. MAP DISPLAY (Fixed Esri imagery, no toggle)
 # =========================================================
-
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
@@ -624,12 +623,13 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
-    # Fixed Esri imagery (no basemap toggle)
+    # ✅ Fixed Esri imagery, no toggle
     m = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=15,
-        tiles="Esri.WorldImagery",
-        attr=" "
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri WorldImagery",
+        control_scale=False
     )
 
     # Zone colors
@@ -654,7 +654,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
     ).add_to(m)
 
-    # Legend in bottom-left
+    # ✅ Legend bottom-left
     unique_zones = sorted(zones_gdf["Zone"].unique())
     legend_html = """
     <div style="
@@ -677,12 +677,8 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Only toggle user-added layers (Zones, Yield, etc.)
-    folium.LayerControl(collapsed=False, position="topright").add_to(m)
-
-    # Display map
+    # Removed LayerControl – no Esri toggle anymore
     st_folium(m, width=1000, height=600)
-
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
@@ -701,8 +697,7 @@ if "fixed_products" not in st.session_state:
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
 
-    # Show available columns for debugging
-    st.write("📋 Columns in uploaded file:", list(df.columns))
+    # 🚫 Removed debug: st.write("📋 Columns in uploaded file:", list(df.columns))
 
     # 🔍 Detect yield column (prefer Dry Yield variants)
     yield_col_priority = ["Dry_Yield", "DryYield", "DryYld", "Yld_Dry",
