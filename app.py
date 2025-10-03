@@ -610,31 +610,18 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
-
 # =========================================================
-# 6. MAP DISPLAY (Fixed Esri imagery, overlays toggleable)
+# 6. MAP DISPLAY (Zones overlay + legend)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    # Center map on field bounds
+    # Center map on field bounds without re-creating the map
     bounds = zones_gdf.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
-
-    # ✅ Base map with locked Esri imagery
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=15,
-        tiles=None
-    )
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri WorldImagery",
-        name="Esri Imagery",
-        overlay=False,
-        control=False
-    ).add_to(m)
+    m.location = [center_lat, center_lon]
+    m.zoom_start = 15
 
     # Zone colors
     zone_colors = {
@@ -814,10 +801,10 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     m.get_root().html.add_child(Element(profit_legend_html))
 
 # =========================================================
-# 8. DISPLAY MAP (once, all overlays toggleable)
+# 8. DISPLAY MAP
 # =========================================================
-folium.LayerControl(collapsed=False, position="topright").add_to(m)
 st_folium(m, use_container_width=True, height=600)
+
 
 # =========================================================
 # 9. PROFIT SUMMARY
