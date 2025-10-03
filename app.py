@@ -474,83 +474,125 @@ if st.session_state["yield_df"] is not None:
     """
     m.get_root().html.add_child(Element(legend_html))
 
-
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
 folium.LayerControl(collapsed=False).add_to(m)
-st_folium(m, use_container_width=True, height=650)
+st_folium(m, use_container_width=True, height=600)
 
-# --- Ensure session state keys exist ---
+# --- Ensure session state keys always exist before profit summary ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
 if "seed_products" not in st.session_state:
     st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
+if "zones_gdf" not in st.session_state:
+    st.session_state["zones_gdf"] = None
+
+if "yield_df" not in st.session_state:
+    st.session_state["yield_df"] = None
+
+
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
 st.header("Profit Summary")
 
+# --- Defaults if no yield map is uploaded ---
+revenue_per_acre = 0.0
+net_profit_per_acre = 0.0
+
 if df is not None:
     revenue_per_acre = df["Revenue_per_acre"].mean()
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
 
-    # --- Profit Metrics ---
-    st.subheader("Profit Metrics")
-    summary = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Value": [round(revenue_per_acre,2),
-                  round(base_expenses_per_acre,2),
-                  round(net_profit_per_acre,2)]
-    })
+# --- Profit Metrics ---
+st.subheader("Profit Metrics")
+summary = pd.DataFrame({
+    "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+    "Value": [round(revenue_per_acre, 2),
+              round(base_expenses_per_acre, 2),
+              round(net_profit_per_acre, 2)]
+})
 
-    def highlight_profit(val):
+def highlight_profit(val):
+    if isinstance(val, (int, float)):
         if val > 0:
             return "color: green; font-weight: bold;"
         elif val < 0:
             return "color: red; font-weight: bold;"
-        return "font-weight: bold;"
+    return "font-weight: bold;"
 
-    st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]),
-                 use_container_width=True)
+st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]),
+             use_container_width=True)
 
-       # --- Variable Input Costs ---
-    if "fert_products" in st.session_state and "seed_products" in st.session_state:
-        if not st.session_state["fert_products"].empty or not st.session_state["seed_products"].empty:
-            st.subheader("Variable Rate Input Costs")
-            var_df = pd.concat([st.session_state["fert_products"], st.session_state["seed_products"]],
-                               ignore_index=True)
-            var_df.loc["Total"] = ["Total Variable",
-                                   var_df["Acres"].sum(),
-                                   var_df["CostTotal"].sum(),
-                                   var_df["CostPerAcre"].mean()]
-            st.dataframe(var_df, use_container_width=True)
 
-    # --- Fixed Input Costs ---
-    st.subheader("Fixed Input Costs")
-    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense","$/ac"])
-    fixed_df.loc["Total"] = ["Total Fixed", fixed_df["$/ac"].sum()]
-    st.dataframe(fixed_df, use_container_width=True, height=(len(fixed_df)*35+40))
+# --- Variable Input Costs ---
+if ("fert_products" in st.session_state and not st.session_state["fert_products"].empty) or \
+   ("seed_products" in st.session_state and not st.session_state["seed_products"].empty):
 
-    # --- Profit per Zone (if zones provided) ---
-    if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
-        st.subheader("Zone Profit Summary")
+    st.subheader("Variable Rate Input Costs")
 
-        # Each zone profit = average profit/acre * zone acres (final)
-        zone_acres = st.session_state["zones_gdf"][["ZoneIndex","Zone_Acres_Final"]] \
-            if "ZoneIndex" in st.session_state["zones_gdf"].columns else \
-            st.session_state["zones_gdf"][["Zone","Zone_Acres_Final"]].rename(columns={"Zone":"ZoneIndex"})
+    var_df = pd.concat(
+        [st.session_state["fert_products"], st.session_state["seed_products"]],
+        ignore_index=True
+    )
 
-        zone_acres["Profit_per_acre"] = net_profit_per_acre
-        zone_acres["Total_Profit"] = zone_acres["Zone_Acres_Final"] * zone_acres["Profit_per_acre"]
+    if not var_df.empty:
+        var_df.loc["Total"] = [
+            "Total Variable",
+            var_df["Acres"].sum(),
+            var_df["CostTotal"].sum(),
+            var_df["CostPerAcre"].mean()
+        ]
 
-        st.dataframe(zone_acres.rename(columns={
+    st.dataframe(var_df, use_container_width=True)
+
+
+# --- Fixed Input Costs ---
+st.subheader("Fixed Input Costs")
+fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+fixed_df.loc["Total"] = ["Total Fixed Costs", fixed_df["$/ac"].sum()]
+st.dataframe(fixed_df, use_container_width=True, height=(len(fixed_df) * 28 + 40))
+
+
+# --- Profit per Zone (if zones provided) ---
+if st.session_state["zones_gdf"] is not None:
+    st.subheader("Zone Profit Summary")
+
+    zones_df = st.session_state["zones_gdf"]
+
+    # Ensure acres column exists (placeholder until overridden by user)
+    if "Zone_Acres_Final" not in zones_df.columns:
+        zones_df["Zone_Acres_Final"] = zones_df.geometry.area * 0.000247105  # m² to acres approx
+
+    zone_acres = zones_df[["ZoneIndex", "Zone_Acres_Final"]] \
+        if "ZoneIndex" in zones_df.columns else \
+        zones_df[["Zone", "Zone_Acres_Final"]].rename(columns={"Zone": "ZoneIndex"})
+
+    zone_acres["Profit_per_acre"] = net_profit_per_acre
+    zone_acres["Total_Profit"] = zone_acres["Zone_Acres_Final"] * zone_acres["Profit_per_acre"]
+
+    # Add grand total row
+    total_row = pd.DataFrame([{
+        "ZoneIndex": "TOTAL",
+        "Zone_Acres_Final": zone_acres["Zone_Acres_Final"].sum(),
+        "Profit_per_acre": net_profit_per_acre,
+        "Total_Profit": zone_acres["Total_Profit"].sum()
+    }])
+
+    zone_acres = pd.concat([zone_acres, total_row], ignore_index=True)
+
+    st.dataframe(
+        zone_acres.rename(columns={
             "ZoneIndex": "Zone",
             "Zone_Acres_Final": "Acres"
-        })[["Zone","Acres","Profit_per_acre","Total_Profit"]].style.format({
+        })[["Zone", "Acres", "Profit_per_acre", "Total_Profit"]].style.format({
             "Acres": "{:,.1f}",
             "Profit_per_acre": "${:,.2f}",
             "Total_Profit": "${:,.0f}"
-        }), use_container_width=True)
+        }).applymap(highlight_profit, subset=["Total_Profit"]),
+        use_container_width=True
+    )
+
