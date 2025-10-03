@@ -136,30 +136,34 @@ if zone_file is not None:
             zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Build display table ---
+            # --- Build display table (without totals for editing) ---
             zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
 
-            # Add total row
-            total_row = pd.DataFrame({
-                "Zone": ["Total"],
-                "Calculated Acres": [zone_acres_df["Calculated Acres"].sum()],
-                "Override Acres": [zone_acres_df["Override Acres"].sum()]
-            })
-            zone_acres_df = pd.concat([zone_acres_df, total_row], ignore_index=True)
-
-            # --- Centered compact table ---
-            col1, col2, col3 = st.columns([1,2,1])  # narrow-wide-narrow layout
+            # --- Centered editable table ---
+            col1, col2, col3 = st.columns([1,2,1])
             with col2:
-                st.dataframe(
-                    zone_acres_df.style.format({
-                        "Calculated Acres": "{:,.2f}",
-                        "Override Acres": "{:,.2f}"
-                    }),
-                    use_container_width=True,   # fit to container, no side scroll
-                    hide_index=True             # no row numbers
+                edited = st.data_editor(
+                    zone_acres_df,
+                    num_rows="fixed",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Zone": st.column_config.TextColumn(disabled=True),
+                        "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                        "Override Acres": st.column_config.NumberColumn(format="%.2f")
+                    },
+                    key="zone_acres_editor"
                 )
 
-            # --- Save cleaned zones to session state ---
+                # Add total row below the editable table
+                total_calc = edited["Calculated Acres"].sum()
+                total_override = edited["Override Acres"].sum()
+                st.markdown(
+                    f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**"
+                )
+
+            # --- Save overrides back to gdf ---
+            zones_gdf["Override Acres"] = edited["Override Acres"]
             st.session_state["zones_gdf"] = zones_gdf
 
         else:
