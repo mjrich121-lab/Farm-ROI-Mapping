@@ -603,35 +603,43 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 # =========================================================
-# 6. ZONE MAP DISPLAY (Map Only)
+# 6. ZONE MAP DISPLAY (Colored Zones)
 # =========================================================
-st.header("Zone Map")
-
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # Ensure correct CRS for map display
+    # Ensure CRS is EPSG:4326 for map rendering
     try:
         if gdf.crs is None:
-            gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84
+            gdf.set_crs(epsg=4326, inplace=True)
         elif gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs(epsg=4326)
     except Exception as e:
-        st.warning(f"⚠️ Could not set CRS: {e}")
+        st.warning(f"⚠️ CRS issue: {e}")
 
-    # Create folium map centered on zones
-    centroid = gdf.geometry.centroid
-    m = folium.Map(location=[centroid.y.mean(), centroid.x.mean()], zoom_start=14)
+    # Define fixed zone colors
+    zone_colors = {
+        1: "#e41a1c",  # red
+        2: "#ff7f00",  # orange
+        3: "#ffff33",  # yellow
+        4: "#4daf4a",  # light green
+        5: "#006400",  # dark green
+    }
 
-    # Add polygons with tooltip
+    # Create folium map centered on zone bounds
+    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+    m = folium.Map(location=center, zoom_start=14)
+
+    # Add polygons with unique colors per zone
     folium.GeoJson(
         gdf,
         name="Zones",
         style_function=lambda feature: {
-            "fillColor": "#3186cc",
+            "fillColor": zone_colors.get(int(feature["properties"]["Zone"]), "#3186cc"),
             "color": "black",
             "weight": 1,
-            "fillOpacity": 0.4,
+            "fillOpacity": 0.5,
         },
         tooltip=folium.GeoJsonTooltip(
             fields=["Zone", "Calculated Acres", "Override Acres"],
@@ -640,17 +648,32 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         )
     ).add_to(m)
 
-    # Fit map to zone bounds
-    try:
-        bounds = gdf.total_bounds
-        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-    except Exception as e:
-        st.warning(f"⚠️ Could not fit bounds: {e}")
+    # Fit map to field bounds
+    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Render map
+    # Add legend manually
+    legend_html = """
+     <div style="
+         position: fixed; 
+         bottom: 30px; left: 30px; width: 150px; height: 160px; 
+         background-color: white; 
+         border:2px solid grey; 
+         z-index:9999; 
+         font-size:14px;
+         ">
+         &nbsp;<b>Zone Colors</b><br>
+         &nbsp;<i style="background:#e41a1c;color:#e41a1c">..</i>&nbsp; Zone 1<br>
+         &nbsp;<i style="background:#ff7f00;color:#ff7f00">..</i>&nbsp; Zone 2<br>
+         &nbsp;<i style="background:#ffff33;color:#ffff33">..</i>&nbsp; Zone 3<br>
+         &nbsp;<i style="background:#4daf4a;color:#4daf4a">..</i>&nbsp; Zone 4<br>
+         &nbsp;<i style="background:#006400;color:#006400">..</i>&nbsp; Zone 5<br>
+     </div>
+     """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    # Show map
     st_folium(m, width=800, height=500)
-else:
-    st.info("ℹ️ Upload a Zone Map in Section 1 to see zones here.")
+
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
