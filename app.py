@@ -498,12 +498,12 @@ st.dataframe(
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
 def make_base_map():
-    # Disable scroll wheel zoom initially (must click map to activate)
+    # Disable scroll zoom until user clicks the map
     m = folium.Map(
-        location=[40, -95],
-        zoom_start=4,
+        location=[39.5, -98.35],  # Center of continental US
+        zoom_start=5,             # Tighter view on US than zoom_start=4
         tiles=None,
-        scrollWheelZoom=False,   # 🔹 prevent accidental scroll zoom
+        scrollWheelZoom="center",  # 🔹 requires click to activate scroll zoom
         prefer_canvas=True
     )
     folium.TileLayer(
@@ -536,6 +536,7 @@ elif st.session_state["yield_df"] is not None and not st.session_state["yield_df
     south, north = st.session_state["yield_df"]["Latitude"].min(), st.session_state["yield_df"]["Latitude"].max()
     west, east = st.session_state["yield_df"]["Longitude"].min(), st.session_state["yield_df"]["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
+
 
 # =========================================================
 # 6. ZONES
