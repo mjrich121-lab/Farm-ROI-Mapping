@@ -698,7 +698,37 @@ with col_left:
 
     # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
+ # ... all the variable, fixed, breakeven calculations ...
 
+    st.dataframe(
+        comparison.style.applymap(
+            highlight_profit,
+            subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
+        ).format({
+            "Breakeven Budget":"${:,.2f}",
+            "Variable Rate":"${:,.2f}",
+            "Fixed Rate":"${:,.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Collapsible formulas go right here
+    with st.expander("Show Calculation Formulas", expanded=False):
+        st.markdown("""
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Breakeven Budget</b><br>
+            (Target Yield × Sell Price) − Fixed Inputs
+        </div>
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Variable Rate</b><br>
+            (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+        </div>
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Fixed Rate</b><br>
+            (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+        </div>
+        """, unsafe_allow_html=True)
     # Variable Rate Profit
     var_profit = 0.0
     if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
