@@ -743,8 +743,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-    # Legend HTML
-    # ✅ Custom Legend (top-left, transparent background)
+  # ✅ Custom Legend (top-left, transparent background)
     legend_html = f"""
     <div style="position: fixed; top: 20px; left: 20px; z-index: 9999;
                 display: flex; flex-direction: column; gap: 10px; 
@@ -776,8 +775,6 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     </div>
     """
     m.get_root().html.add_child(Element(legend_html))
-
-
 
 # =========================================================
 # 8. DISPLAY MAP (once, all overlays toggleable)
