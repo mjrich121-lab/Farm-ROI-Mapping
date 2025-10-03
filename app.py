@@ -86,7 +86,6 @@ def auto_zoom_map(m, df=None, gdf=None):
         bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     return m
-
 # =========================================================
 # 1. ZONE MAP UPLOAD
 # =========================================================
@@ -113,6 +112,39 @@ if zone_file is not None:
         shutil.rmtree("temp_shp", ignore_errors=True)
     if zones_gdf is not None:
         st.success("Zone map loaded successfully")
+
+        # --- Add Zone Index if not present ---
+        zone_col = None
+        for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
+            if candidate in zones_gdf.columns:
+                zone_col = candidate
+                break
+        if zone_col is None:
+            zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+            zone_col = "ZoneIndex"
+
+        # --- Calculate acres automatically ---
+        zones_gdf["Zone_Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
+
+        # --- Manual override interface ---
+        st.subheader("Zone Acre Overrides")
+        editable = zones_gdf[[zone_col, "Zone_Acres"]].rename(columns={zone_col: "Zone", "Zone_Acres": "Calculated Acres"})
+        editable["Override Acres"] = editable["Calculated Acres"]
+
+        # Let user adjust overrides
+        edited = st.data_editor(
+            editable,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="zone_acres_editor"
+        )
+
+        # Merge overrides back into zones_gdf
+        zones_gdf["Zone_Acres_Final"] = edited["Override Acres"]
+
+        # Save zones to session state for use later
+        st.session_state["zones_gdf"] = zones_gdf
+
 # =========================================================
 # 2. YIELD MAP UPLOAD
 # =========================================================
@@ -450,99 +482,66 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, use_container_width=True, height=700)
 
 # =========================================================
-# 9. PROFIT SUMMARY (always visible, even without yield map)
+# 9. PROFIT SUMMARY
 # =========================================================
 st.header("Profit Summary")
-
-# Default values if no yield map
-revenue_per_acre = 0.0
-net_profit_per_acre = 0.0
 
 if df is not None:
     revenue_per_acre = df["Revenue_per_acre"].mean()
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
 
-# --- Profit Metrics ---
-summary = pd.DataFrame({
-    "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-    "Value": [revenue_per_acre, base_expenses_per_acre, net_profit_per_acre]
-})
-summary["Value"] = summary["Value"].map("${:,.2f}".format)
-summary = summary.set_index("Metric")
-
-def style_profit(val, metric):
-    if metric == "Profit ($/ac)":
-        num = float(val.replace("$","").replace(",",""))
-        if num > 0:
-            return "color: green; font-weight: bold;"
-        elif num < 0:
-            return "color: red; font-weight: bold;"
-        else:
-            return "font-weight: bold;"
-    return ""
-
-# --- Fixed Input Costs ---
-fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
-total_fixed = sum(expenses.values())
-fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", total_fixed]
-fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
-fixed_df = fixed_df.set_index("Expense")
-
-def style_totals(val, idx):
-    if "Total" in idx:
-        return "font-weight: bold;"
-    return ""
-
-# --- Variable Rate Input Costs ---
-variable_list = []
-if not fert_products.empty:
-    fert_display = fert_products[["product", "CostPerAcre"]].copy()
-    fert_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
-    variable_list.append(fert_display)
-if not seed_products.empty:
-    seed_display = seed_products[["product", "CostPerAcre"]].copy()
-    seed_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
-    variable_list.append(seed_display)
-
-if variable_list:
-    variable_df = pd.concat(variable_list, ignore_index=True)
-    total_var = variable_df["$/ac"].sum()
-    variable_df.loc[len(variable_df)] = ["Total Variable Costs", total_var]
-else:
-    variable_df = pd.DataFrame({
-        "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3", "Total Variable Costs"],
-        "$/ac": [0, 0, 0, 0, 0]
+    # --- Profit Metrics ---
+    st.subheader("Profit Metrics")
+    summary = pd.DataFrame({
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+        "Value": [round(revenue_per_acre,2),
+                  round(base_expenses_per_acre,2),
+                  round(net_profit_per_acre,2)]
     })
 
-variable_df["$/ac"] = variable_df["$/ac"].apply(lambda x: f"${x:,.2f}")
-variable_df = variable_df.set_index("Product")
+    def highlight_profit(val):
+        if val > 0:
+            return "color: green; font-weight: bold;"
+        elif val < 0:
+            return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
 
-# --- Layout ---
-left_col, right_col = st.columns([1.2, 1])
+    st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]),
+                 use_container_width=True)
 
-with left_col:
-    st.subheader("Profit Metrics")
-    st.dataframe(
-        summary.style.apply(
-            lambda col: [style_profit(v, col.name) for v in col],
-            axis=0
-        )
-    )
+    # --- Variable Input Costs ---
+    if not st.session_state["fert_products"].empty or not st.session_state["seed_products"].empty:
+        st.subheader("Variable Rate Input Costs")
+        var_df = pd.concat([st.session_state["fert_products"], st.session_state["seed_products"]],
+                           ignore_index=True)
+        var_df.loc["Total"] = ["Total Variable", var_df["Acres"].sum(),
+                               var_df["CostTotal"].sum(),
+                               var_df["CostPerAcre"].mean()]
+        st.dataframe(var_df, use_container_width=True)
 
-    st.subheader("Variable Rate Input Costs")
-    st.dataframe(
-        variable_df.style.apply(
-            lambda col: [style_totals(v, idx) for idx, v in zip(variable_df.index, col)],
-            axis=0
-        )
-    )
-with right_col:
+    # --- Fixed Input Costs ---
     st.subheader("Fixed Input Costs")
-    st.dataframe(
-        fixed_df.style.apply(
-            lambda col: [style_totals(v, idx) for idx, v in zip(fixed_df.index, col)],
-            axis=0
-        ),
-        use_container_width=True,              # expand horizontally
-        height=(len(fixed_df) * 35 + 40)      # auto-fit vertically (no scroll)
-    )
+    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense","$/ac"])
+    fixed_df.loc["Total"] = ["Total Fixed", fixed_df["$/ac"].sum()]
+    st.dataframe(fixed_df, use_container_width=True, height=(len(fixed_df)*35+40))
+
+    # --- Profit per Zone (if zones provided) ---
+    if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
+        st.subheader("Zone Profit Summary")
+
+        # Each zone profit = average profit/acre * zone acres (final)
+        zone_acres = st.session_state["zones_gdf"][["ZoneIndex","Zone_Acres_Final"]] \
+            if "ZoneIndex" in st.session_state["zones_gdf"].columns else \
+            st.session_state["zones_gdf"][["Zone","Zone_Acres_Final"]].rename(columns={"Zone":"ZoneIndex"})
+
+        zone_acres["Profit_per_acre"] = net_profit_per_acre
+        zone_acres["Total_Profit"] = zone_acres["Zone_Acres_Final"] * zone_acres["Profit_per_acre"]
+
+        st.dataframe(zone_acres.rename(columns={
+            "ZoneIndex": "Zone",
+            "Zone_Acres_Final": "Acres"
+        })[["Zone","Acres","Profit_per_acre","Total_Profit"]].style.format({
+            "Acres": "{:,.1f}",
+            "Profit_per_acre": "${:,.2f}",
+            "Total_Profit": "${:,.0f}"
+        }), use_container_width=True)
