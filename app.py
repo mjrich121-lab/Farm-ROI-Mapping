@@ -493,11 +493,20 @@ if "zones_gdf" not in st.session_state:
 if "yield_df" not in st.session_state:
     st.session_state["yield_df"] = None
 
-
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
 st.header("Profit Summary")
+
+# --- Ensure session state keys exist so tables don't crash ---
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "zones_gdf" not in st.session_state:
+    st.session_state["zones_gdf"] = None
+if "yield_df" not in st.session_state:
+    st.session_state["yield_df"] = None
 
 # --- Defaults if no yield map is uploaded ---
 revenue_per_acre = 0.0
@@ -511,9 +520,11 @@ if df is not None:
 st.subheader("Profit Metrics")
 summary = pd.DataFrame({
     "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-    "Value": [round(revenue_per_acre, 2),
-              round(base_expenses_per_acre, 2),
-              round(net_profit_per_acre, 2)]
+    "Value": [
+        round(revenue_per_acre, 2),
+        round(base_expenses_per_acre, 2),
+        round(net_profit_per_acre, 2)
+    ]
 })
 
 def highlight_profit(val):
@@ -524,8 +535,11 @@ def highlight_profit(val):
             return "color: red; font-weight: bold;"
     return "font-weight: bold;"
 
-st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]),
-             use_container_width=True)
+st.dataframe(
+    summary.style.applymap(highlight_profit, subset=["Value"]).format({"Value": "${:,.2f}"}),
+    use_container_width=True
+)
+
 
 
 # --- Variable Input Costs ---
