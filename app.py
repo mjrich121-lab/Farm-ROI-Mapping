@@ -612,9 +612,8 @@ def make_base_map():
 m = make_base_map()
 
 # =========================================================
-# 6. ZONES MAP DISPLAY
+# 6. MAP DISPLAY
 # =========================================================
-st.header("Zones Map")
 
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"]
@@ -623,10 +622,11 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     zones_gdf = zones_gdf.to_crs(epsg=4326)
 
     # Center map on zones
-    bounds = zones_gdf.total_bounds  # [minx, miny, maxx, maxy]
+    bounds = zones_gdf.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
+    # Fixed basemap (no toggle for imagery)
     m = folium.Map(location=[center_lat, center_lon], zoom_start=15,
                    tiles="Esri.WorldImagery")
 
@@ -639,7 +639,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         5: "#006400"    # Dark Green
     }
 
-    # Add zones layer
+    # --- Zones layer ---
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -652,12 +652,12 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
     ).add_to(m)
 
-    # --- Auto legend (toggleable) ---
+    # --- Legend (always on, baked into map) ---
     unique_zones = sorted(zones_gdf["Zone"].unique())
     legend_html = """
     <div style="
         position: fixed; 
-        bottom: 50px; left: 50px; 
+        bottom: 40px; left: 40px; 
         z-index:9999; 
         background-color: rgba(0,0,0,0.5); 
         padding: 8px 12px; 
@@ -673,21 +673,16 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
                         <div style='background:{color}; width:15px; height:15px; margin-right:6px;'></div> Zone {z}</div>"
     legend_html += "</div>"
 
-    legend_group = folium.FeatureGroup(name="Legend", show=True)
-    legend_group.add_child(folium.map.Marker(
-        [center_lat, center_lon],
-        icon=folium.DivIcon(html=legend_html)
-    ))
-    legend_group.add_to(m)
+    m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Add layer control
+    # Add layer control ONLY for uploaded layers (no basemap, no legend)
     folium.LayerControl(collapsed=False).add_to(m)
 
     # Display map
     st_folium(m, width=1000, height=600)
 
 else:
-    st.info("ℹ️ Upload a Zone Map in Section 1 to see zones here.")
+    st.info("Upload a Zone Map in Section 1 to see zones here.")
 
 
 # =========================================================
