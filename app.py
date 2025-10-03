@@ -1,5 +1,5 @@
 # =========================================================
-# Farm ROI Tool V3 (with auto-zoom logic)
+# Farm Profit Mapping Tool V4 
 # =========================================================
 import streamlit as st
 import pandas as pd
@@ -90,8 +90,14 @@ def auto_zoom_map(m, df=None, gdf=None):
 # 1. ZONE MAP UPLOAD
 # =========================================================
 st.header("Zone Map Upload")
-zone_file = st.file_uploader("Upload Zone Map (GeoJSON or zipped Shapefile)",
-                             type=["geojson", "json", "zip"], key="zone")
+zone_file = st.file_uploader(
+    "Upload Zone Map",
+    type=["geojson", "json", "zip"],
+    key="zone"
+)
+st.markdown(
+    "_Accepted formats: **GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+)
 
 zones_gdf = None
 if zone_file is not None:
@@ -149,7 +155,15 @@ if zone_file is not None:
 # 2. YIELD MAP UPLOAD
 # =========================================================
 st.header("Yield Map Upload")
-yield_file = st.file_uploader("Upload Yield Map", type=["csv","geojson","json","zip"], key="yield")
+yield_file = st.file_uploader(
+    "Upload Yield Map",
+    type=["csv","geojson","json","zip"],
+    key="yield"
+)
+st.markdown(
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+)
+
 
 df = None
 if yield_file is not None:
@@ -182,11 +196,19 @@ fert_file = st.file_uploader(
     type=["csv", "geojson", "json", "zip"],
     key="fert"
 )
+st.markdown(
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+)
+
 seed_file = st.file_uploader(
     "Upload Seed Prescription Map",
     type=["csv", "geojson", "json", "zip"],
     key="seed"
 )
+st.markdown(
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+)
+
 
 def process_prescription(file, prescrip_type="fertilizer"):
     """Process fertilizer/seed prescription maps safely."""
