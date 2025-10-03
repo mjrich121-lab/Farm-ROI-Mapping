@@ -337,99 +337,98 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, width=900, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY (highlighted, bold totals)
+# 9. PROFIT SUMMARY (always visible, even without yield map)
 # =========================================================
 st.header("Profit Summary")
+
+# Default values if no yield map
+revenue_per_acre = 0.0
+net_profit_per_acre = 0.0
 
 if df is not None:
     revenue_per_acre = df["Revenue_per_acre"].mean()
     net_profit_per_acre = df["NetProfit_per_acre"].mean()
 
-    # --- Profit Metrics ---
-    summary = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Value": [revenue_per_acre, base_expenses_per_acre, net_profit_per_acre]
-    })
-    summary["Value"] = summary["Value"].map("${:,.2f}".format)
-    summary = summary.set_index("Metric")
+# --- Profit Metrics ---
+summary = pd.DataFrame({
+    "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+    "Value": [revenue_per_acre, base_expenses_per_acre, net_profit_per_acre]
+})
+summary["Value"] = summary["Value"].map("${:,.2f}".format)
+summary = summary.set_index("Metric")
 
-    def style_profit(val, metric):
-        """Color profit row green/red and bold"""
-        if metric == "Profit ($/ac)":
-            num = float(val.replace("$","").replace(",",""))
-            if num > 0:
-                return "color: green; font-weight: bold;"
-            elif num < 0:
-                return "color: red; font-weight: bold;"
-            else:
-                return "font-weight: bold;"
-        return ""
-
-    # --- Fixed Input Costs ---
-    fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
-    total_fixed = sum(expenses.values())
-    fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", total_fixed]
-    fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
-    fixed_df = fixed_df.set_index("Expense")
-
-    def style_totals(val, idx):
-        """Bold total rows"""
-        if "Total" in idx:
+def style_profit(val, metric):
+    if metric == "Profit ($/ac)":
+        num = float(val.replace("$","").replace(",",""))
+        if num > 0:
+            return "color: green; font-weight: bold;"
+        elif num < 0:
+            return "color: red; font-weight: bold;"
+        else:
             return "font-weight: bold;"
-        return ""
+    return ""
 
-    # --- Variable Rate Input Costs ---
-    variable_list = []
-    if not fert_products.empty:
-        fert_display = fert_products[["product", "CostPerAcre"]].copy()
-        fert_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
-        variable_list.append(fert_display)
-    if not seed_products.empty:
-        seed_display = seed_products[["product", "CostPerAcre"]].copy()
-        seed_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
-        variable_list.append(seed_display)
+# --- Fixed Input Costs ---
+fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
+total_fixed = sum(expenses.values())
+fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", total_fixed]
+fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
+fixed_df = fixed_df.set_index("Expense")
 
-    if variable_list:
-        variable_df = pd.concat(variable_list, ignore_index=True)
-        total_var = variable_df["$/ac"].sum()
-        variable_df.loc[len(variable_df)] = ["Total Variable Costs", total_var]
-    else:
-        variable_df = pd.DataFrame({
-            "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3", "Total Variable Costs"],
-            "$/ac": [0, 0, 0, 0, 0]
-        })
+def style_totals(val, idx):
+    if "Total" in idx:
+        return "font-weight: bold;"
+    return ""
 
-    variable_df["$/ac"] = variable_df["$/ac"].apply(lambda x: f"${x:,.2f}")
-    variable_df = variable_df.set_index("Product")
+# --- Variable Rate Input Costs ---
+variable_list = []
+if not fert_products.empty:
+    fert_display = fert_products[["product", "CostPerAcre"]].copy()
+    fert_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
+    variable_list.append(fert_display)
+if not seed_products.empty:
+    seed_display = seed_products[["product", "CostPerAcre"]].copy()
+    seed_display.rename(columns={"product": "Product", "CostPerAcre": "$/ac"}, inplace=True)
+    variable_list.append(seed_display)
 
-    # --- Layout ---
-    left_col, right_col = st.columns([1.2, 1])
-
-    with left_col:
-        st.subheader("Profit Metrics")
-        st.dataframe(
-            summary.style.apply(
-                lambda col: [style_profit(v, col.name) for v in col],
-                axis=0
-            )
-        )
-
-        st.subheader("Variable Rate Input Costs")
-        st.dataframe(
-            variable_df.style.apply(
-                lambda col: [style_totals(v, idx) for idx, v in zip(variable_df.index, col)],
-                axis=0
-            )
-        )
-
-    with right_col:
-        st.subheader("Fixed Input Costs")
-        st.dataframe(
-            fixed_df.style.apply(
-                lambda col: [style_totals(v, idx) for idx, v in zip(fixed_df.index, col)],
-                axis=0
-            )
-        )
-
+if variable_list:
+    variable_df = pd.concat(variable_list, ignore_index=True)
+    total_var = variable_df["$/ac"].sum()
+    variable_df.loc[len(variable_df)] = ["Total Variable Costs", total_var]
 else:
-    st.write("Upload a yield map (or zone file) to see profit results.")
+    variable_df = pd.DataFrame({
+        "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3", "Total Variable Costs"],
+        "$/ac": [0, 0, 0, 0, 0]
+    })
+
+variable_df["$/ac"] = variable_df["$/ac"].apply(lambda x: f"${x:,.2f}")
+variable_df = variable_df.set_index("Product")
+
+# --- Layout ---
+left_col, right_col = st.columns([1.2, 1])
+
+with left_col:
+    st.subheader("Profit Metrics")
+    st.dataframe(
+        summary.style.apply(
+            lambda col: [style_profit(v, col.name) for v in col],
+            axis=0
+        )
+    )
+
+    st.subheader("Variable Rate Input Costs")
+    st.dataframe(
+        variable_df.style.apply(
+            lambda col: [style_totals(v, idx) for idx, v in zip(variable_df.index, col)],
+            axis=0
+        )
+    )
+
+with right_col:
+    st.subheader("Fixed Input Costs")
+    st.dataframe(
+        fixed_df.style.apply(
+            lambda col: [style_totals(v, idx) for idx, v in zip(fixed_df.index, col)],
+            axis=0
+        )
+    )
