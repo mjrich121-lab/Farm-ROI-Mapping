@@ -148,15 +148,15 @@ if zone_file is not None:
             zone_acres_df = pd.concat([zone_acres_df, total_row], ignore_index=True)
 
             # --- Centered compact table ---
-            col1, col2, col3 = st.columns([1,2,1])  # center column wider
+            col1, col2, col3 = st.columns([1,2,1])  # narrow-wide-narrow layout
             with col2:
                 st.dataframe(
                     zone_acres_df.style.format({
                         "Calculated Acres": "{:,.2f}",
                         "Override Acres": "{:,.2f}"
                     }),
-                    use_container_width=False,
-                    height=200
+                    use_container_width=True,   # fit to container, no side scroll
+                    hide_index=True             # no row numbers
                 )
 
             # --- Save cleaned zones to session state ---
