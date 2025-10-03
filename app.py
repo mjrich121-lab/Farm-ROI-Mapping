@@ -775,7 +775,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     </div>
     """  # <-- this closes the f-string properly
 
-    m.get_root().html.add_child(Element(legend_html)
+    m.get_root().html.add_child(Element(legend_html))
 
 # =========================================================
 # 8. DISPLAY MAP (once, all overlays toggleable)
