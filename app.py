@@ -350,7 +350,7 @@ base_expenses_per_acre = sum(expenses.values())
 # =========================================================
 st.header("Fixed Rate Prescription Inputs")
 
-with st.expander("⚙️ Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
+with st.expander("Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
     # Initialize session state if missing
     if "fixed_products" not in st.session_state:
         st.session_state["fixed_products"] = pd.DataFrame(
@@ -380,7 +380,7 @@ with st.expander("⚙️ Fixed Rate Inputs (Seed & Fertilizer)", expanded=False)
 # =========================================================
 st.header("Variable Rate Prescription Inputs")
 
-with st.expander("📊 Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
+with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
     fert_df = st.session_state["fert_products"]
     seed_df = st.session_state["seed_products"]
 
