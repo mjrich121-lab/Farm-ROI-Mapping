@@ -638,8 +638,8 @@ with col_right:
     )
 
     # --- Force height expansion ---
-    row_height = 35   # bump per-row pixel height up a bit
-    header_buffer = 60
+    row_height = 32   # bump per-row pixel height up a bit
+    header_buffer = 45
     table_height = len(fixed_df) * row_height + header_buffer
 
     st.dataframe(
