@@ -597,13 +597,14 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
+
 # =========================================================
-# 6. ZONE MAP DISPLAY (Colored Zones, Map Only)
+# 6. ZONE MAP DISPLAY (Colored Zones, Satellite Basemap, Dynamic Legend)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"]
 
-    # Guarantee EPSG:4326 for Folium
+    # Ensure EPSG:4326 for Folium
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -612,7 +613,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Fixed colors 1→5
+    # Zone colors fixed for 1–5 but applied dynamically
     zone_colors = {
         1: "#e41a1c",  # red
         2: "#ff7f00",  # orange
@@ -628,11 +629,21 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             return "#3186cc"
 
     # Bounds & map
-    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+    bounds = gdf.total_bounds
     center = [(bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0]
-    m = folium.Map(location=center, zoom_start=14)
 
-    # GeoJson layer — tooltips require these fields to EXIST in gdf
+    # Satellite basemap with labels
+    m = folium.Map(location=center, zoom_start=15, tiles=None)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Esri Satellite",
+        overlay=False,
+        control=True
+    ).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
+
+    # Add zones
     folium.GeoJson(
         gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
         name="Zones",
@@ -649,27 +660,30 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         ),
     ).add_to(m)
 
-    # Auto-zoom
+    # Fit map to field bounds
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Legend
-    legend_html = """
+    # Dynamic legend (matches zones present in gdf)
+    unique_zones = sorted(gdf["Zone"].unique())
+    legend_items = ""
+    for z in unique_zones:
+        color = zone_colors.get(int(z), "#3186cc")
+        legend_items += f'<i style="background:{color};color:{color}">..</i>&nbsp; Zone {z}<br>'
+
+    legend_html = f"""
      <div style="
          position: fixed; 
-         bottom: 30px; left: 30px; width: 150px; height: 160px; 
+         bottom: 30px; left: 30px; width: 160px; 
          background-color: white; border:2px solid grey; z-index:9999; 
          font-size:14px; padding:6px;">
          <b>Zone Colors</b><br>
-         <i style="background:#e41a1c;color:#e41a1c">..</i>&nbsp; Zone 1<br>
-         <i style="background:#ff7f00;color:#ff7f00">..</i>&nbsp; Zone 2<br>
-         <i style="background:#ffff33;color:#ffff33">..</i>&nbsp; Zone 3<br>
-         <i style="background:#4daf4a;color:#4daf4a">..</i>&nbsp; Zone 4<br>
-         <i style="background:#006400;color:#006400">..</i>&nbsp; Zone 5<br>
+         {legend_items}
      </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    st_folium(m, width=800, height=500)
+    # Show map with proper sizing
+    st_folium(m, width=1000, height=600)
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
