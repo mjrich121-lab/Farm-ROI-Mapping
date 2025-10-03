@@ -619,14 +619,18 @@ m = make_base_map()
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    # Center on field bounds
+    # Center map on field bounds
     bounds = zones_gdf.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
-    # Fixed Esri imagery (no toggle for basemap)
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=15,
-                   tiles="Esri.WorldImagery", attr=" ")
+    # Fixed Esri imagery (no basemap toggle)
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=15,
+        tiles="Esri.WorldImagery",
+        attr=" "
+    )
 
     # Zone colors
     zone_colors = {
@@ -637,7 +641,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         5: "#006400"    # Dark Green
     }
 
-    # Zones layer
+    # Add zones layer
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -650,7 +654,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
     ).add_to(m)
 
-    # --- Legend (fixed bottom-left) ---
+    # Legend in bottom-left
     unique_zones = sorted(zones_gdf["Zone"].unique())
     legend_html = """
     <div style="
@@ -673,12 +677,11 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Layer control (ONLY user layers like Zones, Yield, Prescriptions)
+    # Only toggle user-added layers (Zones, Yield, etc.)
     folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
     # Display map
     st_folium(m, width=1000, height=600)
-
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
