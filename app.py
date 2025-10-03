@@ -610,16 +610,42 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
+
 # =========================================================
-# 6. MAP DISPLAY (Zones Overlay, no rendering yet)
+# 6. MAP DISPLAY (Fixed Esri imagery, overlays toggleable)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    # Zone colors
-    zone_colors = {1:"#FF0000",2:"#FF8C00",3:"#FFFF00",4:"#32CD32",5:"#006400"}
+    # Center map on field bounds
+    bounds = zones_gdf.total_bounds
+    center_lat = (bounds[1] + bounds[3]) / 2
+    center_lon = (bounds[0] + bounds[2]) / 2
 
-    # Add zones as overlay (toggleable, very transparent so yield shows beneath)
+    # ✅ Base map with locked Esri imagery
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=15,
+        tiles=None
+    )
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri WorldImagery",
+        name="Esri Imagery",
+        overlay=False,
+        control=False
+    ).add_to(m)
+
+    # Zone colors
+    zone_colors = {
+        1: "#FF0000",   # Red
+        2: "#FF8C00",   # Orange
+        3: "#FFFF00",   # Yellow
+        4: "#32CD32",   # Light Green
+        5: "#006400"    # Dark Green
+    }
+
+    # Zones overlay (transparent so yield/heatmaps show beneath)
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -627,12 +653,12 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             "fillColor": zone_colors.get(int(feature["properties"]["Zone"]), "#808080"),
             "color": "black",
             "weight": 1,
-            "fillOpacity": 0.1,   # ✅ transparent so yield/heatmaps show beneath
+            "fillOpacity": 0.1,
         },
-        tooltip=folium.GeoJsonTooltip(fields=["Zone","Calculated Acres","Override Acres"])
+        tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
     ).add_to(m)
 
-       # ✅ Zone legend in bottom-left
+    # ✅ Zone legend in bottom-left
     unique_zones = sorted(zones_gdf["Zone"].unique())
     zone_legend_html = """
     <div style="
@@ -654,8 +680,12 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     zone_legend_html += "</div>"
     m.get_root().html.add_child(folium.Element(zone_legend_html))
 
+    # ✅ Keep overlay toggles
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+
+
 # =========================================================
-# 7. YIELD + PROFIT (Variable + Fixed Rate, overlays only)
+# 7. YIELD + PROFIT (Variable + Fixed Rate overlays)
 # =========================================================
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
@@ -694,7 +724,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
         fixed_costs = fixed_df["$/ac"].sum()
     df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - base_expenses_per_acre - fixed_costs
 
-    # ✅ Auto-zoom to combined bounds (zones + yield)
+    # ✅ Auto-zoom to combined bounds
     bounds_list = []
     if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
         zb = st.session_state["zones_gdf"].total_bounds
@@ -730,19 +760,27 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
             image=rgba,
             bounds=[[south, west], [north, east]],
             opacity=0.5,
-            name=name,        # ✅ appears in LayerControl
+            name=name,
             overlay=True,
             show=show_default
         )
         overlay.add_to(m)
         return (vmin, vmax)
 
-    # Add overlays (all toggleable)
+    # Add overlays (toggleable)
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
     v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-# ✅ Custom Legend (top-left, transparent background)
+    # Build gradient for legends
+    def rgba_to_hex(rgba_tuple):
+        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
+
+    # ✅ Profit/Yield legend (top-left, transparent)
     profit_legend_html = f"""
     <div style="position: fixed; top: 20px; left: 20px; z-index: 9999;
                 display: flex; flex-direction: column; gap: 10px; 
