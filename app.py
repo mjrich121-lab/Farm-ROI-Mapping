@@ -497,7 +497,8 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import Template
+from branca.element import MacroElement
+from jinja2 import Template
 
 def make_base_map():
     m = folium.Map(
@@ -520,17 +521,22 @@ def make_base_map():
     ).add_to(m)
 
     # 🔹 Add JS for click-to-enable scroll
-    template = Template("""
+    scroll_template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
+        map.scrollWheelZoom.disable();
         map.once('click', function() {
             map.scrollWheelZoom.enable();
         });
         {% endmacro %}
     """)
-    m.get_root().script.add_child(template)
+
+    scroll_macro = MacroElement()
+    scroll_macro._template = scroll_template
+    m.get_root().add_child(scroll_macro)
 
     return m
+
 
 
 # =========================================================
