@@ -627,14 +627,18 @@ with col_left:
 with col_right:
     st.subheader("Fixed Input Costs")
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
-    total_fixed = pd.DataFrame([{"Expense":"Total Fixed Costs", "$/ac":fixed_df["$/ac"].sum()}])
+    total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    # Expand table height so no scrolling is needed
+    # Dynamically calculate height so it always fits
+    row_height = 32  # pixels per row (approx)
+    buffer_height = 40  # top padding
+    table_height = len(fixed_df) * row_height + buffer_height
+
     st.dataframe(
-        fixed_df.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
+        fixed_df.style.format({"$/ac": "${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
         use_container_width=True,
         hide_index=True,
-        height=(len(fixed_df) * 28 + 40)   # 👈 expands dynamically to fit rows
+        height=table_height  # 👈 force full expansion
     )
 
