@@ -645,90 +645,9 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 # --- Layout (two columns) ---
 col_left, col_right = st.columns([2, 2])
-
-# --------------------------
-# LEFT SIDE = Breakeven + Profit Comparison
-# --------------------------
-with col_left:
-    st.subheader("Breakeven Budget Tool (Corn vs Beans)")
-
-    # --- User inputs ---
-    st.markdown("Enter yield goals and sell prices to see breakeven budgets per acre.")
-
-    corn_yield = st.number_input("Corn Yield Goal (bu/ac)", min_value=0.0, value=200.0, step=1.0)
-    corn_price = st.number_input("Corn Sell Price ($/bu)", min_value=0.0, value=5.0, step=0.1)
-    bean_yield = st.number_input("Soybean Yield Goal (bu/ac)", min_value=0.0, value=60.0, step=1.0)
-    bean_price = st.number_input("Soybean Sell Price ($/bu)", min_value=0.0, value=12.0, step=0.1)
-
-    # --- Calculate breakeven budgets ---
-    corn_revenue = corn_yield * corn_price
-    bean_revenue = bean_yield * bean_price
-
-    corn_budget = corn_revenue - expenses_per_acre
-    bean_budget = bean_revenue - expenses_per_acre
-
-    breakeven_df = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
-        "Revenue ($/ac)": [corn_revenue, bean_revenue],
-        "Fixed Inputs ($/ac)": [expenses_per_acre, expenses_per_acre],
-        "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
-    })
-
-    def highlight_budget(val):
-        if isinstance(val, (int, float)):
-            if val > 0:
-                return "color: green; font-weight: bold;"
-            elif val < 0:
-                return "color: red; font-weight: bold;"
-        return "font-weight: bold;"
-
-    st.dataframe(
-        breakeven_df.style.applymap(highlight_budget, subset=["Breakeven Budget ($/ac)"]).format({
-            "Yield Goal (bu/ac)": "{:,.1f}",
-            "Sell Price ($/bu)": "${:,.2f}",
-            "Revenue ($/ac)": "${:,.2f}",
-            "Fixed Inputs ($/ac)": "${:,.2f}",
-            "Breakeven Budget ($/ac)": "${:,.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
     # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
- # ... all the variable, fixed, breakeven calculations ...
 
-    st.dataframe(
-        comparison.style.applymap(
-            highlight_profit,
-            subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
-        ).format({
-            "Breakeven Budget":"${:,.2f}",
-            "Variable Rate":"${:,.2f}",
-            "Fixed Rate":"${:,.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # Collapsible formulas go right here
-    with st.expander("Show Calculation Formulas", expanded=False):
-        st.markdown("""
-        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
-            <b>Breakeven Budget</b><br>
-            (Target Yield × Sell Price) − Fixed Inputs
-        </div>
-        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
-            <b>Variable Rate</b><br>
-            (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-        </div>
-        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
-            <b>Fixed Rate</b><br>
-            (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-        </div>
-        """, unsafe_allow_html=True)
     # Variable Rate Profit
     var_profit = 0.0
     if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
@@ -759,26 +678,12 @@ with col_left:
     expenses_overall = expenses_per_acre
     profit_overall = net_profit_per_acre
 
+    # Build numeric-only comparison table
     comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)", "Formula"],
-        "Breakeven Budget": [
-            round(revenue_overall, 2),
-            round(expenses_overall, 2),
-            round(profit_overall, 2),
-            "(Target Yield × Sell Price) − Fixed Inputs"
-        ],
-        "Variable Rate": [
-            round(revenue_var, 2),
-            round(expenses_var, 2),
-            round(var_profit, 2),
-            "(Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)"
-        ],
-        "Fixed Rate": [
-            round(revenue_fixed, 2),
-            round(expenses_fixed, 2),
-            round(fixed_profit, 2),
-            "(Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)"
-        ]
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+        "Breakeven Budget": [round(revenue_overall,2), round(expenses_overall,2), round(profit_overall,2)],
+        "Variable Rate": [round(revenue_var,2), round(expenses_var,2), round(var_profit,2)],
+        "Fixed Rate": [round(revenue_fixed,2), round(expenses_fixed,2), round(fixed_profit,2)]
     })
 
     def highlight_profit(val):
@@ -797,10 +702,28 @@ with col_left:
             "Breakeven Budget":"${:,.2f}",
             "Variable Rate":"${:,.2f}",
             "Fixed Rate":"${:,.2f}"
-        }, na_rep=""),
+        }),
         use_container_width=True,
         hide_index=True
     )
+
+    # Collapsible formulas shown separately
+    with st.expander("📘 Show Calculation Formulas", expanded=False):
+        st.markdown("""
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Breakeven Budget</b><br>
+            (Target Yield × Sell Price) − Fixed Inputs
+        </div>
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Variable Rate</b><br>
+            (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+        </div>
+        <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+            <b>Fixed Rate</b><br>
+            (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+        </div>
+        """, unsafe_allow_html=True)
+
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
