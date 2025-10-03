@@ -162,7 +162,10 @@ base_expenses_per_acre = sum(expenses.values())
 # =========================================================
 # 5. BASE MAP
 # =========================================================
-m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
+if "farm_map" not in st.session_state:
+    st.session_state["farm_map"] = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
+
+m = st.session_state["farm_map"]
 
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
