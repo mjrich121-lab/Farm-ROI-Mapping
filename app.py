@@ -14,6 +14,45 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Farm ROI Tool V3", layout="wide")
 st.title("Farm Profit Mapping Tool V3")
+# Make the app responsive to screen size
+st.markdown(
+    """
+    <style>
+    /* Force all Streamlit containers to be responsive */
+    .block-container {
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    /* Dataframes and tables fit screen width */
+    .dataframe {
+        width: 100% !important;
+        overflow-x: auto !important;
+    }
+
+    /* Compact table styling */
+    .compact-table td, .compact-table th {
+        padding: 4px 8px !important;
+        font-size: 12px !important;
+        white-space: nowrap;
+    }
+
+    /* Map responsiveness */
+    iframe[title="st_folium"] {
+        width: 100% !important;
+        height: 70vh !important;
+    }
+
+    /* Make headers tighter */
+    h1, h2, h3 {
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # =========================================================
 # HELPER: AUTO-ZOOM
