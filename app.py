@@ -611,40 +611,15 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 # =========================================================
-# 6. MAP DISPLAY (Fixed Esri imagery, overlays toggleable)
+# 6. MAP DISPLAY (Zones Overlay, no rendering yet)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    # Center map on field bounds (default start, will be adjusted later by Section 7)
-    bounds = zones_gdf.total_bounds
-    center_lat = (bounds[1] + bounds[3]) / 2
-    center_lon = (bounds[0] + bounds[2]) / 2
-
-    # ✅ Fixed Esri imagery, not toggleable
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=15,
-        tiles=None
-    )
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri WorldImagery",
-        name="Esri Imagery",
-        overlay=False,
-        control=False   # 🚫 do not show basemap toggle
-    ).add_to(m)
-
     # Zone colors
-    zone_colors = {
-        1: "#FF0000",   # Red
-        2: "#FF8C00",   # Orange
-        3: "#FFFF00",   # Yellow
-        4: "#32CD32",   # Light Green
-        5: "#006400"    # Dark Green
-    }
+    zone_colors = {1:"#FF0000",2:"#FF8C00",3:"#FFFF00",4:"#32CD32",5:"#006400"}
 
-    # Add zones as overlay (toggleable, very transparent so yield shows)
+    # Add zones as overlay (toggleable, very transparent so yield shows beneath)
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -654,7 +629,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             "weight": 1,
             "fillOpacity": 0.1,   # ✅ transparent so yield/heatmaps show beneath
         },
-        tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
+        tooltip=folium.GeoJsonTooltip(fields=["Zone","Calculated Acres","Override Acres"])
     ).add_to(m)
 
     # ✅ Zone legend in bottom-left
@@ -679,48 +654,28 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     legend_html += "</div>"
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # ✅ Keep LayerControl for overlays (Zones, Yield, Profit maps, etc.)
-    folium.LayerControl(collapsed=False, position="topright").add_to(m)
-
-    # Display map placeholder (will be updated in Section 7 if yield is present)
-    st_folium(m, width=1000, height=600)
-
 
 # =========================================================
-# 7. YIELD + PROFIT (Variable + Fixed Rate)
+# 7. YIELD + PROFIT (Variable + Fixed Rate, overlays only)
 # =========================================================
-df = None
-# --- Ensure session state defaults ---
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "yield_df" not in st.session_state:
-    st.session_state["yield_df"] = None
-if "fixed_products" not in st.session_state:
-    st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
-
-# --- Work with yield data if available ---
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
 
-    # 🔍 Detect yield column (prefer Dry Yield variants)
-    yield_col_priority = ["Dry_Yield", "DryYield", "DryYld", "Yld_Dry",
-                          "YIELD", "Yield", "Yld", "YLD", "YLD_BuAc", "USBU_AC", "WET_YLD"]
-
+    # 🔍 Detect yield column
+    yield_col_priority = ["Dry_Yield","DryYield","DryYld","Yld_Dry",
+                          "YIELD","Yield","Yld","YLD","YLD_BuAc","USBU_AC","WET_YLD"]
     yield_col = None
     for candidate in yield_col_priority:
         for col in df.columns:
             if candidate.lower() in col.lower():
                 yield_col = col
                 break
-        if yield_col:
-            break
+        if yield_col: break
 
     if yield_col is None:
         st.error("❌ No recognized yield column found in uploaded file.")
     else:
-        df = df.rename(columns={yield_col: "Yield"})
+        df = df.rename(columns={yield_col:"Yield"})
         st.success(f"✅ Using `{yield_col}` column for Yield calculations (renamed to `Yield`).")
         st.session_state["yield_df"] = df
         df["Revenue_per_acre"] = df["Yield"] * sell_price
@@ -745,7 +700,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
         zb = st.session_state["zones_gdf"].total_bounds
         bounds_list.append([[zb[1], zb[0]], [zb[3], zb[2]]])
-    if df is not None and "Latitude" in df and "Longitude" in df:
+    if {"Latitude","Longitude"}.issubset(df.columns):
         bounds_list.append([[df["Latitude"].min(), df["Longitude"].min()],
                             [df["Latitude"].max(), df["Longitude"].max()]])
     if bounds_list:
@@ -755,7 +710,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
         east  = max(b[1][1] for b in bounds_list)
         m.fit_bounds([[south, west], [north, east]])
 
-    # ✅ Heatmap helper (toggleable overlays)
+    # ✅ Heatmap helper
     def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
@@ -776,7 +731,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
             image=rgba,
             bounds=[[south, west], [north, east]],
             opacity=0.5,
-            name=name,        # ✅ toggleable in LayerControl
+            name=name,        # ✅ appears in LayerControl
             overlay=True,
             show=show_default
         )
@@ -788,7 +743,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
-    # Legend
+    # Legend HTML
     def rgba_to_hex(rgba_tuple):
         r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
         return f"#{r:02x}{g:02x}{b:02x}"
@@ -824,8 +779,9 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 
 # =========================================================
-# 8. DISPLAY MAP
+# 8. DISPLAY MAP (once, all overlays toggleable)
 # =========================================================
+folium.LayerControl(collapsed=False, position="topright").add_to(m)
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
