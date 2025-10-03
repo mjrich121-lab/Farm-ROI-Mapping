@@ -595,22 +595,118 @@ def make_base_map():
 m = make_base_map()
 
 # =========================================================
-# 6. ZONE MAP DISPLAY (minimal test)
+# 6. ZONE MAP DISPLAY
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"].copy()
 
-    # Bounds and center
+    # CRS fix
+    try:
+        if gdf.crs is None:
+            gdf.set_crs(epsg=4326, inplace=True)
+        elif gdf.crs.to_string() != "EPSG:4326":
+            gdf = gdf.to_crs(epsg=4326)
+    except Exception as e:
+        st.warning(f"⚠️ CRS issue: {e}")
+
+    # Ensure required columns
+    if "Zone" not in gdf.columns:
+        gdf["Zone"] = range(1, len(gdf) + 1)
+    for col in ["Calculated Acres", "Override Acres"]:
+        if col not in gdf.columns:
+            gdf[col] = 0.0
+        gdf[col] = gdf[col].astype(float)
+
+    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]
+
+    # Zone colors
+    zone_colors = {1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"}
+    def color_for_zone(z):
+        try:
+            return zone_colors.get(int(z), "#3186cc")
+        except Exception:
+            return "#3186cc"
+
+    # Map setup
     bounds = gdf.total_bounds
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Just make a base map
-    m = folium.Map(location=center, zoom_start=15, tiles="OpenStreetMap")
+    # Esri Satellite basemap
+    folium.TileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri World Imagery",
+        name="Satellite",
+        overlay=False
+    ).add_to(m)
 
-    # Test marker in center so we *know* it’s rendering
-    folium.Marker(location=center, popup="Center of Field").add_to(m)
+    # Labels overlay
+    folium.TileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri Boundaries & Labels",
+        name="Labels",
+        overlay=True
+    ).add_to(m)
 
-    # Force render
+    # Zones
+    try:
+        folium.GeoJson(
+            gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
+            style_function=lambda f: {
+                "fillColor": color_for_zone(f["properties"].get("Zone")),
+                "color": "black", "weight": 1, "fillOpacity": 0.45,
+            },
+            tooltip=folium.GeoJsonTooltip(
+                fields=["Zone", "Calculated Acres", "Override Acres"],
+                aliases=["Zone", "Calculated Acres", "Override Acres"]
+            ),
+            name="Zones"
+        ).add_to(m)
+    except Exception as e:
+        st.error(f"❌ Zone rendering failed: {e}")
+
+    # Legend as a toggleable overlay
+    legend_items = ""
+    for z, col in zone_colors.items():
+        legend_items += (
+            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
+            f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
+            f'<span style="color:#000;">Zone {z}</span>'
+            f'</div>'
+        )
+
+    legend_html = f"""
+     <div style="
+         background: rgba(255,255,255,0.95);
+         border: 1px solid #888;
+         border-radius: 6px;
+         padding: 8px 10px;
+         font-size: 14px;
+         ">
+       <div style="font-weight:600;margin-bottom:6px;color:#000;">Zone Colors</div>
+       {legend_items}
+     </div>
+    """
+
+    # Wrap legend as a "Custom" layer
+    legend = folium.map.Marker(
+        [center[0], center[1]],  # dummy anchor, not shown
+        icon=folium.DivIcon(html=legend_html)
+    )
+    legend_group = folium.FeatureGroup(name="Legend", show=True)
+    legend_group.add_child(legend)
+    m.add_child(legend_group)
+
+    # Add layer control
+    folium.LayerControl(collapsed=False).add_to(m)
+
+    # Fit map
+    try:
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception:
+        pass
+
+    # Show map
     st_folium(m, width=1000, height=650)
 
 # =========================================================
