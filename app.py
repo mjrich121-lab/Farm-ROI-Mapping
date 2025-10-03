@@ -645,8 +645,8 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 # --- Layout (two columns) ---
 col_left, col_right = st.columns([2, 2])
-    # --- Profit Metrics Comparison ---
-    st.subheader("Profit Metrics Comparison")
+# --- Profit Metrics Comparison ---
+st.subheader("Profit Metrics Comparison")
 
     # Variable Rate Profit
     var_profit = 0.0
