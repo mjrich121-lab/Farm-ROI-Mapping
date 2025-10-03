@@ -156,17 +156,16 @@ if uploaded_file is not None:
     try:
         df = None
 
-        # --- Handle ZIP (look for first CSV inside) ---
+        # --- Handle ZIP (extract first CSV) ---
         if uploaded_file.name.endswith(".zip"):
-            import zipfile
-            import io
+            import zipfile, io
             with zipfile.ZipFile(uploaded_file) as z:
                 csv_files = [f for f in z.namelist() if f.endswith(".csv")]
-                if len(csv_files) == 0:
-                    st.error("❌ No CSV found inside the ZIP file.")
-                else:
+                if csv_files:
                     with z.open(csv_files[0]) as f:
                         df = pd.read_csv(f)
+                else:
+                    st.error("❌ No CSV found inside the ZIP file.")
 
         # --- Handle CSV ---
         elif uploaded_file.name.endswith(".csv"):
@@ -200,7 +199,6 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Error reading file: {e}")
-
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
