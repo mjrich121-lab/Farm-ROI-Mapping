@@ -638,15 +638,15 @@ with col_right:
     )
 
    # --- Force height expansion (no scrolling, slight buffer) ---
-row_height = 35        # keep a comfortable row height
-header_buffer = 60     # allow for header + bottom padding
-scroll_buffer = 20     # extra space to prevent clipping
+    row_height = 35        # keep a comfortable row height
+    header_buffer = 60     # allow for header + bottom padding
+    scroll_buffer = 20     # extra space to prevent clipping
 
-table_height = len(fixed_df) * row_height + header_buffer + scroll_buffer
+    table_height = len(fixed_df) * row_height + header_buffer + scroll_buffer
 
-st.dataframe(
-    styled_fixed,
-    use_container_width=True,
-    hide_index=True,
-    height=table_height  # always a touch taller than needed
-)
+        st.dataframe(
+        styled_fixed,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height  # always a touch taller than needed
+    )
