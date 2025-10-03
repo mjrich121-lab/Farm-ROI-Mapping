@@ -500,14 +500,14 @@ from branca.element import MacroElement, Template
 
 def make_base_map():
     m = folium.Map(
-        location=[39.5, -98.35],  # Center of continental US
-        zoom_start=5,             # Default zoom on load
+        location=[39.5, -98.35],  # Center of US
+        zoom_start=5,
         tiles=None,
-        scrollWheelZoom=False,    # Disable scroll wheel initially
+        scrollWheelZoom=False,    # Disable on load
         prefer_canvas=True
     )
 
-    # Esri Satellite + Labels always on
+    # Always-on Esri layers
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -517,25 +517,25 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # 🔹 JS: Enable scroll zoom only while the mouse is over the map
+    # JS to mimic Google Maps behavior
     template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
 
-        // Disable scroll by default
+        // Disable scroll wheel by default
         map.scrollWheelZoom.disable();
 
-        // Enable scroll when mouse enters map
-        map.on('mouseover', function() {
+        // Enable scroll wheel ONLY when map has focus (clicked)
+        map.on('focus', function() {
             map.scrollWheelZoom.enable();
         });
 
-        // Disable scroll when mouse leaves map
-        map.on('mouseout', function() {
+        // Disable again when map loses focus
+        map.on('blur', function() {
             map.scrollWheelZoom.disable();
         });
 
-        // Keep minZoom locked at 7 after map loads
+        // Lock min zoom after load
         map.whenReady(function() {
             setTimeout(function() {
                 map.setMinZoom(7);
@@ -549,7 +549,7 @@ def make_base_map():
 
     return m
 
-# Always start with a fresh map each run
+# Always start with a fresh map
 m = make_base_map()
 
 # =========================================================
