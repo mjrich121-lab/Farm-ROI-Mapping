@@ -496,18 +496,20 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import MacroElement, Template
+from branca.element import MacroElement
+from jinja2 import Template
 
 def make_base_map():
+    # Start centered on US, scroll wheel disabled initially
     m = folium.Map(
-        location=[39.5, -98.35],  # Center of US
-        zoom_start=5,
+        location=[39.5, -98.35],
+        zoom_start=5,           # default US view
         tiles=None,
-        scrollWheelZoom=False,    # Disable on load
+        scrollWheelZoom=False,  # OFF at load (page scroll stays smooth)
         prefer_canvas=True
     )
 
-    # Always-on Esri layers
+    # Always-on Esri Satellite + Labels (no user toggles)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -517,40 +519,68 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # JS to mimic Google Maps behavior
-    template = Template("""
+    # JS: click to enable wheel zoom; disable when pointer leaves the map.
+    # Also set minZoom=7 AFTER the map is ready so it doesn't override your initial zoom_start=5 or fit_bounds.
+    scroll_lock_js = Template("""
         {% macro script(this, kwargs) %}
-        var map = {{this._parent.get_name()}};
+        (function() {
+          var map = {{ this._parent.get_name() }};
+          function setup() {
+            try {
+              var container = map.getContainer();
+              // Make sure container can receive focus if needed
+              if (container && !container.hasAttribute('tabindex')) {
+                container.setAttribute('tabindex', '0');
+              }
 
-        // Disable scroll wheel by default
-        map.scrollWheelZoom.disable();
+              // Disable wheel zoom at start
+              map.scrollWheelZoom.disable();
 
-        // Enable scroll wheel ONLY when map has focus (clicked)
-        map.on('focus', function() {
-            map.scrollWheelZoom.enable();
-        });
+              // Enable wheel zoom after a click (focus-like behavior)
+              container.addEventListener('click', function() {
+                map.scrollWheelZoom.enable();
+                try { container.focus({preventScroll:true}); } catch(e) {}
+              });
 
-        // Disable again when map loses focus
-        map.on('blur', function() {
-            map.scrollWheelZoom.disable();
-        });
+              // Disable wheel zoom when pointer leaves the map area
+              container.addEventListener('mouseleave', function() {
+                map.scrollWheelZoom.disable();
+              });
 
-        // Lock min zoom after load
-        map.whenReady(function() {
-            setTimeout(function() {
-                map.setMinZoom(7);
-            }, 500);
-        });
+              // As an extra guard, if the page is scrolled while not hovering the map, keep it disabled
+              window.addEventListener('scroll', function() {
+                if (!container.matches(':hover')) {
+                  map.scrollWheelZoom.disable();
+                }
+              }, {passive:true});
+
+              // Apply minZoom AFTER map is ready (so your zoom_start=5 and any fit_bounds still work)
+              map.whenReady(function() {
+                setTimeout(function() { map.setMinZoom(7); }, 0);
+              });
+            } catch (e) {
+              console && console.warn && console.warn('Scroll lock setup failed:', e);
+            }
+          }
+
+          // Run when Leaflet map is ready
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function(){ map.whenReady(setup); });
+          } else {
+            map.whenReady(setup);
+          }
+        })();
         {% endmacro %}
     """)
     macro = MacroElement()
-    macro._template = template
+    macro._template = scroll_lock_js
     m.get_root().add_child(macro)
 
     return m
 
-# Always start with a fresh map
+# Always start with a fresh map each run
 m = make_base_map()
+
 
 # =========================================================
 # 6. ZONES
@@ -720,7 +750,12 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
+# (after you add overlays)
+folium.LayerControl(collapsed=False).add_to(m)
+
+# Render
 st_folium(m, use_container_width=True, height=600)
+st.caption("Tip: Click inside the map to enable mouse-wheel zoom. Move the mouse off the map to resume page scrolling.")
 
 # --- Initialize session state defaults (safety net) ---
 if "fert_products" not in st.session_state:
