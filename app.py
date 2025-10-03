@@ -337,7 +337,7 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, width=900, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY (compact, no line numbers, with totals)
+# 9. PROFIT SUMMARY (highlighted, bold totals)
 # =========================================================
 st.header("Profit Summary")
 
@@ -353,11 +353,30 @@ if df is not None:
     summary["Value"] = summary["Value"].map("${:,.2f}".format)
     summary = summary.set_index("Metric")
 
-    # --- Fixed Input Costs (always show all) ---
+    def style_profit(val, metric):
+        """Color profit row green/red and bold"""
+        if metric == "Profit ($/ac)":
+            num = float(val.replace("$","").replace(",",""))
+            if num > 0:
+                return "color: green; font-weight: bold;"
+            elif num < 0:
+                return "color: red; font-weight: bold;"
+            else:
+                return "font-weight: bold;"
+        return ""
+
+    # --- Fixed Input Costs ---
     fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
-    fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", sum(expenses.values())]
+    total_fixed = sum(expenses.values())
+    fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", total_fixed]
     fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
     fixed_df = fixed_df.set_index("Expense")
+
+    def style_totals(val, idx):
+        """Bold total rows"""
+        if "Total" in idx:
+            return "font-weight: bold;"
+        return ""
 
     # --- Variable Rate Input Costs ---
     variable_list = []
@@ -388,15 +407,29 @@ if df is not None:
 
     with left_col:
         st.subheader("Profit Metrics")
-        st.table(summary)
+        st.dataframe(
+            summary.style.apply(
+                lambda col: [style_profit(v, col.name) for v in col],
+                axis=0
+            )
+        )
 
         st.subheader("Variable Rate Input Costs")
-        st.table(variable_df)
+        st.dataframe(
+            variable_df.style.apply(
+                lambda col: [style_totals(v, idx) for idx, v in zip(variable_df.index, col)],
+                axis=0
+            )
+        )
 
     with right_col:
         st.subheader("Fixed Input Costs")
-        st.table(fixed_df)
+        st.dataframe(
+            fixed_df.style.apply(
+                lambda col: [style_totals(v, idx) for idx, v in zip(fixed_df.index, col)],
+                axis=0
+            )
+        )
 
 else:
     st.write("Upload a yield map (or zone file) to see profit results.")
-
