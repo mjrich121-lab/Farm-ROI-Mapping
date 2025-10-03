@@ -719,12 +719,8 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
-# (after you add overlays)
-folium.LayerControl(collapsed=False).add_to(m)
-
-# Render
+# ✅ Do NOT add LayerControl since base layers are locked
 st_folium(m, use_container_width=True, height=600)
-st.caption("Tip: Click inside the map to enable mouse-wheel zoom. Move the mouse off the map to resume page scrolling.")
 
 # --- Initialize session state defaults (safety net) ---
 if "fert_products" not in st.session_state:
