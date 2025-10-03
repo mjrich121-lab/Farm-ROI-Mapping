@@ -753,7 +753,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     west, east = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # ✅ Heatmap helper (now adds overlays with names so they appear in LayerControl)
+       # Heatmap helper (fixed to show layers in LayerControl)
     def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
@@ -770,16 +770,16 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
-        folium.raster_layers.ImageOverlay(
+        overlay = folium.raster_layers.ImageOverlay(
             image=rgba,
             bounds=[[south, west], [north, east]],
             opacity=0.5,
-            name=name,        # ✅ visible in LayerControl
-            overlay=True,     # ✅ mark as overlay
+            name=name,        # ✅ this name appears in LayerControl
             show=show_default
-        ).add_to(m)
-
+        )
+        overlay.add_to(m)      # ✅ properly register with map
         return (vmin, vmax)
+
 
     # Add overlays (toggleable in LayerControl)
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
