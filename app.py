@@ -591,28 +591,35 @@ if "fixed_products" not in st.session_state:
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
 
-    # 🔍 Detect yield column (prefer Dry Yield)
-    yield_col_priority = ["Dry_Yield", "DRY_YIELD", "DryYield", "DRY YIELD", "YIELD", "Yield", "YLD_BuAc", "USBU_AC", "WET_YLD"]
+    # Show available columns for debugging
+    st.write("📋 Columns in uploaded file:", list(df.columns))
+
+    # 🔍 Detect yield column (prefer Dry Yield variants)
+    yield_col_priority = ["Dry_Yield", "DryYield", "DryYld", "Yld_Dry",
+                          "YIELD", "Yield", "Yld", "YLD", "YLD_BuAc", "USBU_AC", "WET_YLD"]
+
     yield_col = None
-    for c in yield_col_priority:
-        if c in df.columns:
-            yield_col = c
+    for candidate in yield_col_priority:
+        for col in df.columns:
+            if candidate.lower() in col.lower():   # case-insensitive, partial match
+                yield_col = col
+                break
+        if yield_col:
             break
 
     if yield_col is None:
         st.error(
             "❌ No recognized yield column found in uploaded file. "
-            "Expected one of: Dry_Yield, YIELD, YLD_BuAc, USBU_AC, WET_YLD"
+            "Expected something like Dry_Yield, YIELD, YLD_BuAc, USBU_AC, etc."
         )
     else:
-        # Always rename to Yield so rest of code works
+        # Always rename detected column to "Yield"
         df = df.rename(columns={yield_col: "Yield"})
         st.success(f"✅ Using `{yield_col}` column for Yield calculations (renamed to `Yield`).")
         st.session_state["yield_df"] = df
 
         # Revenue from yield * sell price
         df["Revenue_per_acre"] = df["Yield"] * sell_price
-
 
     # Variable rate profit
     fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
