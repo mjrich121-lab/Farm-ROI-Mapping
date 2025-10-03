@@ -498,7 +498,14 @@ st.dataframe(
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
 def make_base_map():
-    m = folium.Map(location=[40, -95], zoom_start=4, tiles=None)
+    # Disable scroll wheel zoom initially (must click map to activate)
+    m = folium.Map(
+        location=[40, -95],
+        zoom_start=4,
+        tiles=None,
+        scrollWheelZoom=False,   # 🔹 prevent accidental scroll zoom
+        prefer_canvas=True
+    )
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
@@ -517,6 +524,18 @@ if "yield_df" not in st.session_state:
 
 # Always start with a fresh map each run
 m = make_base_map()
+
+# =========================================================
+# AUTO-ZOOM TO DATA IF AVAILABLE
+# =========================================================
+if st.session_state["zones_gdf"] is not None:
+    bounds = st.session_state["zones_gdf"].total_bounds  # [minx, miny, maxx, maxy]
+    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+
+elif st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
+    south, north = st.session_state["yield_df"]["Latitude"].min(), st.session_state["yield_df"]["Latitude"].max()
+    west, east = st.session_state["yield_df"]["Longitude"].min(), st.session_state["yield_df"]["Longitude"].max()
+    m.fit_bounds([[south, west], [north, east]])
 
 # =========================================================
 # 6. ZONES
