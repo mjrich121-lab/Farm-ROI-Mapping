@@ -337,7 +337,7 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, width=900, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY (two-column layout with totals)
+# 9. PROFIT SUMMARY (compact, no line numbers, with totals)
 # =========================================================
 st.header("Profit Summary")
 
@@ -351,11 +351,13 @@ if df is not None:
         "Value": [revenue_per_acre, base_expenses_per_acre, net_profit_per_acre]
     })
     summary["Value"] = summary["Value"].map("${:,.2f}".format)
+    summary = summary.set_index("Metric")
 
-    # --- Fixed Input Costs (always all expenses) ---
+    # --- Fixed Input Costs (always show all) ---
     fixed_df = pd.DataFrame(expenses.items(), columns=["Expense", "$/ac"])
-    fixed_df.loc["Total"] = ["Total Fixed Costs", sum(expenses.values())]
+    fixed_df.loc[len(fixed_df)] = ["Total Fixed Costs", sum(expenses.values())]
     fixed_df["$/ac"] = fixed_df["$/ac"].map("${:,.2f}".format)
+    fixed_df = fixed_df.set_index("Expense")
 
     # --- Variable Rate Input Costs ---
     variable_list = []
@@ -371,17 +373,17 @@ if df is not None:
     if variable_list:
         variable_df = pd.concat(variable_list, ignore_index=True)
         total_var = variable_df["$/ac"].sum()
-        variable_df.loc["Total"] = ["Total Variable Costs", total_var]
+        variable_df.loc[len(variable_df)] = ["Total Variable Costs", total_var]
     else:
         variable_df = pd.DataFrame({
             "Product": ["Seed", "Fertilizer 1", "Fertilizer 2", "Fertilizer 3", "Total Variable Costs"],
             "$/ac": [0, 0, 0, 0, 0]
         })
 
-    # Format variable table with $
     variable_df["$/ac"] = variable_df["$/ac"].apply(lambda x: f"${x:,.2f}")
+    variable_df = variable_df.set_index("Product")
 
-    # --- Two-column layout ---
+    # --- Layout ---
     left_col, right_col = st.columns([1.2, 1])
 
     with left_col:
@@ -397,3 +399,4 @@ if df is not None:
 
 else:
     st.write("Upload a yield map (or zone file) to see profit results.")
+
