@@ -195,7 +195,7 @@ if yield_file is not None:
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
-    # st.write("📋 Columns in uploaded file:", list(df.columns))  # removed
+st.success(f"✅ Zone Acre Overrides file loaded successfully with {len(df)} records.")
 
 
 # =========================================================
