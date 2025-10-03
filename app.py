@@ -497,13 +497,14 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
+from branca.element import MacroElement, Template
+
 def make_base_map():
-    # Disable scroll zoom until user clicks the map
     m = folium.Map(
         location=[39.5, -98.35],  # Center of continental US
-        zoom_start=5,             # Tighter view on US than zoom_start=4
+        zoom_start=5,             # Tighter zoom on US
         tiles=None,
-        scrollWheelZoom="center",  # 🔹 requires click to activate scroll zoom
+        scrollWheelZoom=False,    # 🔹 start with scroll zoom OFF
         prefer_canvas=True
     )
     folium.TileLayer(
@@ -514,6 +515,18 @@ def make_base_map():
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
+
+    # 🔹 Add JS: enable scroll zoom after first click
+    template = Template("""
+        <script>
+        var map = {{this._parent.get_name()}};
+        map.once('click', function() {
+            map.scrollWheelZoom.enable();
+        });
+        </script>
+    """)
+    m.get_root().add_child(MacroElement().add_child(template))
+
     return m
 
 # Initialize session state storage if not already there
