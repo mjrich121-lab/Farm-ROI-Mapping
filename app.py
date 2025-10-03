@@ -759,7 +759,7 @@ with col_left:
     )
 
     # Collapsible formulas shown separately
-    with st.expander("📘 Show Calculation Formulas", expanded=False):
+    with st.expander("Show Calculation Formulas", expanded=False):
         st.markdown("""
         <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
             <b>Breakeven Budget</b><br>
