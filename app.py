@@ -799,7 +799,7 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
                 gradient_css = ", ".join(stops)
 
                 profit_legend_html = f"""
-                <div style="position:absolute; top:20px; left:20px; z-index:9999;
+                <div style="position:absolute; top:70px; left:20px; z-index:9999;
                             display:flex; flex-direction:column; gap:10px;
                             font-family:sans-serif; font-size:12px; color:white; pointer-events:none;">
                   <div>
@@ -826,6 +826,9 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
                 </div>
                 """
                 m.get_root().html.add_child(folium.Element(profit_legend_html))
+                    # ✅ Add/refresh LayerControl so overlays are toggleable
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+
 
 # =========================================================
 # 8. DISPLAY MAP
