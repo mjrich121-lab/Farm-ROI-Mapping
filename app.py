@@ -827,7 +827,7 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
                 """
                 m.get_root().html.add_child(folium.Element(profit_legend_html))
                     # ✅ Add/refresh LayerControl so overlays are toggleable
-    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+                folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
 
 # =========================================================
