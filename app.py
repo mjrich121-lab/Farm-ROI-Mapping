@@ -87,62 +87,71 @@ zone_file = st.file_uploader(
     key="zone"
 )
 st.markdown(
-    "_Accepted formats: **GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+    "_Accepted formats: **GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. "
+    "⚠️ Uploading just a single .shp file will not work._"
 )
 
 zones_gdf = None
 if zone_file is not None:
-    if zone_file.name.endswith((".geojson", ".json")):
-        zones_gdf = gpd.read_file(zone_file)
-    elif zone_file.name.endswith(".zip"):
-        with open("temp.zip", "wb") as f:
-            f.write(zone_file.getbuffer())
-        with zipfile.ZipFile("temp.zip", "r") as zip_ref:
-            zip_ref.extractall("temp_shp")
-        for f_name in os.listdir("temp_shp"):
-            if f_name.endswith(".shp"):
-                shp_path = os.path.join("temp_shp", f_name)
-                zones_gdf = gpd.read_file(shp_path)
-                break
-        os.remove("temp.zip")
-        shutil.rmtree("temp_shp", ignore_errors=True)
+    try:
+        # --- Load file into GeoDataFrame ---
+        if zone_file.name.endswith((".geojson", ".json")):
+            zones_gdf = gpd.read_file(zone_file)
+        elif zone_file.name.endswith(".zip"):
+            with open("temp.zip", "wb") as f:
+                f.write(zone_file.getbuffer())
+            with zipfile.ZipFile("temp.zip", "r") as zip_ref:
+                zip_ref.extractall("temp_shp")
+            for f_name in os.listdir("temp_shp"):
+                if f_name.endswith(".shp"):
+                    shp_path = os.path.join("temp_shp", f_name)
+                    zones_gdf = gpd.read_file(shp_path)
+                    break
+            os.remove("temp.zip")
+            shutil.rmtree("temp_shp", ignore_errors=True)
 
-    if zones_gdf is not None:
-        st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} zones.")
+        if zones_gdf is not None and not zones_gdf.empty:
+            st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} zones.")
 
-        # --- Add Zone Index if not present ---
-        zone_col = None
-        for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
-            if candidate in zones_gdf.columns:
-                zone_col = candidate
-                break
-        if zone_col is None:
-            zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
-            zone_col = "ZoneIndex"
+            # --- Identify zone column or assign one ---
+            zone_col = None
+            for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
+                if candidate in zones_gdf.columns:
+                    zone_col = candidate
+                    break
+            if zone_col is None:
+                zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+                zone_col = "ZoneIndex"
 
-        # --- Calculate acres automatically ---
-        zones_gdf["Zone_Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
+            # --- Reproject to equal-area CRS (for correct acre calculation) ---
+            try:
+                if zones_gdf.crs is None:
+                    zones_gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84 if missing
+                if zones_gdf.crs.is_geographic:
+                    zones_gdf = zones_gdf.to_crs(epsg=5070)  # Albers Equal Area (USA)
+            except Exception as e:
+                st.warning(f"⚠️ Could not reproject zones: {e}")
 
-        # --- Manual override interface ---
-        st.subheader("Zone Acre Overrides")
-        editable = zones_gdf[[zone_col, "Zone_Acres"]].rename(
-            columns={zone_col: "Zone", "Zone_Acres": "Calculated Acres"}
-        )
-        editable["Override Acres"] = editable["Calculated Acres"]
+            # --- Calculate acres ---
+            zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
+            zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-        # Let user adjust overrides
-        edited = st.data_editor(
-            editable,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="zone_acres_editor"
-        )
+            # --- Display compact override table ---
+            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
+            st.dataframe(
+                zone_acres_df.style.format({"Calculated Acres": "{:,.2f}", "Override Acres": "{:,.2f}"}),
+                use_container_width=True,
+                height=220
+            )
 
-        # Merge overrides back into zones_gdf
-        zones_gdf["Zone_Acres_Final"] = edited["Override Acres"]
+            # --- Save cleaned zones to session state ---
+            st.session_state["zones_gdf"] = zones_gdf
 
-        # Save zones to session state for use later
-        st.session_state["zones_gdf"] = zones_gdf
+        else:
+            st.error("❌ Could not load zone map. Please check file format.")
+
+    except Exception as e:
+        st.error(f"❌ Error processing zone map: {e}")
 
 # =========================================================
 # 2. YIELD MAP UPLOAD
