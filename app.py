@@ -174,7 +174,6 @@ if zone_file is not None:
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
 
-
 # =========================================================
 # 2. YIELD MAP UPLOAD
 # =========================================================
@@ -199,40 +198,51 @@ if yield_file is not None:
             df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
             # --- Debug: show available columns ---
-            with st.expander("📂 Columns detected in uploaded file"):
+            with st.expander("📂 Columns detected in uploaded CSV"):
                 st.write(list(df.columns))
 
-            # --- Prefer dry yield ---
-            dry_candidates = [c for c in df.columns if "dry" in c and ("yield" in c or "yld" in c)]
+            # --- Prefer dry yield volume (yld_vol_dr or dry_yield) ---
+            if "yld_vol_dr" in df.columns:
+                chosen = "yld_vol_dr"
+            elif "dry_yield" in df.columns:
+                chosen = "dry_yield"
+            else:
+                chosen = None
 
-            if dry_candidates:
-                chosen = dry_candidates[0]
+            if chosen:
                 df.rename(columns={chosen: "Yield"}, inplace=True)
                 st.success(f"✅ Yield CSV loaded successfully (using dry yield column '{chosen}').")
             else:
-                st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dry' or 'dry_yield').")
+                st.error("❌ No usable dry yield column found (expected 'yld_vol_dr' or 'dry_yield').")
 
         else:
             gdf = load_vector_file(yield_file)
             if gdf is not None and not gdf.empty:
+                # --- Normalize column names ---
                 gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
 
                 # --- Debug: show available columns ---
                 with st.expander("📂 Columns detected in uploaded shapefile"):
                     st.write(list(gdf.columns))
 
+                # --- Add lat/long from geometry centroids ---
                 gdf["Longitude"] = gdf.geometry.centroid.x
                 gdf["Latitude"] = gdf.geometry.centroid.y
 
-                dry_candidates = [c for c in gdf.columns if "dry" in c and ("yield" in c or "yld" in c)]
+                # --- Prefer dry yield volume (yld_vol_dr or dry_yield) ---
+                if "yld_vol_dr" in gdf.columns:
+                    chosen = "yld_vol_dr"
+                elif "dry_yield" in gdf.columns:
+                    chosen = "dry_yield"
+                else:
+                    chosen = None
 
-                if dry_candidates:
-                    chosen = dry_candidates[0]
+                if chosen:
                     gdf.rename(columns={chosen: "Yield"}, inplace=True)
                     df = pd.DataFrame(gdf.drop(columns="geometry"))
                     st.success(f"✅ Yield shapefile loaded successfully (using dry yield column '{chosen}').")
                 else:
-                    st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dry' or 'dry_yield').")
+                    st.error("❌ No usable dry yield column found (expected 'yld_vol_dr' or 'dry_yield').")
 
             else:
                 st.error("❌ Could not read shapefile/geojson")
@@ -243,6 +253,7 @@ if yield_file is not None:
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
+
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
