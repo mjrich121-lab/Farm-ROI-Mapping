@@ -91,6 +91,15 @@ st.markdown(
     "⚠️ Uploading just a single .shp file will not work._"
 )
 
+# --- callback to clean overrides ---
+def _sanitize_zone_overrides():
+    df = st.session_state.get("zone_acres_editor")
+    if df is None:
+        return
+    df["Override Acres"] = pd.to_numeric(df["Override Acres"], errors="coerce")
+    df["Override Acres"] = df["Override Acres"].fillna(df["Calculated Acres"])
+    st.session_state["zone_acres_editor"] = df
+
 zones_gdf = None
 if zone_file is not None:
     try:
@@ -123,23 +132,24 @@ if zone_file is not None:
                 zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
                 zone_col = "ZoneIndex"
 
-            # --- Reproject to equal-area CRS (for correct acre calculation) ---
+            # --- Reproject to equal-area CRS for acre calculation ---
             try:
                 if zones_gdf.crs is None:
                     zones_gdf.set_crs(epsg=4326, inplace=True)  # assume WGS84 if missing
                 if zones_gdf.crs.is_geographic:
-                    zones_gdf = zones_gdf.to_crs(epsg=5070)  # Albers Equal Area (USA)
+                    zones_gdf = zones_gdf.to_crs(epsg=5070)  # Albers Equal Area
             except Exception as e:
                 st.warning(f"⚠️ Could not reproject zones: {e}")
 
             # --- Calculate acres ---
-            zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105  # m² → acres
+            zones_gdf["Calculated Acres"] = zones_gdf.geometry.area * 0.000247105
             zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
 
-            # --- Build display table ---
-            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
+            # --- Reproject back to EPSG:4326 for mapping ---
+            zones_gdf = zones_gdf.to_crs(epsg=4326)
 
-            # --- Centered editable table ---
+            # --- Display editable override table ---
+            zone_acres_df = zones_gdf[[zone_col, "Calculated Acres", "Override Acres"]].rename(columns={zone_col: "Zone"})
             col1, col2, col3 = st.columns([1,2,1])
             with col2:
                 edited = st.data_editor(
@@ -152,23 +162,20 @@ if zone_file is not None:
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
                         "Override Acres": st.column_config.NumberColumn(format="%.2f")
                     },
-                    key="zone_acres_editor"
+                    key="zone_acres_editor",
+                    on_change=_sanitize_zone_overrides
                 )
 
-                # --- Convert Override Acres to numeric and fix blanks ---
-                edited["Override Acres"] = pd.to_numeric(
-                    edited["Override Acres"], errors="coerce"
-                ).fillna(edited["Calculated Acres"])
+                edited = st.session_state.get("zone_acres_editor", edited)
 
-                # --- Totals ---
-                total_calc = edited["Calculated Acres"].sum()
-                total_override = edited["Override Acres"].sum()
+                total_calc = float(edited["Calculated Acres"].sum())
+                total_override = float(edited["Override Acres"].sum())
                 st.markdown(
                     f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**"
                 )
 
             # --- Save overrides back to gdf ---
-            zones_gdf["Override Acres"] = edited["Override Acres"]
+            zones_gdf["Override Acres"] = edited["Override Acres"].values
             st.session_state["zones_gdf"] = zones_gdf
 
         else:
