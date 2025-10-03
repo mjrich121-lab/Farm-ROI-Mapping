@@ -744,29 +744,29 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
 
     # Legend HTML
-    def rgba_to_hex(rgba_tuple):
-        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
-        return f"#{r:02x}{g:02x}{b:02x}"
-    stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
-    gradient_css = ", ".join(stops)
+    # ✅ Custom Legend (top-left, transparent background)
     legend_html = f"""
-    <div style="position: fixed; bottom: 20px; left: 20px; z-index: 9999;
-                display: flex; flex-direction: column; gap: 6px; font-family: sans-serif; font-size: 12px;">
-      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+    <div style="position: fixed; top: 20px; left: 20px; z-index: 9999;
+                display: flex; flex-direction: column; gap: 10px; 
+                font-family: sans-serif; font-size: 12px; color: white;">
+
+      <div>
         <div style="font-weight: 600; margin-bottom: 2px;">Yield (bu/ac)</div>
         <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
         <div style="display:flex; justify-content: space-between; margin-top: 2px;">
           <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
         </div>
       </div>
-      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+
+      <div>
         <div style="font-weight: 600; margin-bottom: 2px;">Variable Rate Profit ($/ac)</div>
         <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
         <div style="display:flex; justify-content: space-between; margin-top: 2px;">
           <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
         </div>
       </div>
-      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+
+      <div>
         <div style="font-weight: 600; margin-bottom: 2px;">Fixed Rate Profit ($/ac)</div>
         <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
         <div style="display:flex; justify-content: space-between; margin-top: 2px;">
@@ -776,6 +776,7 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
     </div>
     """
     m.get_root().html.add_child(Element(legend_html))
+
 
 
 # =========================================================
