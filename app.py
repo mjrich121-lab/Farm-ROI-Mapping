@@ -155,7 +155,7 @@ if zone_file is not None:
                     key="zone_acres_editor"
                 )
 
-                # --- Fix blanks: default Override Acres back to Calculated Acres ---
+                # --- Convert Override Acres to numeric and fix blanks ---
                 edited["Override Acres"] = pd.to_numeric(
                     edited["Override Acres"], errors="coerce"
                 ).fillna(edited["Calculated Acres"])
@@ -176,7 +176,6 @@ if zone_file is not None:
 
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
-
 
 # =========================================================
 # 2. YIELD MAP UPLOAD
