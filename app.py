@@ -499,43 +499,43 @@ st.dataframe(
 from branca.element import MacroElement, Template
 
 def make_base_map():
-    # Create base map (center US, scroll disabled initially)
     m = folium.Map(
         location=[39.5, -98.35],  # Center of continental US
         zoom_start=5,             # Default zoom on load
         tiles=None,
-        scrollWheelZoom=False,    # Disable scroll wheel by default
+        scrollWheelZoom=False,    # Disable scroll wheel initially
         prefer_canvas=True
     )
 
-    # Always-on Esri Satellite imagery
+    # Esri Satellite + Labels always on
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Esri Satellite", overlay=False, control=False
     ).add_to(m)
-
-    # Always-on Esri Boundaries & Labels
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # 🔹 JS: mimic Google Maps scroll behavior
+    # 🔹 JS: Enable scroll zoom only while the mouse is over the map
     template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
 
-        // Turn on scroll zoom when map is clicked/focused
-        map.on('click', function() {
+        // Disable scroll by default
+        map.scrollWheelZoom.disable();
+
+        // Enable scroll when mouse enters map
+        map.on('mouseover', function() {
             map.scrollWheelZoom.enable();
         });
 
-        // Turn off scroll zoom when mouse leaves the map
+        // Disable scroll when mouse leaves map
         map.on('mouseout', function() {
             map.scrollWheelZoom.disable();
         });
 
-        // After map is ready, lock minZoom at 7
+        // Keep minZoom locked at 7 after map loads
         map.whenReady(function() {
             setTimeout(function() {
                 map.setMinZoom(7);
@@ -551,7 +551,6 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
-
 
 # =========================================================
 # 6. ZONES
