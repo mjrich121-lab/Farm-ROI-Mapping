@@ -502,7 +502,7 @@ def make_base_map():
     m = folium.Map(
         location=[39.5, -98.35],  # Center of continental US
         zoom_start=5,             # Default zoom
-        min_zoom=2,               # Prevent zooming all the way out
+        min_zoom=2,               # Prevent zooming too far out
         tiles=None,
         scrollWheelZoom=False,    # Disabled by default
         prefer_canvas=True
@@ -519,7 +519,7 @@ def make_base_map():
         attr="Esri", overlay=True, control=False
     ).add_to(m)
 
-    # JS to enable scroll on click (like Google Maps)
+    # ✅ Correct way: wrap Template in a MacroElement
     template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
@@ -532,12 +532,21 @@ def make_base_map():
         });
         {% endmacro %}
     """)
-    m.get_root().add_child(template)
+    macro = MacroElement()
+    macro._template = template
+    m.get_root().add_child(macro)
 
     return m
 
 # Always start with a fresh map each run
 m = make_base_map()
+
+# =========================================================
+# 8. DISPLAY MAP
+# =========================================================
+# No LayerControl since base layers are locked
+st_folium(m, use_container_width=True, height=600)
+
 # =========================================================
 # 6. ZONES
 # =========================================================
