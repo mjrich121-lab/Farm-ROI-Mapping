@@ -344,48 +344,37 @@ expenses = {
     "Cash Rent": cash_rent
 }
 base_expenses_per_acre = sum(expenses.values())
+
 # =========================================================
-# 4B. MANUAL FIXED-RATE PRESCRIPTIONS
+# 4B. FIXED RATE INPUTS (Manual Seed & Fertilizer Table)
 # =========================================================
-st.header("Manual Fixed-Rate Prescriptions")
+st.header("Fixed Rate Prescription Inputs")
 
-# --- Fixed-Rate Seed ---
-st.subheader("Fixed-Rate Seed")
-fixed_seed_data = pd.DataFrame({
-    "Variety": [""],
-    "Rate (units/ac)": [0.0],
-    "Cost per Unit ($)": [0.0]
-})
-fixed_seed_entries = st.data_editor(
-    fixed_seed_data,
-    num_rows="dynamic",
-    use_container_width=True,
-    key="fixed_seed"
-)
-fixed_seed_entries["Cost/acre"] = (
-    fixed_seed_entries["Rate (units/ac)"] * fixed_seed_entries["Cost per Unit ($)"]
-)
+with st.expander("⚙️ Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
+    # Initialize session state if missing
+    if "fixed_products" not in st.session_state:
+        st.session_state["fixed_products"] = pd.DataFrame(
+            {
+                "Type": ["Seed", "Fertilizer"],
+                "Product": ["", ""],
+                "Rate": [0.0, 0.0],
+                "CostPerUnit": [0.0, 0.0],
+                "$/ac": [0.0, 0.0]
+            }
+        )
 
-# --- Fixed-Rate Fertilizer ---
-st.subheader("Fixed-Rate Fertilizer")
-fixed_fert_data = pd.DataFrame({
-    "Fertilizer Type": [""],
-    "Rate (lbs/ac)": [0.0],
-    "Cost per lb ($)": [0.0]
-})
-fixed_fert_entries = st.data_editor(
-    fixed_fert_data,
-    num_rows="dynamic",
-    use_container_width=True,
-    key="fixed_fert"
-)
-fixed_fert_entries["Cost/acre"] = (
-    fixed_fert_entries["Rate (lbs/ac)"] * fixed_fert_entries["Cost per lb ($)"]
-)
+    # Show editable table
+    fixed_entries = st.data_editor(
+        st.session_state["fixed_products"],
+        num_rows="dynamic",
+        use_container_width=True,
+        key="fixed_editor"
+    )
 
-# --- Store in session state for use in Section 7 & 9 ---
-st.session_state["fixed_seed"] = fixed_seed_entries
-st.session_state["fixed_fert"] = fixed_fert_entries
+    # Safely store back into session state
+    st.session_state["fixed_products"] = (
+        fixed_entries.copy().reset_index(drop=True)
+    )
 
 
 # =========================================================
