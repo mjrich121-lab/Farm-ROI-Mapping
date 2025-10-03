@@ -77,7 +77,7 @@ def auto_zoom_map(m, df=None, gdf=None):
         bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     return m
-# =========================================================
+# ========================================================= 
 # 1. ZONE MAP UPLOAD
 # =========================================================
 st.header("Zone Map Upload")
@@ -153,6 +153,12 @@ if zone_file is not None:
                         "Override Acres": st.column_config.NumberColumn(format="%.2f")
                     },
                     key="zone_acres_editor"
+                )
+
+                # --- Fix blanks: default Override Acres back to Calculated Acres ---
+                edited["Override Acres"] = edited.apply(
+                    lambda row: row["Calculated Acres"] if pd.isna(row["Override Acres"]) else row["Override Acres"],
+                    axis=1
                 )
 
                 # Add total row below the editable table
