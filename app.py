@@ -252,7 +252,7 @@ if st.session_state["yield_df"] is not None:
     # --- Revenue & Profit ---
     df["Revenue_per_acre"] = df["Yield"] * sell_price
     fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+    seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
     df["NetProfit_per_acre"] = (
         df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
     )
