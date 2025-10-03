@@ -194,39 +194,50 @@ if yield_file is not None:
     try:
         if yield_file.name.endswith(".csv"):
             df = pd.read_csv(yield_file)
-            # Normalize columns
-            df.columns = [c.strip().lower() for c in df.columns]
-            yield_candidates = [c for c in df.columns if "yield" in c or "yld" in c]
-            if yield_candidates:
-                df.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
-                st.success(f"✅ Yield CSV loaded successfully with {len(df)} records (using column '{yield_candidates[0]}').")
+
+            # --- Normalize column names ---
+            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+            # --- Only prefer dry yield columns that are already in bushels/acre ---
+            dry_candidates = [c for c in df.columns if ("dry" in c and "vol" in c) or c == "dry_yield"]
+
+            if dry_candidates:
+                chosen = dry_candidates[0]
+                df.rename(columns={chosen: "Yield"}, inplace=True)
+                st.success(f"✅ Yield CSV loaded successfully (using dry yield column '{chosen}').")
             else:
-                st.error("❌ CSV must include a yield column (e.g., 'Yield', 'Dry_Yield').")
+                st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dry' or 'dry_yield').")
+
         else:
             gdf = load_vector_file(yield_file)
             if gdf is not None and not gdf.empty:
-                # Normalize columns
-                gdf.columns = [c.strip().lower() for c in gdf.columns]
+                # --- Normalize column names ---
+                gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
 
                 gdf["Longitude"] = gdf.geometry.centroid.x
                 gdf["Latitude"] = gdf.geometry.centroid.y
 
-                # Look for yield column
-                yield_candidates = [c for c in gdf.columns if "yield" in c or "yld" in c]
-                if yield_candidates:
-                    gdf.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
+                # --- Only prefer dry yield columns that are already in bushels/acre ---
+                dry_candidates = [c for c in gdf.columns if ("dry" in c and "vol" in c) or c == "dry_yield"]
+
+                if dry_candidates:
+                    chosen = dry_candidates[0]
+                    gdf.rename(columns={chosen: "Yield"}, inplace=True)
                     df = pd.DataFrame(gdf.drop(columns="geometry"))
-                    st.success(f"✅ Yield shapefile loaded successfully with {len(df)} records (using column '{yield_candidates[0]}').")
+                    st.success(f"✅ Yield shapefile loaded successfully (using dry yield column '{chosen}').")
                 else:
-                    st.error("❌ No yield column found in uploaded file. Please ensure a field like 'Yield' or 'Dry_Yield' exists.")
+                    st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dry' or 'dry_yield').")
+
             else:
                 st.error("❌ Could not read shapefile/geojson")
+
     except Exception as e:
         st.error(f"❌ Error processing yield file: {e}")
 
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
+
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
