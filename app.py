@@ -496,61 +496,48 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import MacroElement
-from jinja2 import Template
+from branca.element import MacroElement, Template
 
 def make_base_map():
     m = folium.Map(
-        location=[39.5, -98.35],
-        zoom_start=5,           # default zoom
+        location=[39.5, -98.35],  # Center of continental US
+        zoom_start=5,             # Default zoom
+        min_zoom=2,               # Prevent zooming all the way out
         tiles=None,
-        scrollWheelZoom=False,  # disabled by default
+        scrollWheelZoom=False,    # Disabled by default
         prefer_canvas=True
     )
 
-    # Always-on satellite + labels
+    # Add locked base layers (satellite + labels)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Satellite", overlay=False, control=False
+        attr="Esri", overlay=False, control=False
     ).add_to(m)
+
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Labels", overlay=True, control=False
+        attr="Esri", overlay=True, control=False
     ).add_to(m)
 
-    # JS: click to enable wheel zoom; disable again when mouse leaves map
-    scroll_js = Template("""
+    # JS to enable scroll on click (like Google Maps)
+    template = Template("""
         {% macro script(this, kwargs) %}
-        var map = {{ this._parent.get_name() }};
-
-        // Disable wheel zoom at start
+        var map = {{this._parent.get_name()}};
         map.scrollWheelZoom.disable();
-
-        // Enable on click inside map
         map.on('click', function() {
             map.scrollWheelZoom.enable();
         });
-
-        // Disable when mouse leaves map area
         map.on('mouseout', function() {
             map.scrollWheelZoom.disable();
         });
-
-        // Keep minZoom=7 AFTER ready, but don't override initial zoom=5
-        map.whenReady(function() {
-            setTimeout(function() {
-                map.setMinZoom(7);
-            }, 0);
-        });
         {% endmacro %}
     """)
-    macro = MacroElement()
-    macro._template = scroll_js
-    m.get_root().add_child(macro)
+    m.get_root().add_child(template)
 
     return m
 
-
+# Always start with a fresh map each run
+m = make_base_map()
 # =========================================================
 # 6. ZONES
 # =========================================================
@@ -719,9 +706,8 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
-# ✅ Do NOT add LayerControl since base layers are locked
+# No LayerControl since base layers are locked
 st_folium(m, use_container_width=True, height=600)
-
 # --- Initialize session state defaults (safety net) ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
