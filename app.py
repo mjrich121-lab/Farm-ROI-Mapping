@@ -383,21 +383,42 @@ if st.session_state["zones_gdf"] is not None:
 # =========================================================
 # 7. YIELD + PROFIT
 # =========================================================
+
+# --- Ensure session state keys exist before using them ---
+if "yield_df" not in st.session_state:
+    st.session_state["yield_df"] = None
+if "fert_products" not in st.session_state:
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+if "seed_products" not in st.session_state:
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+
+# --- Handle uploaded yield files ---
 df = None
 if uploaded_files:
     for file in uploaded_files:
-        df = pd.read_csv(file)
-        if {"Latitude", "Longitude", "Yield"}.issubset(df.columns):
+        temp_df = pd.read_csv(file)
+        if {"Latitude", "Longitude", "Yield"}.issubset(temp_df.columns):
+            df = temp_df.copy()
             st.session_state["yield_df"] = df
 
-# Draw overlays from session state if available
+# --- Draw overlays if yield data exists ---
 if st.session_state["yield_df"] is not None:
     df = st.session_state["yield_df"]
 
     # --- Revenue & Profit ---
     df["Revenue_per_acre"] = df["Yield"] * sell_price
-    fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-    seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+
+    fert_costs = (
+        st.session_state["fert_products"]["CostPerAcre"].sum()
+        if not st.session_state["fert_products"].empty
+        else 0
+    )
+    seed_costs = (
+        st.session_state["seed_products"]["CostPerAcre"].sum()
+        if not st.session_state["seed_products"].empty
+        else 0
+    )
+
     df["NetProfit_per_acre"] = (
         df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
     )
@@ -405,24 +426,25 @@ if st.session_state["yield_df"] is not None:
     if sell_price == 0:
         st.warning("⚠️ Sell Price is 0 — profit heatmap will be flat. Set a non-zero $/bu.")
 
-    # --- Auto-zoom to data bounds ---
+    # --- Auto-zoom map to field bounds ---
     south, north = df["Latitude"].min(), df["Latitude"].max()
     west,  east  = df["Longitude"].min(), df["Longitude"].max()
     m.fit_bounds([[south, west], [north, east]])
 
-    # --- Heatmap overlays (Yield + Profit) ---
+    # --- Heatmap overlay function ---
     def add_heatmap_overlay(values, name, show_default):
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        # Interpolate with linear + nearest fallback
+        # Interpolation
         pts = (df["Longitude"].values, df["Latitude"].values)
         grid_lin = griddata(pts, values, (lon_grid, lat_grid), method="linear")
         grid_nn  = griddata(pts, values, (lon_grid, lat_grid), method="nearest")
         grid     = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
 
+        # Normalize and colorize
         vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
         if vmin == vmax:
             vmax = vmin + 1
@@ -441,15 +463,17 @@ if st.session_state["yield_df"] is not None:
 
         return (vmin, vmax)
 
-    # Add both overlays
+    # --- Add both overlays ---
     y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
     p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", show_default=True)
 
-    # --- Legends (bottom left stacked) ---
+    # --- Legends ---
     from branca.element import Element
+
     def rgba_to_hex(rgba_tuple):
-        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+        r, g, b, a = (int(round(255 * x)) for x in rgba_tuple)
         return f"#{r:02x}{g:02x}{b:02x}"
+
     stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
 
@@ -473,6 +497,7 @@ if st.session_state["yield_df"] is not None:
     </div>
     """
     m.get_root().html.add_child(Element(legend_html))
+
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
