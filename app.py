@@ -583,7 +583,8 @@ with col_left:
 
     st.dataframe(
         summary.style.applymap(highlight_profit, subset=["Value"]).format({"Value": "${:,.2f}"}),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
 
     # --- Variable Rate Input Costs ---
@@ -602,20 +603,24 @@ with col_left:
     combined = default_var.copy()
 
     # Replace defaults if prescription data exists
-    if not fert_df.empty:
-        combined = pd.concat([combined, fert_df.rename(columns={"product":"Product","CostPerAcre":"$/ac"})[["Product","$/ac"]]])
     if not seed_df.empty:
-        combined = pd.concat([combined, seed_df.rename(columns={"product":"Product","CostPerAcre":"$/ac"})[["Product","$/ac"]]])
+        combined.loc[combined["Product"] == "Seed", "$/ac"] = seed_df["CostPerAcre"].sum()
 
-    # Drop duplicates so prescriptions overwrite placeholders
-    combined = combined.groupby("Product", as_index=False).max()
+    if not fert_df.empty:
+        fert_list = fert_df["CostPerAcre"].tolist()
+        for i, val in enumerate(fert_list, start=1):
+            if i <= 3:
+                combined.loc[combined["Product"] == f"Fertilizer {i}", "$/ac"] = val
 
     # Add Total row
     total_var = pd.DataFrame([{"Product":"Total Variable Costs", "$/ac":combined["$/ac"].sum()}])
     combined = pd.concat([combined, total_var], ignore_index=True)
 
-    st.dataframe(combined.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
-                 use_container_width=True)
+    st.dataframe(
+        combined.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
+        use_container_width=True,
+        hide_index=True
+    )
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
@@ -626,5 +631,8 @@ with col_right:
     total_fixed = pd.DataFrame([{"Expense":"Total Fixed Costs", "$/ac":fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    st.dataframe(fixed_df.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
-                 use_container_width=True, height=(len(fixed_df) * 28 + 40))
+    st.dataframe(
+        fixed_df.style.format({"$/ac":"${:,.2f}"}).applymap(highlight_profit, subset=["$/ac"]),
+        use_container_width=True,
+        hide_index=True
+    )
