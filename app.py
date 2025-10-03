@@ -597,14 +597,13 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
-
 # =========================================================
-# 6. ZONE MAP DISPLAY (Satellite, Dynamic Legend, Proper Sizing)
+# 6. ZONE MAP DISPLAY (Satellite + Dynamic Legend, no scale bar)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
-    gdf = st.session_state["zones_gdf"]
+    gdf = st.session_state["zones_gdf"].copy()
 
-    # Ensure CRS is EPSG:4326 for Folium
+    # Ensure EPSG:4326 for Folium
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -613,7 +612,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Zone colors
+    # Color scheme (1 → red, 5 → dark green)
     zone_colors = {
         1: "#e41a1c",  # red
         2: "#ff7f00",  # orange
@@ -621,47 +620,49 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         4: "#4daf4a",  # light green
         5: "#006400",  # dark green
     }
-    def _color_for_feature(feat):
-        z = feat["properties"].get("Zone")
+
+    def color_for_zone(z):
         try:
             return zone_colors.get(int(z), "#3186cc")
         except Exception:
             return "#3186cc"
 
-    # Bounds & map center
-    bounds = gdf.total_bounds
+    # Bounds & center
+    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
     center = [(bounds[1] + bounds[3]) / 2.0, (bounds[0] + bounds[2]) / 2.0]
 
-    # Folium map with fixed size + satellite tiles
-    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=True)
+    # Make the map (tiles=None so we control layers; control_scale=False to remove distance bar)
+    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Esri Satellite
+    # Basemap: Satellite + labels
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri World Imagery",
         name="Esri Satellite",
         overlay=False,
-        control=True
+        control=True,
     ).add_to(m)
-
-    # Esri Labels overlay (roads, cities, etc.)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="Esri Boundaries & Labels",
         name="Labels",
         overlay=True,
-        control=True
+        control=True,
     ).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
+    folium.LayerControl(collapsed=False).add_to(m)
 
-    # Add zones
+    # Add zones layer (only needed fields + geometry)
+    layer_gdf = gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]].copy()
+
     folium.GeoJson(
-        gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
+        layer_gdf,
         name="Zones",
         style_function=lambda feature: {
-            "fillColor": _color_for_feature(feature),
+            "fillColor": color_for_zone(feature["properties"].get("Zone")),
             "color": "black",
             "weight": 1,
-            "fillOpacity": 0.4,  # <== more transparent so satellite shows
+            "fillOpacity": 0.45,  # see satellite beneath
         },
         tooltip=folium.GeoJsonTooltip(
             fields=["Zone", "Calculated Acres", "Override Acres"],
@@ -670,36 +671,56 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         ),
     ).add_to(m)
 
-    # Fit map to bounds
+    # Auto-zoom to field
     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Dynamic Legend
-    unique_zones = sorted(gdf["Zone"].unique())
+    # Dynamic legend based on actual Zone values
+    def _zone_label(z):
+        try:
+            return str(int(z))
+        except Exception:
+            return str(z)
+
+    # Sort numerically if possible
+    try:
+        unique_zones = sorted(layer_gdf["Zone"].unique(), key=lambda v: int(v))
+    except Exception:
+        unique_zones = sorted(layer_gdf["Zone"].unique(), key=lambda v: str(v))
+
     legend_items = ""
     for z in unique_zones:
-        color = zone_colors.get(int(z), "#3186cc")
-        legend_items += f'<div style="margin:0 0 4px 0;"><span style="background:{color};width:18px;height:18px;display:inline-block;border:1px solid #000;"></span> Zone {z}</div>'
+        label = _zone_label(z)
+        col = color_for_zone(z)
+        legend_items += (
+            f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
+            f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
+            f'<span style="color:#000;">Zone {label}</span>'
+            f'</div>'
+        )
 
     legend_html = f"""
      <div style="
-         position: fixed; 
-         bottom: 30px; left: 30px; 
-         width: 160px; 
-         background-color: white; 
-         border:2px solid grey; 
-         z-index:9999; 
-         font-size:14px; 
-         padding:6px;
+         position: fixed;
+         top: 20px; right: 20px;    /* moved to top-right, away from controls */
+         background: rgba(255,255,255,0.95);
+         border: 1px solid #888;
+         border-radius: 6px;
+         padding: 8px 10px;
+         font-size: 14px;
+         z-index: 9999;
+         box-shadow: 0 2px 6px rgba(0,0,0,0.25);
      ">
-         <b>Zone Colors</b><br>
-         {legend_items}
+       <div style="font-weight:600;margin-bottom:6px;color:#000;">Zone Colors</div>
+       {legend_items}
      </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Show map in Streamlit
-    st_folium(m, width=1000, height=650)
-
+    # IMPORTANT: let CSS control the size so it fills the container
+    st_folium(m)
+else:
+    # No header/text — map-only section
+    pass
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
