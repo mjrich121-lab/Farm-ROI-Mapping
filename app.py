@@ -497,7 +497,7 @@ st.dataframe(
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
-from branca.element import MacroElement, Template
+from branca.element import Template
 
 def make_base_map():
     m = folium.Map(
@@ -525,31 +525,9 @@ def make_base_map():
         });
         </script>
     """)
-    m.get_root().add_child(MacroElement().add_child(template))
+    m.get_root().add_child(template)
 
     return m
-
-# Initialize session state storage if not already there
-if "zones_gdf" not in st.session_state:
-    st.session_state["zones_gdf"] = None
-if "yield_df" not in st.session_state:
-    st.session_state["yield_df"] = None
-
-# Always start with a fresh map each run
-m = make_base_map()
-
-# =========================================================
-# AUTO-ZOOM TO DATA IF AVAILABLE
-# =========================================================
-if st.session_state["zones_gdf"] is not None:
-    bounds = st.session_state["zones_gdf"].total_bounds  # [minx, miny, maxx, maxy]
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-
-elif st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
-    south, north = st.session_state["yield_df"]["Latitude"].min(), st.session_state["yield_df"]["Latitude"].max()
-    west, east = st.session_state["yield_df"]["Longitude"].min(), st.session_state["yield_df"]["Longitude"].max()
-    m.fit_bounds([[south, west], [north, east]])
-
 
 # =========================================================
 # 6. ZONES
