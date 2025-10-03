@@ -316,7 +316,33 @@ legend_html = f"""
 legend_element = Element(legend_html)
 m.get_root().html.add_child(legend_element)
 
-         
+  # --- Add hover tooltips for Yield + Profit ---
+try:
+    # Use the same grid size as heatmaps for hover sampling
+    n = 40  # fewer points = lighter map, more = denser hover coverage
+    lon_lin = np.linspace(west, east, n)
+    lat_lin = np.linspace(south, north, n)
+    lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+
+    # Interpolate yield + profit values at these grid points
+    pts = (df["Longitude"].values, df["Latitude"].values)
+    y_vals = griddata(pts, df["Yield"].values, (lon_grid, lat_grid), method="linear")
+    p_vals = griddata(pts, df["NetProfit_per_acre"].values, (lon_grid, lat_grid), method="linear")
+
+    # Add invisible markers with tooltips
+    for i in range(n):
+        for j in range(n):
+            if not np.isnan(y_vals[i, j]) and not np.isnan(p_vals[i, j]):
+                folium.CircleMarker(
+                    location=[lat_grid[i, j], lon_grid[i, j]],
+                    radius=0.1,  # essentially invisible
+                    color="transparent",
+                    fill=False,
+                    tooltip=f"Yield: {y_vals[i,j]:.1f} bu/ac<br>Profit: ${p_vals[i,j]:.2f}/ac"
+                ).add_to(m)
+except Exception as e:
+    st.warning(f"Could not add hover tooltips: {e}")
+       
 
 # =========================================================
 # 8. DISPLAY MAP
