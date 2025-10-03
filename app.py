@@ -611,26 +611,24 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 
+
 # =========================================================
 # 6. MAP DISPLAY
 # =========================================================
 
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
-    zones_gdf = st.session_state["zones_gdf"]
+    zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    # Reproject to WGS84 for display
-    zones_gdf = zones_gdf.to_crs(epsg=4326)
-
-    # Center map on zones
+    # Center on field bounds
     bounds = zones_gdf.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
 
-    # Fixed basemap (no toggle for imagery)
+    # Fixed Esri imagery (no toggle for basemap)
     m = folium.Map(location=[center_lat, center_lon], zoom_start=15,
-                   tiles="Esri.WorldImagery")
+                   tiles="Esri.WorldImagery", attr=" ")
 
-    # Fixed color scheme for up to 5 zones
+    # Zone colors
     zone_colors = {
         1: "#FF0000",   # Red
         2: "#FF8C00",   # Orange
@@ -639,7 +637,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         5: "#006400"    # Dark Green
     }
 
-    # --- Zones layer ---
+    # Zones layer
     folium.GeoJson(
         zones_gdf,
         name="Zones",
@@ -652,16 +650,16 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres", "Override Acres"])
     ).add_to(m)
 
-    # --- Legend (always on, baked into map) ---
+    # --- Legend (fixed bottom-left) ---
     unique_zones = sorted(zones_gdf["Zone"].unique())
     legend_html = """
     <div style="
-        position: fixed; 
-        bottom: 40px; left: 40px; 
+        position: absolute; 
+        bottom: 20px; left: 20px; 
         z-index:9999; 
-        background-color: rgba(0,0,0,0.5); 
-        padding: 8px 12px; 
-        border-radius: 6px; 
+        background-color: rgba(0,0,0,0.6); 
+        padding: 6px 10px; 
+        border-radius: 5px; 
         font-size: 13px; 
         color: white;
     ">
@@ -670,19 +668,16 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     for z in unique_zones:
         color = zone_colors.get(int(z), "#808080")
         legend_html += f"<div style='display:flex; align-items:center; margin:2px 0;'> \
-                        <div style='background:{color}; width:15px; height:15px; margin-right:6px;'></div> Zone {z}</div>"
+                        <div style='background:{color}; width:14px; height:14px; margin-right:6px;'></div> Zone {z}</div>"
     legend_html += "</div>"
 
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Add layer control ONLY for uploaded layers (no basemap, no legend)
-    folium.LayerControl(collapsed=False).add_to(m)
+    # Layer control (ONLY user layers like Zones, Yield, Prescriptions)
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
     # Display map
     st_folium(m, width=1000, height=600)
-
-else:
-    st.info("Upload a Zone Map in Section 1 to see zones here.")
 
 
 # =========================================================
