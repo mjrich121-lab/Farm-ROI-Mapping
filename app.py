@@ -509,16 +509,16 @@ def make_base_map():
         prefer_canvas=True
     )
 
-    # Esri Satellite imagery
+    # Always-on Esri Satellite imagery
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Esri Satellite", overlay=False, control=True
+        attr="Esri", name="Esri Satellite", overlay=False, control=False
     ).add_to(m)
 
-    # Esri Boundaries & Labels
+    # Always-on Esri Boundaries & Labels
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="Labels", overlay=True, control=True
+        attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
     # 🔹 Custom JS: enable scroll after user clicks the map
@@ -707,7 +707,6 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
-folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, use_container_width=True, height=600)
 
 # --- Initialize session state defaults (safety net) ---
