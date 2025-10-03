@@ -161,6 +161,7 @@ if zone_file is not None:
                     if (pd.isna(row["Override Acres"]) or str(row["Override Acres"]).strip() == "") 
                     else row["Override Acres"],
                     axis=1
+                )
 
                 # Add total row below the editable table
                 total_calc = edited["Calculated Acres"].sum()
