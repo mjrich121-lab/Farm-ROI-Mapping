@@ -577,6 +577,7 @@ if st.session_state["zones_gdf"] is not None:
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
 # =========================================================
 df = None
+# --- Ensure session state defaults ---
 if "fert_products" not in st.session_state:
     st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 if "seed_products" not in st.session_state:
@@ -586,9 +587,32 @@ if "yield_df" not in st.session_state:
 if "fixed_products" not in st.session_state:
     st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
 
+# --- Work with yield data if available ---
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
     df = st.session_state["yield_df"].copy()
-    df["Revenue_per_acre"] = df["Yield"] * sell_price
+
+    # 🔍 Detect yield column (prefer Dry Yield)
+    yield_col_priority = ["Dry_Yield", "DRY_YIELD", "DryYield", "DRY YIELD", "YIELD", "Yield", "YLD_BuAc", "USBU_AC", "WET_YLD"]
+    yield_col = None
+    for c in yield_col_priority:
+        if c in df.columns:
+            yield_col = c
+            break
+
+    if yield_col is None:
+        st.error(
+            "❌ No recognized yield column found in uploaded file. "
+            "Expected one of: Dry_Yield, YIELD, YLD_BuAc, USBU_AC, WET_YLD"
+        )
+    else:
+        # Always rename to Yield so rest of code works
+        df = df.rename(columns={yield_col: "Yield"})
+        st.success(f"✅ Using `{yield_col}` column for Yield calculations (renamed to `Yield`).")
+        st.session_state["yield_df"] = df
+
+        # Revenue from yield * sell price
+        df["Revenue_per_acre"] = df["Yield"] * sell_price
+
 
     # Variable rate profit
     fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
