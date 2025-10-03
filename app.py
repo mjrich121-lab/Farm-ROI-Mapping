@@ -183,22 +183,26 @@ if "yield_df" not in st.session_state:
 # Always start with a fresh map each run
 m = make_base_map()
 
-
 # =========================================================
 # 6. ZONES
 # =========================================================
 if zones_gdf is not None:
+    # Save into session state
+    st.session_state["zones_gdf"] = zones_gdf
+
+# Draw from session state if available
+if st.session_state["zones_gdf"] is not None:
     zone_layer = folium.FeatureGroup(name="Zones", show=True)
     static_zone_colors = {1: "#FF0000", 2: "#FF8000", 3: "#FFFF00", 4: "#80FF00", 5: "#008000"}
     zone_col = None
     for candidate in ["Zone","zone","ZONE","Name","name"]:
-        if candidate in zones_gdf.columns:
+        if candidate in st.session_state["zones_gdf"].columns:
             zone_col = candidate
             break
     if zone_col is None:
-        zones_gdf["ZoneIndex"] = range(1, len(zones_gdf)+1)
+        st.session_state["zones_gdf"]["ZoneIndex"] = range(1, len(st.session_state["zones_gdf"])+1)
         zone_col = "ZoneIndex"
-    for _, row in zones_gdf.iterrows():
+    for _, row in st.session_state["zones_gdf"].iterrows():
         try:
             zone_value = int(row[zone_col])
         except:
@@ -212,147 +216,100 @@ if zones_gdf is not None:
         ).add_to(zone_layer)
     zone_layer.add_to(m)
 
-    # Auto-zoom if no yield yet
-    if not uploaded_files:
-        m = auto_zoom_map(m, gdf=zones_gdf)
 # =========================================================
-# 7. YIELD + PROFIT (smooth heatmaps + stacked legends)
+# 7. YIELD + PROFIT
 # =========================================================
 df = None
 if uploaded_files:
     for file in uploaded_files:
         df = pd.read_csv(file)
-
         if {"Latitude", "Longitude", "Yield"}.issubset(df.columns):
-            # --- Compute Revenue & Profit ---
-            df["Revenue_per_acre"] = df["Yield"] * sell_price
-            fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
-            seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
-            df["NetProfit_per_acre"] = (
-                df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
-            )
+            st.session_state["yield_df"] = df
 
-            # Warn if sell price is zero (prevents flat red heatmap)
-            if sell_price == 0:
-                st.warning("⚠️ Sell Price is 0 — profit heatmap will be flat. Set a non-zero $/bu.")
+# Draw overlays from session state if available
+if st.session_state["yield_df"] is not None:
+    df = st.session_state["yield_df"]
 
-            # --- Fit map to data bounds ---
-            south, north = df["Latitude"].min(), df["Latitude"].max()
-            west,  east  = df["Longitude"].min(), df["Longitude"].max()
-            m.fit_bounds([[south, west], [north, east]])
+    # --- Revenue & Profit ---
+    df["Revenue_per_acre"] = df["Yield"] * sell_price
+    fert_costs = fert_products["CostPerAcre"].sum() if not fert_products.empty else 0
+    seed_costs = seed_products["CostPerAcre"].sum() if not seed_products.empty else 0
+    df["NetProfit_per_acre"] = (
+        df["Revenue_per_acre"] - base_expenses_per_acre - fert_costs - seed_costs
+    )
 
-            # --- Helper: smooth heatmap overlay (linear + nearest fallback) ---
-            import matplotlib.pyplot as plt
-            from scipy.interpolate import griddata
-            from scipy.spatial import cKDTree
-            import numpy as np
-            import folium
+    if sell_price == 0:
+        st.warning("⚠️ Sell Price is 0 — profit heatmap will be flat. Set a non-zero $/bu.")
 
-            def add_heatmap_overlay(values, name, show_default):
-                # Grid covering the field
-                n = 220
-                lon_lin = np.linspace(west, east, n)
-                lat_lin = np.linspace(south, north, n)
-                lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+    # --- Auto-zoom to data bounds ---
+    south, north = df["Latitude"].min(), df["Latitude"].max()
+    west,  east  = df["Longitude"].min(), df["Longitude"].max()
+    m.fit_bounds([[south, west], [north, east]])
 
-                # Interpolate (linear) with nearest fallback to fill NaNs
-                pts = (df["Longitude"].values, df["Latitude"].values)
-                v   = values.astype(float)
-                grid_lin = griddata(pts, v, (lon_grid, lat_grid), method="linear")
-                grid_nn  = griddata(pts, v, (lon_grid, lat_grid), method="nearest")
-                grid     = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+    # --- Heatmap overlays (Yield + Profit) ---
+    def add_heatmap_overlay(values, name, show_default):
+        n = 200
+        lon_lin = np.linspace(west, east, n)
+        lat_lin = np.linspace(south, north, n)
+        lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-                # Normalize to RdYlGn (red=low, green=high)
-                vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
-                if vmin == vmax:  # avoid a flat palette
-                    vmax = vmin + 1.0
-                cmap = plt.cm.get_cmap("RdYlGn")
-                rgba = cmap((grid - vmin) / (vmax - vmin))
-                rgba = np.flipud(rgba)                     # correct north/south for Folium
-                rgba = (rgba * 255).astype(np.uint8)
+        # Interpolate with linear + nearest fallback
+        pts = (df["Longitude"].values, df["Latitude"].values)
+        grid_lin = griddata(pts, values, (lon_grid, lat_grid), method="linear")
+        grid_nn  = griddata(pts, values, (lon_grid, lat_grid), method="nearest")
+        grid     = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
 
-                folium.raster_layers.ImageOverlay(
-                    image=rgba,
-                    bounds=[[south, west], [north, east]],   # [ [S,W], [N,E] ]
-                    opacity=0.60,
-                    name=name,
-                    show=show_default
-                ).add_to(m)
+        vmin, vmax = float(np.nanmin(grid)), float(np.nanmax(grid))
+        if vmin == vmax:
+            vmax = vmin + 1
+        cmap = plt.cm.get_cmap("RdYlGn")
+        rgba = cmap((grid - vmin) / (vmax - vmin))
+        rgba = np.flipud(rgba)
+        rgba = (rgba * 255).astype(np.uint8)
 
-                return (vmin, vmax)
+        folium.raster_layers.ImageOverlay(
+            image=rgba,
+            bounds=[[south, west], [north, east]],
+            opacity=0.5,
+            name=name,
+            show=show_default
+        ).add_to(m)
 
-            # Add layers (Yield off by default, Profit on)
-            y_min, y_max = add_heatmap_overlay(df["Yield"].values,            "Yield (bu/ac)",       show_default=False)
-            p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values,"Net Profit ($/ac)",  show_default=True)
-# --- Stacked legends (bottom-left) ---
-from branca.element import Element
+        return (vmin, vmax)
 
-def rgba_to_hex(rgba_tuple):
-    r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
-    return f"#{r:02x}{g:02x}{b:02x}"
+    # Add both overlays
+    y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
+    p_min, p_max = add_heatmap_overlay(df["NetProfit_per_acre"].values, "Net Profit ($/ac)", show_default=True)
 
-stops = []
-for i in range(0, 101, 10):
-    color = plt.cm.get_cmap("RdYlGn")(i/100.0)
-    stops.append(f"{rgba_to_hex(color)} {i}%")
-gradient_css = ", ".join(stops)
+    # --- Legends (bottom left stacked) ---
+    from branca.element import Element
+    def rgba_to_hex(rgba_tuple):
+        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+        return f"#{r:02x}{g:02x}{b:02x}"
+    stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
 
-legend_html = f"""
-<div style="
-    position: fixed; bottom: 20px; left: 20px; z-index: 9999;
-    display: flex; flex-direction: column; gap: 6px;
-    font-family: sans-serif; font-size: 12px; color: black;">
-  
-  <!-- Yield Legend -->
-  <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
-    <div style="font-weight: 600; margin-bottom: 2px;">Yield (bu/ac)</div>
-    <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
-    <div style="display:flex; justify-content: space-between; margin-top: 2px;">
-      <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+    legend_html = f"""
+    <div style="position: fixed; bottom: 20px; left: 20px; z-index: 9999;
+                display: flex; flex-direction: column; gap: 6px; font-family: sans-serif; font-size: 12px;">
+      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+        <div style="font-weight: 600; margin-bottom: 2px;">Yield (bu/ac)</div>
+        <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
+        <div style="display:flex; justify-content: space-between; margin-top: 2px;">
+          <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+        </div>
+      </div>
+      <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+        <div style="font-weight: 600; margin-bottom: 2px;">Net Profit ($/ac)</div>
+        <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
+        <div style="display:flex; justify-content: space-between; margin-top: 2px;">
+          <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
+        </div>
+      </div>
     </div>
-  </div>
+    """
+    m.get_root().html.add_child(Element(legend_html))
 
-  <!-- Profit Legend -->
-  <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
-    <div style="font-weight: 600; margin-bottom: 2px;">Net Profit ($/ac)</div>
-    <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
-    <div style="display:flex; justify-content: space-between; margin-top: 2px;">
-      <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
-    </div>
-  </div>
-</div>
-"""
-
-legend_element = Element(legend_html)
-m.get_root().html.add_child(legend_element)
-
-  # --- Add hover tooltips for Yield + Profit ---
-try:
-    # Use the same grid size as heatmaps for hover sampling
-    n = 40  # fewer points = lighter map, more = denser hover coverage
-    lon_lin = np.linspace(west, east, n)
-    lat_lin = np.linspace(south, north, n)
-    lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-
-    # Interpolate yield + profit values at these grid points
-    pts = (df["Longitude"].values, df["Latitude"].values)
-    y_vals = griddata(pts, df["Yield"].values, (lon_grid, lat_grid), method="linear")
-    p_vals = griddata(pts, df["NetProfit_per_acre"].values, (lon_grid, lat_grid), method="linear")
-
-    # Add invisible markers with tooltips
-    for i in range(n):
-        for j in range(n):
-            if not np.isnan(y_vals[i, j]) and not np.isnan(p_vals[i, j]):
-                folium.CircleMarker(
-                    location=[lat_grid[i, j], lon_grid[i, j]],
-                    radius=0.1,  # essentially invisible
-                    color="transparent",
-                    fill=False,
-                    tooltip=f"Yield: {y_vals[i,j]:.1f} bu/ac<br>Profit: ${p_vals[i,j]:.2f}/ac"
-                ).add_to(m)
-except Exception as e:
-    st.warning(f"Could not add hover tooltips: {e}")
-       
 
 # =========================================================
 # 8. DISPLAY MAP
