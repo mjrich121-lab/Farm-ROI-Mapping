@@ -612,114 +612,108 @@ def make_base_map():
 m = make_base_map()
 
 # =========================================================
-# 6. ZONE MAP DISPLAY
+# 6. MAP DISPLAY
 # =========================================================
+st.header("Field Map Display")
+
+# Create base map if we have at least one dataset
+datasets = []
+if "yield_gdf" in st.session_state and st.session_state["yield_gdf"] is not None:
+    datasets.append(st.session_state["yield_gdf"])
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
-    gdf = st.session_state["zones_gdf"].copy()
+    datasets.append(st.session_state["zones_gdf"])
+if "seed_gdf" in st.session_state and st.session_state.get("seed_gdf") is not None:
+    datasets.append(st.session_state["seed_gdf"])
+if "fert_gdf" in st.session_state and st.session_state.get("fert_gdf") is not None:
+    datasets.append(st.session_state["fert_gdf"])
 
-    # CRS fix
-    try:
-        if gdf.crs is None:
-            gdf.set_crs(epsg=4326, inplace=True)
-        elif gdf.crs.to_string() != "EPSG:4326":
-            gdf = gdf.to_crs(epsg=4326)
-    except Exception as e:
-        st.warning(f"⚠️ CRS issue: {e}")
+if datasets:
+    # Calculate map center from all datasets
+    combined_bounds = datasets[0].total_bounds
+    for gdf in datasets[1:]:
+        b = gdf.total_bounds
+        combined_bounds = [
+            min(combined_bounds[0], b[0]),
+            min(combined_bounds[1], b[1]),
+            max(combined_bounds[2], b[2]),
+            max(combined_bounds[3], b[3]),
+        ]
+    center_lat = (combined_bounds[1] + combined_bounds[3]) / 2
+    center_lon = (combined_bounds[0] + combined_bounds[2]) / 2
 
-    # Ensure required columns
-    if "Zone" not in gdf.columns:
-        gdf["Zone"] = range(1, len(gdf) + 1)
-    for col in ["Calculated Acres", "Override Acres"]:
-        if col not in gdf.columns:
-            gdf[col] = 0.0
-        gdf[col] = gdf[col].astype(float)
+    # Base map (fixed to satellite imagery)
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=15, tiles=None)
+    folium.TileLayer("Esri.WorldImagery", name="Satellite", control=False).add_to(m)
 
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]
-
-    # Zone colors
-    zone_colors = {1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"}
-    def color_for_zone(z):
-        try:
-            return zone_colors.get(int(z), "#3186cc")
-        except Exception:
-            return "#3186cc"
-
-    # Map setup (satellite only, not toggleable)
-    bounds = gdf.total_bounds
-    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
-    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
-
-    # Satellite basemap (always on)
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri World Imagery",
-        name="Satellite",
-        overlay=False,
-        control=False  # ✅ prevents toggling off
-    ).add_to(m)
-
-    # Labels overlay (toggleable)
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri Boundaries & Labels",
-        name="Labels",
-        overlay=True,
-        control=True
-    ).add_to(m)
-
-    # Zones
-    try:
-        folium.GeoJson(
-            gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
-            style_function=lambda f: {
-                "fillColor": color_for_zone(f["properties"].get("Zone")),
-                "color": "black", "weight": 1, "fillOpacity": 0.45,
-            },
-            tooltip=folium.GeoJsonTooltip(
-                fields=["Zone", "Calculated Acres", "Override Acres"],
-                aliases=["Zone", "Calculated Acres", "Override Acres"]
-            ),
-            name="Zones"
+    # --- Yield Layer ---
+    if "yield_gdf" in st.session_state and st.session_state["yield_gdf"] is not None:
+        yield_gdf = st.session_state["yield_gdf"]
+        folium.Choropleth(
+            geo_data=yield_gdf.to_json(),
+            data=yield_gdf,
+            columns=["obj__id", "Yield"],
+            key_on="feature.properties.obj__id",
+            fill_color="YlGn",
+            fill_opacity=0.6,
+            line_opacity=0.1,
+            legend_name="Yield (bu/ac)",
+            name="Yield"
         ).add_to(m)
-    except Exception as e:
-        st.error(f"❌ Zone rendering failed: {e}")
 
-    # Fixed-position HTML legend (bottom-left)
-    legend_items = "".join(
-        f'<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">'
-        f'<span style="background:{col};width:16px;height:16px;border:1px solid #000;"></span>'
-        f'<span style="color:#000;">Zone {z}</span></div>'
-        for z, col in zone_colors.items()
-    )
-    legend_html = f"""
-     <div style="
-         position: fixed;
-         bottom: 30px; left: 30px;
-         background: rgba(255,255,255,0.95);
-         border: 1px solid #888;
-         border-radius: 6px;
-         padding: 8px 12px;
-         font-size: 14px;
-         z-index: 9999;
-     ">
-       <div style="font-weight:600;margin-bottom:4px;color:#000;">Zone Colors</div>
-       {legend_items}
-     </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    # --- Zones Layer ---
+    if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
+        zones_gdf = st.session_state["zones_gdf"]
+        zone_colors = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400"]
+        folium.GeoJson(
+            zones_gdf,
+            name="Zones",
+            style_function=lambda feature: {
+                "fillColor": zone_colors[(feature["properties"]["Zone"] - 1) % len(zone_colors)],
+                "color": zone_colors[(feature["properties"]["Zone"] - 1) % len(zone_colors)],
+                "weight": 2,
+                "fillOpacity": 0.25
+            },
+            tooltip=folium.GeoJsonTooltip(fields=["Zone", "Calculated Acres"])
+        ).add_to(m)
 
-    # Add layer control
+    # --- Prescription Seeding Layer ---
+    if "seed_gdf" in st.session_state and st.session_state["seed_gdf"] is not None:
+        seed_gdf = st.session_state["seed_gdf"]
+        folium.Choropleth(
+            geo_data=seed_gdf.to_json(),
+            data=seed_gdf,
+            columns=["obj__id", "SeedRate"],
+            key_on="feature.properties.obj__id",
+            fill_color="PuBu",
+            fill_opacity=0.5,
+            line_opacity=0.2,
+            legend_name="Seeding Rate (k/acre)",
+            name="Prescription Seeding"
+        ).add_to(m)
+
+    # --- Prescription Fertilizer Layer ---
+    if "fert_gdf" in st.session_state and st.session_state["fert_gdf"] is not None:
+        fert_gdf = st.session_state["fert_gdf"]
+        folium.Choropleth(
+            geo_data=fert_gdf.to_json(),
+            data=fert_gdf,
+            columns=["obj__id", "FertRate"],
+            key_on="feature.properties.obj__id",
+            fill_color="OrRd",
+            fill_opacity=0.5,
+            line_opacity=0.2,
+            legend_name="Fertilizer Rate (lbs/ac)",
+            name="Prescription Fertilizer"
+        ).add_to(m)
+
+    # Layer toggles for all uploaded layers
     folium.LayerControl(collapsed=False).add_to(m)
 
-    # Fit map
-    try:
-        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-    except Exception:
-        pass
-
-    # Show map
+    # Display map
     st_folium(m, width=1000, height=650)
 
+else:
+    st.info("Upload Yield, Zone, Seeding, or Fertilizer maps to display here.")
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
