@@ -581,7 +581,6 @@ if "zones_gdf" not in st.session_state:
     st.session_state["zones_gdf"] = None
 if "yield_df" not in st.session_state:
     st.session_state["yield_df"] = None
-
 # =========================================================
 # 9. PROFIT SUMMARY
 # =========================================================
@@ -611,10 +610,34 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 # --- Layout (two columns) ---
 col_left, col_right = st.columns([2, 2])
+
 # --------------------------
-# LEFT SIDE = Profit Comparison
+# LEFT SIDE = Break-Even + Profit Comparison
 # --------------------------
 with col_left:
+
+    # --- Break-Even Budget ---
+    st.subheader("Break-Even Budget")
+
+    yield_goal = st.number_input("Target Yield Goal (bu/ac)", min_value=0.0, value=200.0, step=1.0)
+    target_sell_price = sell_price  # from expense inputs above
+    breakeven_budget = yield_goal * target_sell_price
+
+    breakeven_df = pd.DataFrame({
+        "Metric": ["Yield Goal (bu/ac)", "Target Sell Price ($/bu)", "Break-Even Budget ($/ac)"],
+        "Value": [f"{yield_goal:,.0f}", f"${target_sell_price:,.2f}", f"${breakeven_budget:,.2f}"]
+    })
+
+    st.dataframe(
+        breakeven_df.style.applymap(
+            lambda v: "color: blue; font-weight: bold;" if "Break-Even" in str(v) else "font-weight: bold;",
+            subset=["Value"]
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
 
     # --- Variable Rate Profit ---
@@ -625,16 +648,11 @@ with col_left:
         fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
         seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
 
-        if "Revenue_per_acre" in df.columns:
-            revenue_var = df["Revenue_per_acre"].mean()
-        else:
-            revenue_var = 0.0
-
+        revenue_var = df["Revenue_per_acre"].mean() if "Revenue_per_acre" in df.columns else 0.0
         expenses_var = base_expenses_per_acre + fert_costs + seed_costs
         var_profit = revenue_var - expenses_var
     else:
-        revenue_var = 0.0
-        expenses_var = 0.0
+        revenue_var, expenses_var = 0.0, 0.0
 
     # --- Fixed Rate Profit (from Section 4B inputs) ---
     fixed_profit = 0.0
@@ -645,13 +663,10 @@ with col_left:
         expenses_fixed = base_expenses_per_acre + fert_fixed_costs + seed_fixed_costs
         fixed_profit = revenue_fixed - expenses_fixed
     else:
-        revenue_fixed = 0.0
-        expenses_fixed = 0.0
+        revenue_fixed, expenses_fixed = 0.0, 0.0
 
-    # --- Overall Profit (default snapshot) ---
-    revenue_overall = revenue_per_acre
-    expenses_overall = expenses_per_acre
-    profit_overall = net_profit_per_acre
+    # --- Overall Profit ---
+    revenue_overall, expenses_overall, profit_overall = revenue_per_acre, expenses_per_acre, net_profit_per_acre
 
     # --- Build comparison table ---
     comparison = pd.DataFrame({
@@ -682,7 +697,6 @@ with col_left:
         hide_index=True
     )
 
-
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
 # --------------------------
@@ -692,7 +706,6 @@ with col_right:
     total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
     fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    # --- Style (bold totals only) ---
     styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
         lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
         subset=["Expense"]
@@ -701,14 +714,14 @@ with col_right:
         subset=["$/ac"]
     )
 
-    # --- Height: row count × row height + just enough buffer ---
-    row_height = 34       # per-row height in pixels
-    header_buffer = 50    # header & footer allowance
+    row_height = 34
+    header_buffer = 50
     table_height = len(fixed_df) * row_height + header_buffer
 
     st.dataframe(
         styled_fixed,
         use_container_width=True,
         hide_index=True,
-        height=table_height  # exact fit, prevents scroll & gap
+        height=table_height
     )
+
