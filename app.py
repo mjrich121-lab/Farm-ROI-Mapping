@@ -462,12 +462,13 @@ with left_col:
             axis=0
         )
     )
-
 with right_col:
     st.subheader("Fixed Input Costs")
     st.dataframe(
         fixed_df.style.apply(
             lambda col: [style_totals(v, idx) for idx, v in zip(fixed_df.index, col)],
             axis=0
-        )
+        ),
+        use_container_width=True,              # expand horizontally
+        height=(len(fixed_df) * 35 + 40)      # auto-fit vertically (no scroll)
     )
