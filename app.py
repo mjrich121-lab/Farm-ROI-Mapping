@@ -34,14 +34,11 @@ if "fixed_products" not in st.session_state:
 st.markdown(
     """
     <style>
-      /* Make folium map fill the content width and a consistent height */
-      iframe[title="st_folium"] {
-        width: 100% !important;
-        height: 70vh !important;  /* tweak: 65–80vh as you like */
-      }
+    .block-container { max-width: 100% !important; ... }
+    ...
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 # =========================================================
 # HELPER FUNCTION: Load Shapefiles or GeoJSON
