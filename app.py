@@ -161,8 +161,9 @@ if yield_file is not None:
     try:
         if yield_file.name.endswith(".csv"):
             df = pd.read_csv(yield_file)
-            # Look for a yield-like column
-            yield_candidates = [c for c in df.columns if "yield" in c.lower()]
+            # Normalize columns
+            df.columns = [c.strip().lower() for c in df.columns]
+            yield_candidates = [c for c in df.columns if "yield" in c or "yld" in c]
             if yield_candidates:
                 df.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
                 st.success(f"Yield CSV loaded successfully (using column '{yield_candidates[0]}').")
@@ -171,11 +172,14 @@ if yield_file is not None:
         else:
             gdf = load_vector_file(yield_file)
             if gdf is not None and not gdf.empty:
+                # Normalize columns
+                gdf.columns = [c.strip().lower() for c in gdf.columns]
+
                 gdf["Longitude"] = gdf.geometry.centroid.x
                 gdf["Latitude"] = gdf.geometry.centroid.y
 
-                # Robust yield detection
-                yield_candidates = [c for c in gdf.columns if "yield" in c.lower() or "yld" in c.lower()]
+                # Look for yield column
+                yield_candidates = [c for c in gdf.columns if "yield" in c or "yld" in c]
                 if yield_candidates:
                     gdf.rename(columns={yield_candidates[0]: "Yield"}, inplace=True)
                     df = pd.DataFrame(gdf.drop(columns="geometry"))
@@ -191,7 +195,7 @@ if yield_file is not None:
 # Save to session state
 if df is not None:
     st.session_state["yield_df"] = df
-
+    st.write("📋 Columns in uploaded file:", list(df.columns))
 
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS
