@@ -290,21 +290,23 @@ gradient_css = ", ".join(stops)
 legend_html = f"""
 <div style="
     position: fixed; bottom: 20px; left: 20px; z-index: 9999;
-    display: flex; flex-direction: column; gap: 8px;
-    font-family: sans-serif; font-size: 12px;">
+    display: flex; flex-direction: column; gap: 6px;
+    font-family: sans-serif; font-size: 12px; color: black;">
   
-  <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
-    <div style="font-weight: 600; margin-bottom: 6px;">Yield (bu/ac)</div>
-    <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
-    <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+  <!-- Yield Legend -->
+  <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+    <div style="font-weight: 600; margin-bottom: 2px;">Yield (bu/ac)</div>
+    <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
+    <div style="display:flex; justify-content: space-between; margin-top: 2px;">
       <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
     </div>
   </div>
 
-  <div style="background: white; border: 1px solid #999; padding: 8px 10px; width: 220px;">
-    <div style="font-weight: 600; margin-bottom: 6px;">Net Profit ($/ac)</div>
-    <div style="height: 12px; background: linear-gradient(90deg, {gradient_css}); border: 1px solid #999;"></div>
-    <div style="display:flex; justify-content: space-between; margin-top: 4px;">
+  <!-- Profit Legend -->
+  <div style="background: rgba(255,255,255,0.6); padding: 4px 6px; border-radius: 4px;">
+    <div style="font-weight: 600; margin-bottom: 2px;">Net Profit ($/ac)</div>
+    <div style="height: 14px; background: linear-gradient(90deg, {gradient_css}); border-radius: 2px;"></div>
+    <div style="display:flex; justify-content: space-between; margin-top: 2px;">
       <span>{p_min:.2f}</span><span>{p_max:.2f}</span>
     </div>
   </div>
