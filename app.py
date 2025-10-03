@@ -645,38 +645,57 @@ if st.session_state["yield_df"] is not None and not st.session_state["yield_df"]
 
 # --- Layout (two columns) ---
 col_left, col_right = st.columns([2, 2])
-# --- Profit Metrics Comparison ---
-st.subheader("Profit Metrics Comparison")
 
-    # Variable Rate Profit
-    var_profit = 0.0
-    if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
-     df = st.session_state["yield_df"]
+# --------------------------
+# LEFT SIDE = Breakeven + Profit Comparison
+# --------------------------
+with col_left:
+    st.subheader("Breakeven Budget Tool (Corn vs Beans)")
 
-    fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-    seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+    # --- User inputs ---
+    st.markdown("Enter yield goals and sell prices to see breakeven budgets per acre.")
 
-    revenue_var = df["Revenue_per_acre"].mean() if "Revenue_per_acre" in df.columns else 0.0
-    expenses_var = base_expenses_per_acre + fert_costs + seed_costs
-    var_profit = revenue_var - expenses_var
-    else:
-        revenue_var, expenses_var = 0.0, 0.0
+    corn_yield = st.number_input("Corn Yield Goal (bu/ac)", min_value=0.0, value=200.0, step=1.0)
+    corn_price = st.number_input("Corn Sell Price ($/bu)", min_value=0.0, value=5.0, step=0.1)
+    bean_yield = st.number_input("Soybean Yield Goal (bu/ac)", min_value=0.0, value=60.0, step=1.0)
+    bean_price = st.number_input("Soybean Sell Price ($/bu)", min_value=0.0, value=12.0, step=0.1)
 
-    # Fixed Rate Profit
-    fixed_profit = 0.0
-    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
-        fert_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
-        seed_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
-        revenue_fixed = revenue_var
-        expenses_fixed = base_expenses_per_acre + fert_fixed_costs + seed_fixed_costs
-        fixed_profit = revenue_fixed - expenses_fixed
-    else:
-        revenue_fixed, expenses_fixed = 0.0, 0.0
+    # --- Calculate breakeven budgets ---
+    corn_revenue = corn_yield * corn_price
+    bean_revenue = bean_yield * bean_price
 
-    # Breakeven Budget (was Overall)
-    revenue_overall = revenue_per_acre
-    expenses_overall = expenses_per_acre
-    profit_overall = net_profit_per_acre
+    corn_budget = corn_revenue - expenses_per_acre
+    bean_budget = bean_revenue - expenses_per_acre
+
+    breakeven_df = pd.DataFrame({
+        "Crop": ["Corn", "Soybeans"],
+        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
+        "Sell Price ($/bu)": [corn_price, bean_price],
+        "Revenue ($/ac)": [corn_revenue, bean_revenue],
+        "Fixed Inputs ($/ac)": [expenses_per_acre, expenses_per_acre],
+        "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
+    })
+
+    def highlight_budget(val):
+        if isinstance(val, (int, float)):
+            if val > 0:
+                return "color: green; font-weight: bold;"
+            elif val < 0:
+                return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
+
+    st.dataframe(
+        breakeven_df.style.applymap(highlight_budget, subset=["Breakeven Budget ($/ac)"]).format({
+            "Yield Goal (bu/ac)": "{:,.1f}",
+            "Sell Price ($/bu)": "${:,.2f}",
+            "Revenue ($/ac)": "${:,.2f}",
+            "Fixed Inputs ($/ac)": "${:,.2f}",
+            "Breakeven Budget ($/ac)": "${:,.2f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+
     # --- Profit Metrics Comparison ---
     st.subheader("Profit Metrics Comparison")
 
@@ -740,7 +759,7 @@ st.subheader("Profit Metrics Comparison")
     )
 
     # Collapsible formulas shown separately
-    with st.expander("Show Calculation Formulas", expanded=False):
+    with st.expander("📘 Show Calculation Formulas", expanded=False):
         st.markdown("""
         <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
             <b>Breakeven Budget</b><br>
@@ -755,8 +774,6 @@ st.subheader("Profit Metrics Comparison")
             (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
         </div>
         """, unsafe_allow_html=True)
-
-    
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
@@ -785,3 +802,4 @@ with col_right:
         hide_index=True,
         height=table_height
     )
+
