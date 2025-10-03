@@ -677,6 +677,38 @@ col_left, col_right = st.columns([2, 2])
     revenue_overall = revenue_per_acre
     expenses_overall = expenses_per_acre
     profit_overall = net_profit_per_acre
+    # --- Profit Metrics Comparison ---
+    st.subheader("Profit Metrics Comparison")
+
+    # Variable Rate Profit
+    var_profit = 0.0
+    if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
+        df = st.session_state["yield_df"]
+
+        fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
+        seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
+
+        revenue_var = df["Revenue_per_acre"].mean() if "Revenue_per_acre" in df.columns else 0.0
+        expenses_var = base_expenses_per_acre + fert_costs + seed_costs
+        var_profit = revenue_var - expenses_var
+    else:
+        revenue_var, expenses_var = 0.0, 0.0
+
+    # Fixed Rate Profit
+    fixed_profit = 0.0
+    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
+        fert_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
+        seed_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
+        revenue_fixed = revenue_var
+        expenses_fixed = base_expenses_per_acre + fert_fixed_costs + seed_fixed_costs
+        fixed_profit = revenue_fixed - expenses_fixed
+    else:
+        revenue_fixed, expenses_fixed = 0.0, 0.0
+
+    # Breakeven Budget (was Overall)
+    revenue_overall = revenue_per_acre
+    expenses_overall = expenses_per_acre
+    profit_overall = net_profit_per_acre
 
     # Build numeric-only comparison table
     comparison = pd.DataFrame({
@@ -708,7 +740,7 @@ col_left, col_right = st.columns([2, 2])
     )
 
     # Collapsible formulas shown separately
-    with st.expander("📘 Show Calculation Formulas", expanded=False):
+    with st.expander("Show Calculation Formulas", expanded=False):
         st.markdown("""
         <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
             <b>Breakeven Budget</b><br>
@@ -724,6 +756,7 @@ col_left, col_right = st.columns([2, 2])
         </div>
         """, unsafe_allow_html=True)
 
+    
 
 # --------------------------
 # RIGHT SIDE = Fixed Inputs
