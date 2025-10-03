@@ -493,7 +493,6 @@ st.dataframe(
     use_container_width=True,
     hide_index=True
 )
-
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
@@ -505,7 +504,7 @@ def make_base_map():
         location=[39.5, -98.35],  # Center of continental US
         zoom_start=5,             # Default zoom on load
         tiles=None,
-        scrollWheelZoom=False,    # Disable scroll wheel until click
+        scrollWheelZoom=False,    # Disable scroll wheel by default
         prefer_canvas=True
     )
 
@@ -521,17 +520,22 @@ def make_base_map():
         attr="Esri", name="Labels", overlay=True, control=False
     ).add_to(m)
 
-    # 🔹 Custom JS: enable scroll on click, and set minZoom after map loads
+    # 🔹 JS: mimic Google Maps scroll behavior
     template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
-        
-        // Enable scroll zoom only after user clicks
-        map.once('click', function() {
+
+        // Turn on scroll zoom when map is clicked/focused
+        map.on('click', function() {
             map.scrollWheelZoom.enable();
         });
 
-        // After initial load, lock minZoom at 7
+        // Turn off scroll zoom when mouse leaves the map
+        map.on('mouseout', function() {
+            map.scrollWheelZoom.disable();
+        });
+
+        // After map is ready, lock minZoom at 7
         map.whenReady(function() {
             setTimeout(function() {
                 map.setMinZoom(7);
@@ -547,6 +551,7 @@ def make_base_map():
 
 # Always start with a fresh map each run
 m = make_base_map()
+
 
 # =========================================================
 # 6. ZONES
