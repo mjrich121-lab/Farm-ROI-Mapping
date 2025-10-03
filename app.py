@@ -594,32 +594,41 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 # =========================================================
-# 6. ZONE MAP DISPLAY
+# 6. ZONE MAP DISPLAY (Debug Mode)
 # =========================================================
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"].copy()
 
-    # Ensure CRS for Folium
+    # Print columns for debugging
+    st.write("📋 Zone GDF Columns:", list(gdf.columns))
+
+    # Ensure CRS
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
         elif gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs(epsg=4326)
     except Exception as e:
-        st.warning(f"⚠️ CRS issue: {e}")
+        st.error(f"CRS issue: {e}")
 
-    # --- Ensure required fields exist ---
+    # Ensure required fields
     if "Zone" not in gdf.columns:
         gdf["Zone"] = range(1, len(gdf) + 1)
 
     for col in ["Calculated Acres", "Override Acres"]:
         if col not in gdf.columns:
-            gdf[col] = 0
+            st.warning(f"Missing column {col}, filling with 0s.")
+            gdf[col] = 0.0
         gdf[col] = gdf[col].astype(float)
 
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]  # drop empties
+    # Drop invalid geometries
+    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]
+    if gdf.empty:
+        st.error("❌ All geometries were empty or invalid.")
+    else:
+        st.success(f"✅ {len(gdf)} zones ready for display")
 
-    # Color scheme
+    # Colors
     zone_colors = {1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"}
     def color_for_zone(z):
         try:
@@ -627,24 +636,24 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         except Exception:
             return "#3186cc"
 
-    # Map setup
-    bounds = gdf.total_bounds
-    center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
-    m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
-
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri World Imagery", name="Satellite"
-    ).add_to(m)
-    folium.TileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri Boundaries & Labels", name="Labels", overlay=True
-    ).add_to(m)
-
-    folium.LayerControl(collapsed=False).add_to(m)
-
-    # --- Add zones safely ---
+    # Create map
     try:
+        bounds = gdf.total_bounds
+        center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+
+        m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
+
+        # Basemap
+        folium.TileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri World Imagery", name="Satellite"
+        ).add_to(m)
+        folium.TileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri Boundaries & Labels", name="Labels", overlay=True
+        ).add_to(m)
+
+        # Add zones
         folium.GeoJson(
             gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
             style_function=lambda f: {
@@ -656,11 +665,17 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
                 aliases=["Zone", "Calculated Acres", "Override Acres"]
             )
         ).add_to(m)
-    except Exception as e:
-        st.error(f"❌ Could not render zones: {e}")
 
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-    st_folium(m, width=1000, height=650)
+        # Fit bounds
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+
+        # Show map
+        st_folium(m, width=1000, height=650)
+
+    except Exception as e:
+        st.error(f"❌ Map rendering failed: {e}")
+else:
+    st.info("ℹ️ No zone map loaded yet.")
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate)
