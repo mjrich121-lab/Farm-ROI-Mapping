@@ -600,7 +600,7 @@ m = make_base_map()
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     gdf = st.session_state["zones_gdf"].copy()
 
-    # Ensure CRS
+    # --- CRS ---
     try:
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
@@ -609,7 +609,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     except Exception as e:
         st.warning(f"⚠️ CRS issue: {e}")
 
-    # Ensure required fields exist
+    # --- Ensure required columns ---
     if "Zone" not in gdf.columns:
         gdf["Zone"] = range(1, len(gdf) + 1)
     for col in ["Calculated Acres", "Override Acres"]:
@@ -617,26 +617,23 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             gdf[col] = 0.0
         gdf[col] = gdf[col].astype(float)
 
+    # --- Drop empties ---
     gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notnull()]
 
-    # Zone colors
-    zone_colors = {
-        1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"
-    }
+    # --- Color palette ---
+    zone_colors = {1: "#e41a1c", 2: "#ff7f00", 3: "#ffff33", 4: "#4daf4a", 5: "#006400"}
     def color_for_zone(z):
         try:
             return zone_colors.get(int(z), "#3186cc")
         except Exception:
             return "#3186cc"
 
-    # Map bounds
+    # --- Map setup ---
     bounds = gdf.total_bounds
     center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
-
-    # Build map
     m = folium.Map(location=center, zoom_start=15, tiles=None, control_scale=False)
 
-    # Add satellite + labels
+    # Satellite + labels
     folium.TileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri World Imagery", name="Satellite"
@@ -647,23 +644,29 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     ).add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
 
-    # Add zones
-    folium.GeoJson(
-        gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
-        style_function=lambda f: {
-            "fillColor": color_for_zone(f["properties"].get("Zone")),
-            "color": "black", "weight": 1, "fillOpacity": 0.45,
-        },
-        tooltip=folium.GeoJsonTooltip(
-            fields=["Zone", "Calculated Acres", "Override Acres"],
-            aliases=["Zone", "Calculated Acres", "Override Acres"]
-        )
-    ).add_to(m)
+    # --- Zones ---
+    try:
+        folium.GeoJson(
+            gdf[["Zone", "Calculated Acres", "Override Acres", "geometry"]],
+            style_function=lambda f: {
+                "fillColor": color_for_zone(f["properties"].get("Zone")),
+                "color": "black", "weight": 1, "fillOpacity": 0.45,
+            },
+            tooltip=folium.GeoJsonTooltip(
+                fields=["Zone", "Calculated Acres", "Override Acres"],
+                aliases=["Zone", "Calculated Acres", "Override Acres"]
+            )
+        ).add_to(m)
+    except Exception as e:
+        st.error(f"❌ Zone rendering failed: {e}")
 
-    # Fit to field
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    # --- Fit to field ---
+    try:
+        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception:
+        pass
 
-    # Show the map
+    # --- Always render map, even if zones fail ---
     st_folium(m, width=1000, height=650)
 
 # =========================================================
