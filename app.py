@@ -516,15 +516,17 @@ if df is not None:
     st.dataframe(summary.style.applymap(highlight_profit, subset=["Value"]),
                  use_container_width=True)
 
-    # --- Variable Input Costs ---
-    if not st.session_state["fert_products"].empty or not st.session_state["seed_products"].empty:
-        st.subheader("Variable Rate Input Costs")
-        var_df = pd.concat([st.session_state["fert_products"], st.session_state["seed_products"]],
-                           ignore_index=True)
-        var_df.loc["Total"] = ["Total Variable", var_df["Acres"].sum(),
-                               var_df["CostTotal"].sum(),
-                               var_df["CostPerAcre"].mean()]
-        st.dataframe(var_df, use_container_width=True)
+       # --- Variable Input Costs ---
+    if "fert_products" in st.session_state and "seed_products" in st.session_state:
+        if not st.session_state["fert_products"].empty or not st.session_state["seed_products"].empty:
+            st.subheader("Variable Rate Input Costs")
+            var_df = pd.concat([st.session_state["fert_products"], st.session_state["seed_products"]],
+                               ignore_index=True)
+            var_df.loc["Total"] = ["Total Variable",
+                                   var_df["Acres"].sum(),
+                                   var_df["CostTotal"].sum(),
+                                   var_df["CostPerAcre"].mean()]
+            st.dataframe(var_df, use_container_width=True)
 
     # --- Fixed Input Costs ---
     st.subheader("Fixed Input Costs")
