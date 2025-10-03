@@ -34,16 +34,15 @@ if "fixed_products" not in st.session_state:
 st.markdown(
     """
     <style>
-    .block-container { max-width: 100% !important; padding-left: 1rem !important; padding-right: 1rem !important; }
-    .dataframe { width: 100% !important; overflow-x: auto !important; }
-    .compact-table td, .compact-table th { padding: 4px 8px !important; font-size: 12px !important; white-space: nowrap; }
-    iframe[title="st_folium"] { width: 100% !important; height: 70vh !important; }
-    h1, h2, h3 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+      /* Make folium map fill the content width and a consistent height */
+      iframe[title="st_folium"] {
+        width: 100% !important;
+        height: 70vh !important;  /* tweak: 65–80vh as you like */
+      }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
-
 # =========================================================
 # HELPER FUNCTION: Load Shapefiles or GeoJSON
 # =========================================================
