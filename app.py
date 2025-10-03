@@ -632,9 +632,9 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
         tooltip=folium.GeoJsonTooltip(fields=["Zone","Calculated Acres","Override Acres"])
     ).add_to(m)
 
-    # ✅ Zone legend in bottom-left
+     # ✅ Zone legend in bottom-left
     unique_zones = sorted(zones_gdf["Zone"].unique())
-    legend_html = """
+    zone_legend_html = """
     <div style="
         position: absolute; 
         bottom: 20px; left: 20px; 
@@ -649,11 +649,10 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
     """
     for z in unique_zones:
         color = zone_colors.get(int(z), "#808080")
-        legend_html += f"<div style='display:flex; align-items:center; margin:2px 0;'> \
+        zone_legend_html += f"<div style='display:flex; align-items:center; margin:2px 0;'> \
                         <div style='background:{color}; width:14px; height:14px; margin-right:6px;'></div> Zone {z}</div>"
-    legend_html += "</div>"
-    m.get_root().html.add_child(folium.Element(legend_html))
-
+    zone_legend_html += "</div>"
+    m.get_root().html.add_child(folium.Element(zone_legend_html))
 
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed Rate, overlays only)
