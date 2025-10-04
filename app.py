@@ -107,106 +107,94 @@ def auto_zoom_map(m, df=None, gdf=None):
         bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     return m
-# ========================================================= 
-# 1. ZONE MAP UPLOAD
 # =========================================================
-st.header("Zone Map Upload")
-zone_file = st.file_uploader(
-    "Upload Zone Map",
-    type=["geojson", "json", "zip"],
-    key="zone"
-)
-st.markdown(
-    "_Accepted formats: **GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. "
-    "⚠️ Uploading just a single .shp file will not work._"
-)
+# ZONE UPLOAD (Section 1 inside col1, crash-proof + editor)
+# =========================================================
+with col1:
+    st.subheader("Zone Map Upload")
+    zone_file = st.file_uploader(
+        "Upload Zone Map",
+        type=["geojson", "json", "zip"],
+        key="zone_file",   # unique key (no duplicate errors)
+        accept_multiple_files=False
+    )
+    st.caption("Formats: GeoJSON, JSON, or zipped Shapefile (.shp+.shx+.dbf+.prj)")
 
-zones_gdf = None
-if zone_file is not None:
-    try:
-        # --- Load into GeoDataFrame ---
-        if zone_file.name.endswith((".geojson", ".json")):
-            zones_gdf = gpd.read_file(zone_file)
-        elif zone_file.name.endswith(".zip"):
-            with open("temp.zip", "wb") as f:
-                f.write(zone_file.getbuffer())
-            with zipfile.ZipFile("temp.zip", "r") as zip_ref:
-                zip_ref.extractall("temp_shp")
-            for f_name in os.listdir("temp_shp"):
-                if f_name.endswith(".shp"):
-                    zones_gdf = gpd.read_file(os.path.join("temp_shp", f_name))
-                    break
-            os.remove("temp.zip")
-            shutil.rmtree("temp_shp", ignore_errors=True)
+    if zone_file:
+        try:
+            zones_gdf = load_vector_file(zone_file)
 
-        if zones_gdf is not None and not zones_gdf.empty:
-            st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} zones.")
+            if zones_gdf is not None and not zones_gdf.empty:
+                st.success(f"✅ Zone map loaded successfully with {len(zones_gdf)} polygons.")
 
-            # --- Find existing zone name column OR make one ---
-            zone_col = None
-            for candidate in ["Zone", "zone", "ZONE", "Name", "name"]:
-                if candidate in zones_gdf.columns:
-                    zone_col = candidate
-                    break
-            if zone_col is None:
-                zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
-                zone_col = "ZoneIndex"
+                # --- Detect zone column or create one ---
+                zone_col = None
+                for cand in ["Zone", "zone", "ZONE", "Name", "name"]:
+                    if cand in zones_gdf.columns:
+                        zone_col = cand
+                        break
+                if zone_col is None:
+                    zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+                    zone_col = "ZoneIndex"
 
-            # Ensure we **actually have a 'Zone' column** in the GDF for mapping
-            zones_gdf["Zone"] = zones_gdf[zone_col]
+                zones_gdf["Zone"] = zones_gdf[zone_col]
 
-            # --- Acre calculation in equal-area CRS ---
-            gdf_area = zones_gdf.copy()
-            if gdf_area.crs is None:
-                gdf_area.set_crs(epsg=4326, inplace=True)  # assume WGS84
-            if gdf_area.crs.is_geographic:
-                gdf_area = gdf_area.to_crs(epsg=5070)       # Albers Equal Area (USA)
+                # --- Acre calculation (equal-area CRS) ---
+                gdf_area = zones_gdf.copy()
+                if gdf_area.crs is None:
+                    gdf_area.set_crs(epsg=4326, inplace=True)
+                if gdf_area.crs.is_geographic:
+                    gdf_area = gdf_area.to_crs(epsg=5070)  # Albers Equal Area (USA)
 
-            zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
-            zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"].astype(float)
+                zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
+                zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"].astype(float)
 
-            # --- Keep geometry in EPSG:4326 for Folium ---
-            if zones_gdf.crs is None or zones_gdf.crs.to_string() != "EPSG:4326":
-                zones_gdf = zones_gdf.to_crs(epsg=4326)
+                # --- Keep geometry in EPSG:4326 for Folium ---
+                if zones_gdf.crs is None or zones_gdf.crs.to_string() != "EPSG:4326":
+                    zones_gdf = zones_gdf.to_crs(epsg=4326)
 
-            # --- Editable overrides (centered) ---
-            display_df = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
+                # --- Editable table for overrides ---
+                display_df = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
+                c1, c2, c3 = st.columns([1,2,1])
+                with c2:
+                    edited = st.data_editor(
+                        display_df,
+                        num_rows="fixed",
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Zone": st.column_config.TextColumn(disabled=True),
+                            "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                            "Override Acres": st.column_config.NumberColumn(format="%.2f"),
+                        },
+                        key="zone_acres_editor",
+                    )
 
-            c1, c2, c3 = st.columns([1,2,1])
-            with c2:
-                edited = st.data_editor(
-                    display_df,
-                    num_rows="fixed",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Zone": st.column_config.TextColumn(disabled=True),
-                        "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                        "Override Acres": st.column_config.NumberColumn(format="%.2f"),
-                    },
-                    key="zone_acres_editor",
-                )
+                    # sanitize: blanks/None -> Calculated
+                    edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce")
+                    edited["Override Acres"] = edited["Override Acres"].fillna(edited["Calculated Acres"])
 
-                # sanitize: blanks/None -> Calculated
-                edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce")
-                edited["Override Acres"] = edited["Override Acres"].fillna(edited["Calculated Acres"])
+                    # totals
+                    total_calc     = float(zones_gdf["Calculated Acres"].sum())
+                    total_override = float(edited["Override Acres"].sum())
+                    st.markdown(
+                        f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**"
+                    )
 
-                # totals
-                total_calc     = float(zones_gdf["Calculated Acres"].sum())
-                total_override = float(edited["Override Acres"].sum())
-                st.markdown(f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**")
+                # push overrides back into the GeoDataFrame
+                zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
 
-            # push overrides back into the GDF (keep columns for tooltip)
-            zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
+                # save to session for downstream maps
+                st.session_state["zones_gdf"] = zones_gdf
 
-            # save for downstream
-            st.session_state["zones_gdf"] = zones_gdf
+            else:
+                st.error("❌ Could not load zone map. File is empty or invalid.")
 
-        else:
-            st.error("❌ Could not load zone map. Please check file format.")
+        except Exception as e:
+            st.error(f"❌ Error processing zone map: {e}")
+    else:
+        st.caption("No zone file uploaded yet.")
 
-    except Exception as e:
-        st.error(f"❌ Error processing zone map: {e}")
 
 # =========================================================
 # 2–3. FILE UPLOADS (Compact 4-square Layout, Crash-Proof)
