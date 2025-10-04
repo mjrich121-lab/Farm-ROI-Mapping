@@ -842,17 +842,16 @@ if bounds_list:
     m.fit_bounds([[south, west], [north, east]])
 else:
     south, west, north, east = 25, -125, 49, -66  # fallback US view
-
 # -------------------------------
 # 7B. Draw Prescription Overlays
 # -------------------------------
 
 def add_prescription_overlay(gdf, name, cmap, show_default=False):
-    """Draws polygon RX overlays with gradient fill + tooltip + legend."""
+    """Draw polygon RX overlays with gradient fill + tooltip + legend."""
     if gdf is None or gdf.empty:
         return
 
-    # detect product + rate columns
+    # --- detect product + rate cols ---
     product_col, rate_col = None, None
     for c in gdf.columns:
         if product_col is None and "product" in c.lower():
@@ -860,11 +859,11 @@ def add_prescription_overlay(gdf, name, cmap, show_default=False):
         if rate_col is None and ("tgt" in c.lower() or "rate" in c.lower()):
             rate_col = c
 
-    # fixed vs variable detection
+    # --- fixed vs variable detection ---
     rate_type = detect_rate_type(gdf)
     gdf["RateType"] = rate_type
 
-    # legend range (based on target rate if present)
+    # --- legend range ---
     if rate_col and rate_col in gdf.columns:
         vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
         if not vals.empty:
@@ -874,14 +873,21 @@ def add_prescription_overlay(gdf, name, cmap, show_default=False):
     else:
         vmin, vmax = 0.0, 1.0
 
-      # style function with colormap
+    # --- style function ---
     def style_function(feat):
-        val = feat["properties"].get(rate_col, None) if rate_col else None
+        val = None
+        if rate_col and "properties" in feat and rate_col in feat["properties"]:
+            try:
+                val = float(feat["properties"][rate_col])
+            except Exception:
+                val = None
+
         if val is None or pd.isna(val):
             fill = "#808080"  # gray if missing
         else:
-            norm_val = (float(val) - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-            fill = matplotlib.colors.rgb2hex(cmap(norm_val)[:3])  # ✅ FIXED
+            norm_val = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+            norm_val = max(0.0, min(1.0, norm_val))  # clamp between 0–1
+            fill = matplotlib.colors.rgb2hex(cmap(norm_val)[:3])
         return {
             "color": "black",
             "weight": 0.5,
@@ -889,11 +895,12 @@ def add_prescription_overlay(gdf, name, cmap, show_default=False):
             "fillOpacity": 0.5,
         }
 
-
-    # tooltip fields
+    # --- tooltip fields ---
     fields, aliases = [], []
-    if product_col: fields.append(product_col); aliases.append("Product")
-    if rate_col: fields.append(rate_col); aliases.append("Target Rate")
+    if product_col: 
+        fields.append(product_col); aliases.append("Product")
+    if rate_col: 
+        fields.append(rate_col); aliases.append("Target Rate")
     fields.append("RateType"); aliases.append("Type")
 
     folium.GeoJson(
@@ -903,7 +910,7 @@ def add_prescription_overlay(gdf, name, cmap, show_default=False):
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
     ).add_to(m)
 
-    # add gradient legend for this layer
+    # --- gradient legend ---
     add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
     st.session_state["legend_offset"] += 80
 
@@ -916,6 +923,8 @@ if seed_gdf is not None and not seed_gdf.empty:
 for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
         add_prescription_overlay(fgdf, name=f"Fertilizer RX: {k}", cmap=plt.cm.Blues, show_default=True)
+
+
 # -------------------------------
 # 7C. Yield / Profit Heatmaps
 # -------------------------------
