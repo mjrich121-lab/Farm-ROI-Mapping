@@ -847,21 +847,74 @@ else:
 # 7B. Draw Prescription Overlays
 # -------------------------------
 
-# ✅ Seed RX (zones-like, simple blue polygons)
-if seed_gdf is not None and not seed_gdf.empty:
-    add_polygon_overlay(
-        seed_gdf,
-        name="Seed RX",
-        line_color="black",
-        fill_color="#1E90FF",  # DodgerBlue
-        fill_opacity=0.06
-    )
+def add_prescription_overlay(gdf, name, cmap, show_default=False):
+    """Draws polygon RX overlays with gradient fill + tooltip + legend."""
+    if gdf is None or gdf.empty:
+        return
 
-# ✅ Fertilizer RX (stackable, density-colored polygons)
+    # detect product + rate columns
+    product_col, rate_col = None, None
+    for c in gdf.columns:
+        if product_col is None and "product" in c.lower():
+            product_col = c
+        if rate_col is None and ("tgt" in c.lower() or "rate" in c.lower()):
+            rate_col = c
+
+    # fixed vs variable detection
+    rate_type = detect_rate_type(gdf)
+    gdf["RateType"] = rate_type
+
+    # legend range (based on target rate if present)
+    if rate_col and rate_col in gdf.columns:
+        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
+        if not vals.empty:
+            vmin, vmax = float(vals.min()), float(vals.max())
+        else:
+            vmin, vmax = 0.0, 1.0
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    # style function with colormap
+    def style_function(feat):
+        val = feat["properties"].get(rate_col, None) if rate_col else None
+        if val is None or pd.isna(val):
+            fill = "#808080"  # gray if missing
+        else:
+            norm_val = (float(val) - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+            fill = matplotlib.colors.rgb2hex(cmap(norm_val))
+        return {
+            "color": "black",
+            "weight": 0.5,
+            "fillColor": fill,
+            "fillOpacity": 0.5,
+        }
+
+    # tooltip fields
+    fields, aliases = [], []
+    if product_col: fields.append(product_col); aliases.append("Product")
+    if rate_col: fields.append(rate_col); aliases.append("Target Rate")
+    fields.append("RateType"); aliases.append("Type")
+
+    folium.GeoJson(
+        gdf,
+        name=name,
+        style_function=style_function,
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+    ).add_to(m)
+
+    # add gradient legend for this layer
+    add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
+
+
+# --- Seed RX overlay ---
+if seed_gdf is not None and not seed_gdf.empty:
+    add_prescription_overlay(seed_gdf, name="Seed RX", cmap=plt.cm.Greens, show_default=True)
+
+# --- Fert RX overlays (stackable) ---
 for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
-        add_fert_overlay(fgdf, layer_name=f"Fertilizer RX: {k}")
-
+        add_prescription_overlay(fgdf, name=f"Fertilizer RX: {k}", cmap=plt.cm.Blues, show_default=True)
 # -------------------------------
 # 7C. Yield / Profit Heatmaps
 # -------------------------------
@@ -911,7 +964,7 @@ if not st.session_state["fixed_products"].empty:
 df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
 
 # Heatmap Helper
-def add_heatmap_overlay(values, name, show_default):
+def add_heatmap_overlay(values, name, cmap, show_default):
     vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
     mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
     if mask.sum() < 3:
@@ -939,7 +992,6 @@ def add_heatmap_overlay(values, name, show_default):
     if vmin == vmax:
         vmax = vmin + 1.0
 
-    cmap = plt.cm.get_cmap("RdYlGn")
     rgba = cmap((grid - vmin) / (vmax - vmin))
     rgba = np.flipud(rgba)
     rgba = (rgba * 255).astype(np.uint8)
@@ -955,55 +1007,50 @@ def add_heatmap_overlay(values, name, show_default):
 
     return vmin, vmax
 
-# Add overlays
-y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
-v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
-f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
-
-
 # -------------------------------
 # 7D. Legend + Layer Control
 # -------------------------------
-if all(v is not None for v in [y_min, y_max, v_min, v_max, f_min, f_max]):
-    def rgba_to_hex(rgba_tuple):
-        r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
-        return f"#{r:02x}{g:02x}{b:02x}"
-    stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0,101,10)]
+
+def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
+    """Generic stacked gradient legend."""
+    stops = [f"{matplotlib.colors.rgb2hex(cmap(i/100.0))} {i}%" for i in range(0,101,10)]
     gradient_css = ", ".join(stops)
 
-    profit_legend_html = f"""
-    <div style="position:absolute; top:90px; left:10px; z-index:9999;
-                display:flex; flex-direction:column; gap:14px;
+    legend_html = f"""
+    <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
+                display:flex; flex-direction:column; gap:6px;
                 font-family:sans-serif; font-size:12px; color:white;
                 background-color: rgba(0,0,0,0.6);
-                padding:8px 12px; border-radius:6px;">
-
+                padding:6px 10px; border-radius:5px;">
       <div>
-        <div style="font-weight:600; margin-bottom:2px;">Yield (bu/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
+        <div style="font-weight:600; margin-bottom:2px;">{name}</div>
+        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
         <div style="display:flex; justify-content:space-between;">
-          <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
-        </div>
-      </div>
-
-      <div>
-        <div style="font-weight:600; margin-bottom:2px;">Variable Rate Profit ($/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
-        <div style="display:flex; justify-content:space-between;">
-          <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
-        </div>
-      </div>
-
-      <div>
-        <div style="font-weight:600; margin-bottom:2px;">Fixed Rate Profit ($/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
-        <div style="display:flex; justify-content:space-between;">
-          <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
+          <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
         </div>
       </div>
     </div>
     """
-    m.get_root().html.add_child(folium.Element(profit_legend_html))
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+# Reset stacking offset
+st.session_state["legend_offset"] = 90
+
+# Add Yield/Profit overlays + legends
+y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", plt.cm.RdYlGn, show_default=False)
+if y_min is not None:
+    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
+
+v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=True)
+if v_min is not None:
+    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
+
+f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=False)
+if f_min is not None:
+    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
 
 # ✅ Always refresh LayerControl
 folium.LayerControl(collapsed=False, position="topright").add_to(m)
