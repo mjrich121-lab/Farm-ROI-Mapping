@@ -273,7 +273,8 @@ fert_file = st.file_uploader(
     key="fert"
 )
 st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
+    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
 seed_file = st.file_uploader(
@@ -282,39 +283,51 @@ seed_file = st.file_uploader(
     key="seed"
 )
 st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile (.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
+    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
+    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
 
 def process_prescription(file, prescrip_type="fertilizer"):
-    """Process fertilizer/seed prescription maps safely."""
+    """Process fertilizer/seed prescription maps safely (CSV or polygons)."""
     if file is None:
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-    try:
-        # --- Load CSV or shapefile ---
-        if file.name.endswith(".csv"):
-            df = pd.read_csv(file)
-        else:
-            gdf = load_vector_file(file)
-            if gdf is None or gdf.empty:
-                return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+    # --- Handle vector files (shapefile/geojson/json/zip) ---
+    if file.name.lower().endswith((".geojson",".json",".zip",".shp")):
+        gdf = load_vector_file(file)
+        if gdf is None or gdf.empty:
+            st.error(f"❌ Could not read {prescrip_type} prescription map.")
+            return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-            gdf["Longitude"] = gdf.geometry.centroid.x
-            gdf["Latitude"] = gdf.geometry.centroid.y
+        # Normalize column names
+        gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
 
-            # Auto-calc acres if not provided
-            if "acres" not in gdf.columns:
-                gdf["acres"] = gdf.geometry.area * 0.000247105  # m² → acres
+        # Ensure CRS WGS84
+        try:
+            gdf = gdf.to_crs(epsg=4326)
+        except Exception:
+            if gdf.crs is None:
+                gdf.set_crs(epsg=4326, inplace=True)
 
-            df = pd.DataFrame(gdf.drop(columns="geometry"))
+        # Add centroids for later (map bounds + tooltips)
+        gdf["Longitude"] = gdf.geometry.centroid.x
+        gdf["Latitude"]  = gdf.geometry.centroid.y
 
-    except Exception as e:
-        st.error(f"❌ Error processing {prescrip_type} map: {e}")
-        return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+        # Save polygons into session_state for Section 7 overlays
+        if prescrip_type == "seed":
+            st.session_state["seed_gdf"] = gdf.copy()
+        elif prescrip_type == "fertilizer":
+            layer_key = os.path.splitext(file.name)[0].lower().replace(" ", "_")
+            st.session_state.setdefault("fert_gdfs", {})[layer_key] = gdf.copy()
 
-    # --- Normalize column names ---
-    df.columns = [c.strip().lower() for c in df.columns]
+        # Convert to DataFrame (drop geometry) for cost calculations
+        df = pd.DataFrame(gdf.drop(columns="geometry"))
+
+    else:
+        # --- CSV handling ---
+        df = pd.read_csv(file)
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
     # --- Detect product column ---
     if "product" not in df.columns:
@@ -346,6 +359,7 @@ def process_prescription(file, prescrip_type="fertilizer"):
         else:
             df["costtotal"] = 0
 
+    # --- Aggregate ---
     if not df.empty:
         grouped = df.groupby("product", as_index=False).agg(
             Acres=("acres","sum"),
@@ -374,10 +388,8 @@ if seed_file is not None:
 # --- Feedback (safe checks) ---
 if not st.session_state["fert_products"].empty:
     st.success("✅ Fertilizer prescription uploaded successfully")
-
 if not st.session_state["seed_products"].empty:
     st.success("✅ Seed prescription uploaded successfully")
-
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
@@ -687,11 +699,77 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed overlays + legend)
 # =========================================================
-if (
+
+# --- helper: add a simple transparent polygon overlay (Zones-like style) ---
+def add_polygon_overlay(gdf, name, line_color="black", fill_color="#ff0000", fill_opacity=0.06):
+    if gdf is None or gdf.empty:
+        return
+    folium.GeoJson(
+        gdf,
+        name=name,
+        style_function=lambda feat: {
+            "color": line_color,
+            "weight": 1,
+            "fillColor": fill_color,
+            "fillOpacity": fill_opacity,
+        },
+        tooltip=folium.GeoJsonTooltip(fields=[c for c in gdf.columns if c.lower() not in ("geometry",)] [:10])
+    ).add_to(m)
+
+# --- gather bounds from anything we might draw (zones + seed + fert + yield) ---
+bounds_list = []
+
+# Zones (if present)
+if st.session_state.get("zones_gdf") is not None and not st.session_state["zones_gdf"].empty:
+    zb = st.session_state["zones_gdf"].total_bounds
+    if not any(pd.isna(zb)):
+        bounds_list.append([[zb[1], zb[0]], [zb[3], zb[2]]])
+
+# Seed RX (if present)
+seed_gdf = st.session_state.get("seed_gdf")
+if seed_gdf is not None and not seed_gdf.empty:
+    sb = seed_gdf.total_bounds
+    if not any(pd.isna(sb)):
+        bounds_list.append([[sb[1], sb[0]], [sb[3], sb[2]]])
+
+# Fert RX (any number of layers)
+fert_layers = st.session_state.get("fert_gdfs", {})
+for _k, fgdf in fert_layers.items():
+    if fgdf is not None and not fgdf.empty:
+        fb = fgdf.total_bounds
+        if not any(pd.isna(fb)):
+            bounds_list.append([[fb[1], fb[0]], [fb[3], fb[2]]])
+
+# Yield (if uploaded) — we’ll decide below whether to draw it
+yield_df_present = (
     st.session_state.get("yield_df") is not None
     and not st.session_state["yield_df"].empty
-    and "Yield" in st.session_state["yield_df"].columns
-):
+)
+if yield_df_present and {"Latitude","Longitude"}.issubset(st.session_state["yield_df"].columns):
+    yd = st.session_state["yield_df"]
+    if yd[["Latitude","Longitude"]].notnull().all().all():
+        bounds_list.append([[yd["Latitude"].min(), yd["Longitude"].min()],
+                            [yd["Latitude"].max(), yd["Longitude"].max()]])
+
+# Fit bounds if we collected any, else keep current map view
+if bounds_list:
+    south = min(b[0][0] for b in bounds_list); west  = min(b[0][1] for b in bounds_list)
+    north = max(b[1][0] for b in bounds_list); east  = max(b[1][1] for b in bounds_list)
+    m.fit_bounds([[south, west], [north, east]])
+else:
+    south, west, north, east = 25, -125, 49, -66  # fallback window
+
+# --- draw polygon RX overlays first (Zones-like presentation) ---
+if seed_gdf is not None and not seed_gdf.empty:
+    add_polygon_overlay(seed_gdf, name="Seed RX", line_color="black", fill_color="#1E90FF", fill_opacity=0.06)
+
+for k, fgdf in fert_layers.items():
+    if fgdf is not None and not fgdf.empty:
+        # subtle hue change per layer for clarity
+        add_polygon_overlay(fgdf, name=f"Fertilizer RX: {k}", line_color="black", fill_color="#FFD700", fill_opacity=0.06)
+
+# --- now (optionally) do the Yield + Profit heatmaps if Yield is actually present ---
+if yield_df_present:
     df = st.session_state["yield_df"].copy()
 
     # Ensure Yield column
@@ -706,12 +784,12 @@ if (
             if yield_col: break
         if yield_col:
             df = df.rename(columns={yield_col:"Yield"})
-            st.success(f"✅ Using {yield_col} column for Yield (renamed to Yield).")
+            st.success(f"✅ Using `{yield_col}` column for Yield (renamed to `Yield`).")
         else:
-            st.error("❌ No recognized yield column found.")
+            st.info("ℹ️ No recognizable Yield column; skipping Yield/Profit heatmaps.")
             df = None
 
-    if df is not None and "Yield" in df.columns:
+    if df is not None and "Yield" in df.columns and {"Latitude","Longitude"}.issubset(df.columns):
         # Profit calculations
         df["Revenue_per_acre"] = df["Yield"] * sell_price
         fert_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0.0
@@ -727,46 +805,99 @@ if (
             fixed_costs = float(fx["$/ac"].sum())
         df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
 
-        # Compute union bounds across all layers
-        bounds = []
-        if st.session_state.get("zones_gdf") is not None:
-            zb = st.session_state["zones_gdf"].total_bounds
-            if not any(pd.isna(zb)):
-                bounds.append([[zb[1], zb[0]],[zb[3], zb[2]]])
-        if {"Latitude","Longitude"}.issubset(df.columns) and df[["Latitude","Longitude"]].notnull().all().all():
-            bounds.append([[df["Latitude"].min(), df["Longitude"].min()],
-                           [df["Latitude"].max(), df["Longitude"].max()]])
-        if bounds:
-            south = min(b[0][0] for b in bounds); west = min(b[0][1] for b in bounds)
-            north = max(b[1][0] for b in bounds); east  = max(b[1][1] for b in bounds)
-            m.fit_bounds([[south, west],[north, east]])
-        else:
-            south, west, north, east = 25, -125, 49, -66  # fallback
+        # --- helper: gridded heat overlay (with 5–95% trim for legend) ---
+        def add_heatmap_overlay(values, name, show_default):
+            vals = pd.to_numeric(pd.Series(values), errors="coerce")
+            mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
+            if mask.sum() < 3:
+                return None, None
 
-else:
-    # Budget mode: no yield data, fall back to target_yield
-    target_yield = st.session_state.get("target_yield", None)
-    if target_yield and target_yield > 0:
-        est_revenue = target_yield * sell_price
-        fert_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0.0
-        seed_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0.0
-        variable_profit = est_revenue - (base_expenses_per_acre + fert_var + seed_var)
+            pts_lon = df.loc[mask, "Longitude"].values
+            pts_lat = df.loc[mask, "Latitude"].values
+            vals_ok = vals.loc[mask].values
 
-        fixed_costs = 0.0
-        if not st.session_state["fixed_products"].empty:
-            fx = st.session_state["fixed_products"].copy()
-            fx["$/ac"] = fx.apply(
-                lambda r: r.get("Rate",0)*r.get("CostPerUnit",0)
-                          if r.get("Rate",0)>0 and r.get("CostPerUnit",0)>0 else 0,
-                axis=1
-            )
-            fixed_costs = float(fx["$/ac"].sum())
-        fixed_profit = est_revenue - (base_expenses_per_acre + fixed_costs)
+            n = 200
+            lon_lin = np.linspace(west, east, n)
+            lat_lin = np.linspace(south, north, n)
+            lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+            try:
+                grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+                grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+                grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+            except Exception as e:
+                st.warning(f"⚠️ Skipping {name} overlay (interpolation error: {e})")
+                return None, None
 
-        st.info(f"Budget mode: using Target Yield ({target_yield} bu/ac).")
-        st.write(f"Projected Variable Profit: ${variable_profit:,.2f}/ac")
-        st.write(f"Projected Fixed Profit: ${fixed_profit:,.2f}/ac")
+            # 5–95% percentiles for legend (robust to outliers)
+            vmin = float(np.nanpercentile(vals_ok, 5))
+            vmax = float(np.nanpercentile(vals_ok, 95))
+            if vmin == vmax:
+                vmax = vmin + 1.0
 
+            cmap = plt.cm.get_cmap("RdYlGn")
+            rgba = cmap((grid - vmin) / (vmax - vmin))
+            rgba = np.flipud(rgba)
+            rgba = (rgba * 255).astype(np.uint8)
+
+            folium.raster_layers.ImageOverlay(
+                image=rgba,
+                bounds=[[south, west],[north, east]],
+                opacity=0.5,
+                name=name,
+                overlay=True,
+                show=show_default
+            ).add_to(m)
+            return vmin, vmax
+
+        # Add overlays (toggleable)
+        y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
+        v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
+        f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+
+        # Legend (same spacing you liked; no black background behind the gradients themselves)
+        if all(v is not None for v in [y_min, y_max, v_min, v_max, f_min, f_max]):
+            def rgba_to_hex(rgba_tuple):
+                r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
+                return f"#{r:02x}{g:02x}{b:02x}"
+            stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0,101,10)]
+            gradient_css = ", ".join(stops)
+
+            profit_legend_html = f"""
+            <div style="position:absolute; top:90px; left:10px; z-index:9999;
+                        display:flex; flex-direction:column; gap:14px;
+                        font-family:sans-serif; font-size:12px; color:white;
+                        background-color: rgba(0,0,0,0.6);
+                        padding:8px 12px; border-radius:6px;">
+
+              <div>
+                <div style="font-weight:600; margin-bottom:2px;">Yield (bu/ac)</div>
+                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+                </div>
+              </div>
+
+              <div>
+                <div style="font-weight:600; margin-bottom:2px;">Variable Rate Profit ($/ac)</div>
+                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
+                </div>
+              </div>
+
+              <div>
+                <div style="font-weight:600; margin-bottom:2px;">Fixed Rate Profit ($/ac)</div>
+                <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px; margin-bottom:2px;"></div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
+                </div>
+              </div>
+            </div>
+            """
+            m.get_root().html.add_child(folium.Element(profit_legend_html))
+
+# --- always (re)add LayerControl so toggles are visible ---
+folium.LayerControl(collapsed=False, position="topright").add_to(m)
 
 # =========================================================
 # Helper to add a gridded heat overlay safely (with 5–95% trim for legend)
