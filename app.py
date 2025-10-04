@@ -290,13 +290,12 @@ else:
 # --- Keep backward compatibility for downstream sections ---
 st.session_state["yield_df"] = None  # ensures map won't error even if no yield selected
 
-        
 # =========================================================
-# 3. PRESCRIPTION MAP UPLOADS  (multi-file + crash-proof)
+# 3. PRESCRIPTION MAP UPLOADS  (multi-file fert + multi-file seed, crash-proof)
 # =========================================================
 st.header("Prescription Map Uploads")
 
-# --- Multi-file uploaders ---
+# --- Uploaders ---
 fert_files = st.file_uploader(
     "Upload Fertilizer Prescription Map(s)",
     type=["csv", "geojson", "json", "zip"],
@@ -315,9 +314,10 @@ st.markdown(
     "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
-# --- Persistent stores for all uploaded layers ---
-st.session_state.setdefault("fert_layers_store", {})
-st.session_state.setdefault("seed_layers_store", {})
+# --- Reset stores fresh every run (prevents ghost files if user deletes one) ---
+st.session_state["fert_layers_store"] = {}
+st.session_state["seed_layers_store"] = {}
+       
 
 # =========================================================
 # HELPER: Process One Prescription File (existing logic kept)
