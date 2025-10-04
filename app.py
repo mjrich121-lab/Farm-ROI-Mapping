@@ -144,52 +144,81 @@ col1, col2 = st.columns(2)
 col3, col4 = st.columns(2)
 
 # =========================================================
-# ZONE UPLOAD (col1)
+# ZONE MAP UPLOAD (compact + tidy acres override)
 # =========================================================
 with col1:
     st.subheader("Zone Map Upload")
     zone_file = st.file_uploader(
         "Upload Zone Map",
         type=["geojson", "json", "zip"],
-        key="zone",
+        key="zone_file",   # unique key (prevents duplicate key error)
         accept_multiple_files=False
     )
     st.caption("Formats: GeoJSON, JSON, or zipped Shapefile (.shp+.shx+.dbf+.prj)")
 
     if zone_file:
-        zones_gdf = load_vector_file(zone_file)
-        if zones_gdf is not None and not zones_gdf.empty:
-            # detect/create zone column
-            zone_col = None
-            for cand in ["Zone", "zone", "ZONE", "Name", "name"]:
-                if cand in zones_gdf.columns:
-                    zone_col = cand
-                    break
-            if zone_col is None:
-                zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
-                zone_col = "ZoneIndex"
-            zones_gdf["Zone"] = zones_gdf[zone_col]
+        try:
+            zones_gdf = load_vector_file(zone_file)
 
-            # acre calculation
-            gdf_area = zones_gdf.to_crs(epsg=5070)
-            zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
-            zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"]
+            if zones_gdf is not None and not zones_gdf.empty:
+                st.success(f"✅ Zone map loaded ({len(zones_gdf)} polygons)")
 
-            # store
-            st.session_state["zones_gdf"] = zones_gdf
+                # --- Detect or create zone column ---
+                zone_col = None
+                for cand in ["Zone", "zone", "ZONE", "Name", "name"]:
+                    if cand in zones_gdf.columns:
+                        zone_col = cand
+                        break
+                if zone_col is None:
+                    zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+                    zone_col = "ZoneIndex"
 
-            # compact summary table
-            st.caption("Zone Acres")
-            st.dataframe(
-                zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].round(2),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.warning("⚠️ Invalid or empty zone map.")
+                zones_gdf["Zone"] = zones_gdf[zone_col]
+
+                # --- Acre calculation ---
+                gdf_area = zones_gdf.copy()
+                if gdf_area.crs is None:
+                    gdf_area.set_crs(epsg=4326, inplace=True)
+                if gdf_area.crs.is_geographic:
+                    gdf_area = gdf_area.to_crs(epsg=5070)  # Equal Area
+
+                zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
+                zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"].astype(float)
+
+                # --- Compact override editor (like Excel) ---
+                display_df = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
+                edited = st.data_editor(
+                    display_df,
+                    num_rows="fixed",
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Zone": st.column_config.TextColumn(disabled=True),
+                        "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                        "Override Acres": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    key="zone_acres_editor",
+                )
+
+                edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce")
+                edited["Override Acres"] = edited["Override Acres"].fillna(edited["Calculated Acres"])
+
+                # Totals line directly under editor
+                total_calc = float(zones_gdf["Calculated Acres"].sum())
+                total_override = float(edited["Override Acres"].sum())
+                st.markdown(f"**Total Acres → Calculated: {total_calc:,.2f} | Override: {total_override:,.2f}**")
+
+                # Push overrides back into the gdf
+                zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
+                st.session_state["zones_gdf"] = zones_gdf
+
+            else:
+                st.error("❌ Could not load zone map. File is empty or invalid.")
+
+        except Exception as e:
+            st.error(f"❌ Error processing zone map: {e}")
     else:
         st.caption("No zone file uploaded yet.")
-
 
 # =========================================================
 # YIELD UPLOAD (col2)
@@ -301,7 +330,6 @@ with col4:
             st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
     else:
         st.caption("No seed files uploaded yet.")
-
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
@@ -503,7 +531,6 @@ st.dataframe(
     }),
     use_container_width=True,
     hide_index=True
-)
 # =========================================================
 # 5. BASE MAP
 # =========================================================
