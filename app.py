@@ -207,6 +207,7 @@ if zone_file is not None:
 
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
+
 # =========================================================
 # 2. YIELD MAP UPLOAD  (multi-file + crash-proof)
 # =========================================================
@@ -230,6 +231,7 @@ if yield_files:
     for yf in yield_files:
         try:
             df_temp = None
+
             # --- CSV case ---
             if yf.name.lower().endswith(".csv"):
                 df_temp = pd.read_csv(yf)
@@ -239,12 +241,41 @@ if yield_files:
                 if gdf_temp is not None and not gdf_temp.empty:
                     df_temp = pd.DataFrame(gdf_temp.drop(columns="geometry", errors="ignore"))
 
+            # --- Validate dataframe ---
             if df_temp is not None and not df_temp.empty:
+                # normalize column names
                 df_temp.columns = [c.strip().lower().replace(" ", "_") for c in df_temp.columns]
-                st.session_state["yield_files_list"].append({"name": yf.name, "rows": len(df_temp)})
+
+                # --- Intelligent yield column detection ---
+                yield_candidates = []
+
+                # Priority 1 – Dry yield (best accuracy)
+                for key in ["yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield"]:
+                    if key in df_temp.columns:
+                        yield_candidates.append(key)
+
+                # Priority 2 – Other yield-like columns
+                if not yield_candidates:
+                    for key in ["yield", "yld_vol_wt", "yld_mass_wt", "wet_yield"]:
+                        if key in df_temp.columns:
+                            yield_candidates.append(key)
+
+                # Apply first match, else placeholder
+                if yield_candidates:
+                    chosen = yield_candidates[0]
+                    df_temp.rename(columns={chosen: "Yield"}, inplace=True)
+                else:
+                    df_temp["Yield"] = 0.0  # triggers manual Target Yield later
+
+                # record successful load
+                st.session_state["yield_files_list"].append(
+                    {"name": yf.name, "rows": len(df_temp)}
+                )
                 st.success(f"✅ Loaded {yf.name} ({len(df_temp)} rows)")
+
             else:
                 st.warning(f"⚠️ {yf.name} contained no usable data.")
+
         except Exception as e:
             st.warning(f"⚠️ Skipped {yf.name}: {e}")
 
@@ -259,78 +290,7 @@ else:
 # --- Keep backward compatibility for downstream sections ---
 st.session_state["yield_df"] = None  # ensures map won't error even if no yield selected
 
-        # ======================================
-        # Case 1: CSV
-        # ======================================
-        if yield_file.name.endswith(".csv"):
-            df = pd.read_csv(yield_file)
-
-            # Normalize column names
-            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-
-            with st.expander("📂 Columns detected in uploaded CSV"):
-                st.write(list(df.columns))
-
-            # Detect dry yield column
-            dry_candidates = [c for c in df.columns if "yld" in c and "vol" in c and "dr" in c]
-            if dry_candidates:
-                chosen = dry_candidates[0]
-                df.rename(columns={chosen: "Yield"}, inplace=True)
-                st.success(f"✅ Yield CSV loaded successfully (renamed `{chosen}` → `Yield`).")
-            else:
-                st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dr').")
-                df = None
-
-            # Require lat/lon
-            if df is not None and not {"longitude", "latitude"}.issubset(df.columns):
-                st.error("❌ CSV missing Longitude/Latitude columns. Cannot plot yield map.")
-                df = None
-
-        # ======================================
-        # Case 2: Shapefile / GeoJSON
-        # ======================================
-        else:
-            gdf = load_vector_file(yield_file)
-            if gdf is not None and not gdf.empty:
-                gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
-
-                with st.expander("📂 Columns detected in uploaded shapefile/geojson"):
-                    st.write(list(gdf.columns))
-
-                # Force WGS84
-                if gdf.crs is None:
-                    gdf.set_crs(epsg=4326, inplace=True)
-                gdf = gdf.to_crs(epsg=4326)
-
-                # Add Lat/Lon from centroid
-                gdf["Longitude"] = gdf.geometry.centroid.x
-                gdf["Latitude"] = gdf.geometry.centroid.y
-
-                # Detect dry yield column
-                dry_candidates = [c for c in gdf.columns if "yld" in c and "vol" in c and "dr" in c]
-                if dry_candidates:
-                    chosen = dry_candidates[0]
-                    gdf.rename(columns={chosen: "Yield"}, inplace=True)
-                    df = pd.DataFrame(gdf.drop(columns="geometry"))
-                    st.success(f"✅ Yield shapefile/geojson loaded successfully (renamed `{chosen}` → `Yield`).")
-                else:
-                    st.error("❌ No usable dry yield column found (expected something like 'yld_vol_dr').")
-                    df = None
-            else:
-                st.error("❌ Could not read shapefile/geojson")
-
-    except Exception as e:
-        st.error(f"❌ Error processing yield file: {e}")
-        df = None
-
-# ✅ Save cleanly to session state
-if df is not None and not df.empty and "Yield" in df.columns:
-    # Ensure normalized col names for downstream
-    df.columns = [c.strip().replace(" ", "_") for c in df.columns]
-    st.session_state["yield_df"] = df
-else:
-    st.session_state["yield_df"] = None
-
+        
 # =========================================================
 # 3. PRESCRIPTION MAP UPLOADS  (multi-file + crash-proof)
 # =========================================================
