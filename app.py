@@ -1054,6 +1054,9 @@ if f_min is not None:
     add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_index"])
     st.session_state["legend_index"] += 1
 
+# --- Final map fit ---
+bounds = compute_bounds_for_heatmaps()
+safe_fit_bounds(m, bounds)
 
 # =========================================================
 # 7D. LAYER CONTROL
