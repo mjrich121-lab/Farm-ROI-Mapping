@@ -741,23 +741,25 @@ def add_zones_overlay(m):
             for z in unique_vals
         ])
 
-   legend_html = f"""
-<div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
-             font-family:sans-serif; font-size:13px; color:white;
-             background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
-             width:160px;">
-  <div style="font-weight:600; margin-bottom:4px; cursor:pointer;" onclick="
-      var x = document.getElementById('zone-legend-items');
-      if (x.style.display === 'none') {{ x.style.display = 'block'; }} 
-      else {{ x.style.display = 'none'; }}">
-    Zone Colors ▼
-  </div>
-  <div id="zone-legend-items" style="display:block;">
-    {legend_items}
-  </div>
-</div>
-"""
-m.get_root().html.add_child(folium.Element(legend_html))
+         # --- Collapsible zone legend (bottom-right) ---
+        legend_html = f"""
+        <div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
+                     font-family:sans-serif; font-size:13px; color:white;
+                     background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
+                     width:160px;">
+          <div style="font-weight:600; margin-bottom:4px; cursor:pointer;" onclick="
+              var x = document.getElementById('zone-legend-items');
+              if (x.style.display === 'none') {{ x.style.display = 'block'; }} 
+              else {{ x.style.display = 'none'; }}">
+            Zone Colors ▼
+          </div>
+          <div id="zone-legend-items" style="display:block;">
+            {legend_items}
+          </div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
+
 
 # =========================================================
 # 7A. HELPERS + BOUNDS
