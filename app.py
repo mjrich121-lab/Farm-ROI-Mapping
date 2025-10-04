@@ -369,12 +369,13 @@ with col4:
 # 4. COMPACT CONTROLS ABOVE MAP
 # =========================================================
 
+# ---------------- 4A. Expense Inputs (Per Acre $) ----------------
 def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
-    """Tiny number input with a small label."""
+    """Tiny number input with a small label (keeps things compact)."""
     st.caption(label)
     return st.number_input(key, min_value=0.0, value=float(default), step=step, label_visibility="collapsed")
 
-st.markdown("### Expense Inputs (Per Acre $)")
+st.markdown("### 4A. Expense Inputs (Per Acre $)")
 
 # Put everything into just TWO tight rows: 7 + 6
 row1 = st.columns(7)
@@ -411,8 +412,8 @@ expenses = {
 }
 base_expenses_per_acre = float(sum(expenses.values()))
 
-# ---------------- Fixed / Variable sections kept, but with smaller headers and collapsed by default
-st.markdown("### Fixed Rate Prescription Inputs")
+# ---------------- 4B. Fixed Rate Inputs ----------------
+st.markdown("### 4B. Fixed Rate Prescription Inputs")
 with st.expander("Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
     if "fixed_products" not in st.session_state or st.session_state["fixed_products"].empty:
         st.session_state["fixed_products"] = pd.DataFrame(
@@ -427,7 +428,8 @@ with st.expander("Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
     )
     st.session_state["fixed_products"] = fixed_entries.copy().reset_index(drop=True)
 
-st.markdown("### Variable Rate Prescription Inputs")
+# ---------------- 4C. Variable Rate Inputs ----------------
+st.markdown("### 4C. Variable Rate Prescription Inputs")
 with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
     fert_df = st.session_state.get("fert_products", pd.DataFrame())
     seed_df = st.session_state.get("seed_products", pd.DataFrame())
@@ -447,13 +449,13 @@ with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
     if (fert_df is None or fert_df.empty) and (seed_df is None or seed_df.empty):
         st.info("No variable rate prescription maps uploaded yet.")
 
-# ---------------- Compare Crop Profitability (tight: inputs at left, table at right)
-st.markdown("### Compare Crop Profitability (Optional)")
+# ---------------- 4D. Compare Crop Profitability ----------------
+st.markdown("### 4D. Compare Crop Profitability (Optional)")
 with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False):
     left, right = st.columns([1, 2])
 
     with left:
-        st.caption("Corn")
+        st.caption("Corn Yield Goal (bu/ac)")
         st.session_state["corn_yield"] = st.number_input(
             "corn_yld", min_value=0.0, value=st.session_state.get("corn_yield", 200.0),
             step=1.0, label_visibility="collapsed"
@@ -464,7 +466,7 @@ with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False)
             step=0.1, label_visibility="collapsed"
         )
 
-        st.caption("Soybeans")
+        st.caption("Soybean Yield Goal (bu/ac)")
         st.session_state["bean_yield"] = st.number_input(
             "bean_yld", min_value=0.0, value=st.session_state.get("bean_yield", 60.0),
             step=1.0, label_visibility="collapsed"
