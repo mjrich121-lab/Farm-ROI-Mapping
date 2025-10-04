@@ -818,14 +818,32 @@ def add_heatmap_overlay(values, name, show_default):
     ).add_to(m)
 
     return vmin, vmax
-
-
 # =========================================================
 # Add overlays (toggleable in LayerControl)
 # =========================================================
-y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
-v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
-f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+y_min = y_max = v_min = v_max = f_min = f_max = None
+
+if df is not None:
+    # Add yield overlay only if Yield column exists
+    if "Yield" in df.columns:
+        y_min, y_max = add_heatmap_overlay(
+            df["Yield"].values, "Yield (bu/ac)", show_default=False
+        )
+
+    # Add profit overlays only if those columns exist
+    if "NetProfit_per_acre_variable" in df.columns:
+        v_min, v_max = add_heatmap_overlay(
+            df["NetProfit_per_acre_variable"].values,
+            "Variable Rate Profit ($/ac)",
+            show_default=True,
+        )
+
+    if "NetProfit_per_acre_fixed" in df.columns:
+        f_min, f_max = add_heatmap_overlay(
+            df["NetProfit_per_acre_fixed"].values,
+            "Fixed Rate Profit ($/ac)",
+            show_default=False,
+        )
 
 # =========================================================
 # Profit Legend (Yield + Variable Profit + Fixed Profit)
