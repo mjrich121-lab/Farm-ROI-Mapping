@@ -755,14 +755,13 @@ def safe_fit_bounds(m, bounds):
     except Exception:
         pass
 
-
 # =========================================================
-# 7B. PRESCRIPTION OVERLAYS (Seed + Fert) with Gradient Legends
+# 7B. PRESCRIPTION OVERLAYS (Seed + Fert) + Gradient Legends
 # =========================================================
 from matplotlib import colors as mpl_colors
 
+# One stacked gradient legend (top-left). Keep only this version in the whole file.
 def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
-    """Stacked gradient legend (top-left)."""
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
     legend_html = f"""
@@ -779,48 +778,87 @@ def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-
 def detect_rate_type(gdf):
     """Return 'Fixed Rate' if all rate values equal, else 'Variable Rate'."""
     rate_col = None
     for c in gdf.columns:
-        cl = c.lower()
+        cl = str(c).lower()
         if "tgt" in cl or "rate" in cl:
             rate_col = c
             break
-    if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
+    if rate_col is not None and gdf[rate_col].nunique(dropna=True) == 1:
         return "Fixed Rate"
     return "Variable Rate"
 
+# --- NEW: best-effort Unit detection (column > header name > product hint)
+def infer_unit(gdf, rate_col, product_col):
+    # explicit unit columns
+    for cand in ["unit", "units", "uom", "rate_uom", "rateunit", "rate_unit"]:
+        if cand in gdf.columns:
+            vals = gdf[cand].dropna().astype(str).str.strip()
+            if not vals.empty and vals.iloc[0] != "":
+                return vals.iloc[0]
+
+    # based on rate column name
+    rc = str(rate_col or "").lower()
+    if any(k in rc for k in ["gpa", "gal", "uan"]): return "gal/ac"
+    if any(k in rc for k in ["lb", "lbs", "dry", "nh3", "ammonia"]): return "lb/ac"
+    if "kg" in rc: return "kg/ha"
+    if any(k in rc for k in ["seed", "pop", "plant", "ksds", "kseed", "kseeds"]):
+        # Heuristic: if median looks like 20–50 → probably thousands
+        try:
+            med = pd.to_numeric(gdf[rate_col], errors="coerce").median()
+            if 10 <= float(med) <= 90:
+                return "k seeds/ac"
+        except Exception:
+            pass
+        return "seeds/ac"
+
+    # product hint (very light touch; only if obvious)
+    prod_val = ""
+    if product_col and product_col in gdf.columns:
+        try:
+            prod_val = str(gdf[product_col].dropna().astype(str).iloc[0]).lower()
+        except Exception:
+            prod_val = ""
+    if "uan" in prod_val or "10-34-0" in prod_val: return "gal/ac"
+
+    return None  # unknown is fine
 
 def add_prescription_overlay(gdf, name, cmap):
-    """Add Seed/Fert prescription polygons with gradient coloring + legend."""
+    """Add Seed/Fert prescription polygons with gradient fill + tooltip + legend."""
     if gdf is None or gdf.empty:
         return
 
     gdf = gdf.copy()
 
-    # Detect columns
+    # detect columns
     product_col, rate_col = None, None
     for c in gdf.columns:
-        cl = c.lower()
+        cl = str(c).lower()
         if product_col is None and "product" in cl:
             product_col = c
         if rate_col is None and ("tgt" in cl or "rate" in cl):
             rate_col = c
 
-    # Assign rate type
+    # rate type
     gdf["RateType"] = detect_rate_type(gdf)
 
-    # Legend range
+    # legend range
     if rate_col and pd.to_numeric(gdf[rate_col], errors="coerce").notna().any():
         vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
         vmin, vmax = float(vals.min()), float(vals.max())
-        if vmin == vmax: vmax = vmin + 1.0
+        if vmin == vmax:
+            vmax = vmin + 1.0
     else:
         vmin, vmax = 0.0, 1.0
 
-    # Style polygons
+    # units (for tooltip + legend label)
+    unit = infer_unit(gdf, rate_col, product_col)
+    rate_alias = f"Target Rate ({unit})" if unit else "Target Rate"
+    legend_name = f"{name} — {rate_alias}"
+
+    # style (no black checkerboard: disable stroke)
     def style_fn(feat):
         val = feat["properties"].get(rate_col) if rate_col else None
         if val is None or pd.isna(val):
@@ -832,12 +870,19 @@ def add_prescription_overlay(gdf, name, cmap):
                 fill = mpl_colors.rgb2hex(cmap(norm)[:3])
             except Exception:
                 fill = "#808080"
-        return {"color": "black", "weight": 0.5, "fillColor": fill, "fillOpacity": 0.55}
+        return {
+            "stroke": False,      # ✅ no outlines → no checkerboard
+            "opacity": 0,         # just in case
+            "weight": 0,
+            "fillColor": fill,
+            "fillOpacity": 0.55,
+        }
 
+    # tooltip
     fields, aliases = [], []
     if product_col: fields.append(product_col); aliases.append("Product")
-    if rate_col:    fields.append(rate_col);    aliases.append("Target Rate")
-    fields.append("RateType"); aliases.append("Type")
+    if rate_col:    fields.append(rate_col);    aliases.append(rate_alias)
+    fields.append("RateType");                  aliases.append("Type")
 
     folium.GeoJson(
         gdf,
@@ -846,15 +891,16 @@ def add_prescription_overlay(gdf, name, cmap):
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
     ).add_to(m)
 
-    # Add legend stacked top-left
-    add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
+    # legend (stacked top-left)
+    st.session_state["legend_offset"] = st.session_state.get("legend_offset", 90)
+    add_gradient_legend(legend_name, vmin, vmax, cmap, st.session_state["legend_offset"])
     st.session_state["legend_offset"] += 80
 
 
-# --- Draw Prescription Layers ---
-st.session_state["legend_offset"] = 90
+# --- Draw prescription layers ---
+st.session_state["legend_offset"] = 90  # start stack at top-left each run
 
-seed_gdf = st.session_state.get("seed_gdf")
+seed_gdf    = st.session_state.get("seed_gdf")
 fert_layers = st.session_state.get("fert_gdfs", {})
 
 if seed_gdf is not None and not seed_gdf.empty:
@@ -863,6 +909,7 @@ if seed_gdf is not None and not seed_gdf.empty:
 for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
         add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues)
+
 
 
 # =========================================================
