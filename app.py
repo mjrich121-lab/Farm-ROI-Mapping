@@ -735,48 +735,65 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
             m.fit_bounds([[south, west],[north, east]])
         else:
             south, west, north, east = 25, -125, 49, -66  # fallback
+# =========================================================
+# Helper to add a gridded heat overlay safely (with 5–95% trim for legend)
+# =========================================================
+def add_heatmap_overlay(values, name, show_default):
+    vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    if vals.empty:
+        return None, None
 
-        # Generic heatmap helper
-        def add_heatmap_overlay(values, name, show_default):
-            vals = pd.to_numeric(pd.Series(values), errors="coerce")
-            mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
-            if mask.sum() < 3:
-                return None, None
-            pts_lon = df.loc[mask, "Longitude"].values
-            pts_lat = df.loc[mask, "Latitude"].values
-            vals_ok = vals.loc[mask].values
-            n = 200
-            lon_lin = np.linspace(west, east, n)
-            lat_lin = np.linspace(south, north, n)
-            lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-            try:
-                grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
-                grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-                grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
-            except Exception as e:
-                st.warning(f"⚠️ Skipping {name} overlay (error: {e})")
-                return None, None
-            vmin = float(np.nanmin(grid)); vmax = float(np.nanmax(grid))
-            if not np.isfinite(vmin) or not np.isfinite(vmax): return None, None
-            if vmin == vmax: vmax = vmin + 1.0
-            cmap = plt.cm.get_cmap("RdYlGn")
-            rgba = cmap((grid - vmin) / (vmax - vmin))
-            rgba = np.flipud(rgba)
-            rgba = (rgba * 255).astype(np.uint8)
-            folium.raster_layers.ImageOverlay(
-                image=rgba,
-                bounds=[[south, west],[north, east]],
-                opacity=0.5,
-                name=name,
-                overlay=True,
-                show=show_default
-            ).add_to(m)
-            return vmin, vmax
+    mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
+    if mask.sum() < 3:
+        return None, None  # not enough points to interpolate
 
-        # Add overlays
-        y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
-        v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
-        f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+    pts_lon = df.loc[mask, "Longitude"].values
+    pts_lat = df.loc[mask, "Latitude"].values
+    vals_ok = vals.loc[mask].values
+
+    # Grid interpolation for smooth overlay
+    n = 200
+    lon_lin = np.linspace(west, east, n)
+    lat_lin = np.linspace(south, north, n)
+    lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+    try:
+        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+        grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+    except Exception as e:
+        st.warning(f"⚠️ Skipping {name} overlay (interpolation error: {e})")
+        return None, None
+
+    # ✅ Legend bounds = 5th–95th percentile of recorded values
+    vmin = float(np.nanpercentile(vals_ok, 5))
+    vmax = float(np.nanpercentile(vals_ok, 95))
+    if vmin == vmax:
+        vmax = vmin + 1.0
+
+    cmap = plt.cm.get_cmap("RdYlGn")
+    rgba = cmap((grid - vmin) / (vmax - vmin))
+    rgba = np.flipud(rgba)
+    rgba = (rgba * 255).astype(np.uint8)
+
+    folium.raster_layers.ImageOverlay(
+        image=rgba,
+        bounds=[[south, west],[north, east]],
+        opacity=0.5,
+        name=name,
+        overlay=True,
+        show=show_default
+    ).add_to(m)
+
+    return vmin, vmax
+
+
+# =========================================================
+# Add overlays (toggleable in LayerControl)
+# =========================================================
+y_min, y_max = add_heatmap_overlay(df["Yield"].values, "Yield (bu/ac)", show_default=False)
+v_min, v_max = add_heatmap_overlay(df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", show_default=True)
+f_min, f_max = add_heatmap_overlay(df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", show_default=False)
+
 # =========================================================
 # Profit Legend (Yield + Variable Profit + Fixed Profit)
 # =========================================================
