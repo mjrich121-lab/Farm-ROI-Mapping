@@ -772,10 +772,11 @@ else:
 # Helper to add a gridded heat overlay safely (with 5–95% trim for legend)
 # =========================================================
 def add_heatmap_overlay(values, name, show_default):
-    vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
-    if vals.empty:
+    # Guard: must have a df with coords in scope
+    if df is None or not {"Latitude","Longitude"}.issubset(df.columns):
         return None, None
 
+    vals = pd.to_numeric(pd.Series(values), errors="coerce")
     mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
     if mask.sum() < 3:
         return None, None  # not enough points to interpolate
@@ -797,10 +798,10 @@ def add_heatmap_overlay(values, name, show_default):
         st.warning(f"⚠️ Skipping {name} overlay (interpolation error: {e})")
         return None, None
 
-    # ✅ Legend bounds = 5th–95th percentile of recorded values
+    # Legend bounds = 5th–95th percentile of recorded (non-interpolated) values
     vmin = float(np.nanpercentile(vals_ok, 5))
     vmax = float(np.nanpercentile(vals_ok, 95))
-    if vmin == vmax:
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
         vmax = vmin + 1.0
 
     cmap = plt.cm.get_cmap("RdYlGn")
@@ -818,19 +819,31 @@ def add_heatmap_overlay(values, name, show_default):
     ).add_to(m)
 
     return vmin, vmax
+
 # =========================================================
 # Add overlays (toggleable in LayerControl)
 # =========================================================
+# Safe defaults so later legend code never crashes
 y_min = y_max = v_min = v_max = f_min = f_max = None
 
-if df is not None:
-    # Add yield overlay only if Yield column exists
+# Only try spatial overlays if we actually have a yield df with coords
+if (
+    st.session_state.get("yield_df") is not None
+    and not st.session_state["yield_df"].empty
+):
+    df = st.session_state["yield_df"].copy()
+else:
+    df = None  # allows the rest to short-circuit cleanly
+
+if df is not None and {"Latitude","Longitude"}.issubset(df.columns):
+
+    # Yield overlay only if the column exists
     if "Yield" in df.columns:
         y_min, y_max = add_heatmap_overlay(
             df["Yield"].values, "Yield (bu/ac)", show_default=False
         )
 
-    # Add profit overlays only if those columns exist
+    # Profit overlays only if columns exist (these can be from yield or target yield)
     if "NetProfit_per_acre_variable" in df.columns:
         v_min, v_max = add_heatmap_overlay(
             df["NetProfit_per_acre_variable"].values,
@@ -848,53 +861,48 @@ if df is not None:
 # =========================================================
 # Profit Legend (Yield + Variable Profit + Fixed Profit)
 # =========================================================
-if all(v is not None for v in [y_min, y_max, v_min, v_max, f_min, f_max]):
+# Build only the legend rows that exist, in the same spacing you liked
+legend_rows = []
+def add_legend_row(title, vmin, vmax):
+    if vmin is None or vmax is None:
+        return
+    legend_rows.append(f"""
+      <div>
+        <div style="font-weight:600; margin-bottom:2px;">{title}</div>
+        <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
+                    border-radius:2px; margin-bottom:2px;"></div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>{vmin:.2f}</span><span>{vmax:.2f}</span>
+        </div>
+      </div>
+    """)
+
+# Only build the gradient once if at least one overlay exists
+if any(v is not None for v in [y_min, v_min, f_min]):
     def rgba_to_hex(rgba_tuple):
         r, g, b, a = (int(round(255*x)) for x in rgba_tuple)
         return f"#{r:02x}{g:02x}{b:02x}"
     stops = [f"{rgba_to_hex(plt.cm.get_cmap('RdYlGn')(i/100.0))} {i}%" for i in range(0,101,10)]
     gradient_css = ", ".join(stops)
 
-    profit_legend_html = f"""
-    <div style="position:absolute; top:90px; left:10px; z-index:9999;
-                display:flex; flex-direction:column; gap:16px;
-                font-family:sans-serif; font-size:12px; color:white;
-                background-color: rgba(0,0,0,0.6);
-                padding:8px 12px; border-radius:6px;">
+    add_legend_row("Yield (bu/ac)", y_min, y_max)
+    add_legend_row("Variable Rate Profit ($/ac)", v_min, v_max)
+    add_legend_row("Fixed Rate Profit ($/ac)", f_min, f_max)
 
-      <!-- Yield Legend -->
-      <div>
-        <div style="font-weight:600;">Yield (bu/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-        <div style="display:flex; justify-content:space-between; margin-top:2px;">
-          <span>{y_min:.1f}</span><span>{y_max:.1f}</span>
+    if legend_rows:
+        profit_legend_html = f"""
+        <div style="position:absolute; top:90px; left:10px; z-index:9999;
+                    display:flex; flex-direction:column; gap:14px;
+                    font-family:sans-serif; font-size:12px; color:white;
+                    background-color: rgba(0,0,0,0.6);
+                    padding:8px 12px; border-radius:6px;">
+          {''.join(legend_rows)}
         </div>
-      </div>
+        """
+        m.get_root().html.add_child(folium.Element(profit_legend_html))
 
-      <!-- Variable Rate Profit Legend -->
-      <div>
-        <div style="font-weight:600;">Variable Rate Profit ($/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-        <div style="display:flex; justify-content:space-between; margin-top:2px;">
-          <span>{v_min:.2f}</span><span>{v_max:.2f}</span>
-        </div>
-      </div>
-
-      <!-- Fixed Rate Profit Legend -->
-      <div>
-        <div style="font-weight:600;">Fixed Rate Profit ($/ac)</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-        <div style="display:flex; justify-content:space-between; margin-top:2px;">
-          <span>{f_min:.2f}</span><span>{f_max:.2f}</span>
-        </div>
-      </div>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(profit_legend_html))
-
-# ✅ Always refresh LayerControl (so toggles never vanish on rerun)
+# Always refresh LayerControl so toggles never vanish on rerun
 folium.LayerControl(collapsed=False, position="topright").add_to(m)
-
 
 # =========================================================
 # 8. DISPLAY MAP
