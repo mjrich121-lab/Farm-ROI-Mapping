@@ -684,12 +684,14 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             )
         legend_parts.append("</div>")
         m.get_root().html.add_child(folium.Element("".join(legend_parts)))
-
-
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed overlays + legend)
 # =========================================================
-if st.session_state.get("yield_df") is not None and not st.session_state["yield_df"].empty:
+if (
+    st.session_state.get("yield_df") is not None
+    and not st.session_state["yield_df"].empty
+    and "Yield" in st.session_state["yield_df"].columns
+):
     df = st.session_state["yield_df"].copy()
 
     # Ensure Yield column
@@ -704,7 +706,7 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
             if yield_col: break
         if yield_col:
             df = df.rename(columns={yield_col:"Yield"})
-            st.success(f"✅ Using `{yield_col}` column for Yield (renamed to `Yield`).")
+            st.success(f"✅ Using {yield_col} column for Yield (renamed to Yield).")
         else:
             st.error("❌ No recognized yield column found.")
             df = None
@@ -735,11 +737,37 @@ if st.session_state.get("yield_df") is not None and not st.session_state["yield_
             bounds.append([[df["Latitude"].min(), df["Longitude"].min()],
                            [df["Latitude"].max(), df["Longitude"].max()]])
         if bounds:
-            south = min(b[0][0] for b in bounds); west  = min(b[0][1] for b in bounds)
+            south = min(b[0][0] for b in bounds); west = min(b[0][1] for b in bounds)
             north = max(b[1][0] for b in bounds); east  = max(b[1][1] for b in bounds)
             m.fit_bounds([[south, west],[north, east]])
         else:
             south, west, north, east = 25, -125, 49, -66  # fallback
+
+else:
+    # Budget mode: no yield data, fall back to target_yield
+    target_yield = st.session_state.get("target_yield", None)
+    if target_yield and target_yield > 0:
+        est_revenue = target_yield * sell_price
+        fert_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0.0
+        seed_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0.0
+        variable_profit = est_revenue - (base_expenses_per_acre + fert_var + seed_var)
+
+        fixed_costs = 0.0
+        if not st.session_state["fixed_products"].empty:
+            fx = st.session_state["fixed_products"].copy()
+            fx["$/ac"] = fx.apply(
+                lambda r: r.get("Rate",0)*r.get("CostPerUnit",0)
+                          if r.get("Rate",0)>0 and r.get("CostPerUnit",0)>0 else 0,
+                axis=1
+            )
+            fixed_costs = float(fx["$/ac"].sum())
+        fixed_profit = est_revenue - (base_expenses_per_acre + fixed_costs)
+
+        st.info(f"Budget mode: using Target Yield ({target_yield} bu/ac).")
+        st.write(f"Projected Variable Profit: ${variable_profit:,.2f}/ac")
+        st.write(f"Projected Fixed Profit: ${fixed_profit:,.2f}/ac")
+
+
 # =========================================================
 # Helper to add a gridded heat overlay safely (with 5–95% trim for legend)
 # =========================================================
