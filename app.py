@@ -134,63 +134,82 @@ def process_prescription(file, prescrip_type="fertilizer"):
         )
         return grouped
     return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-
 # =========================================================
-# FILE UPLOADS — 4-SQUARE LAYOUT
+# 2–3. FILE UPLOADS (Compact 4-square Layout, Excel-style tables)
 # =========================================================
 st.header("Upload Maps")
+
+# ---------- Layout ----------
 col1, col2 = st.columns(2)
 col3, col4 = st.columns(2)
 
-# ---- Zone Upload ----
+# =========================================================
+# ZONE UPLOAD (col1)
+# =========================================================
 with col1:
     st.subheader("Zone Map Upload")
     zone_file = st.file_uploader(
         "Upload Zone Map",
-        type=["geojson","json","zip"],
-        key="zone_file",
+        type=["geojson", "json", "zip"],
+        key="zone",
         accept_multiple_files=False
     )
     st.caption("Formats: GeoJSON, JSON, or zipped Shapefile (.shp+.shx+.dbf+.prj)")
+
     if zone_file:
         zones_gdf = load_vector_file(zone_file)
         if zones_gdf is not None and not zones_gdf.empty:
-            st.success(f"✅ Zone map loaded ({len(zones_gdf)} polygons)")
-            if "Zone" not in zones_gdf.columns:
-                zones_gdf["Zone"] = range(1, len(zones_gdf)+1)
-            gdf_area = zones_gdf.copy()
-            if gdf_area.crs.is_geographic:
-                gdf_area = gdf_area.to_crs(epsg=5070)
-            zones_gdf["Calculated Acres"] = gdf_area.geometry.area * 0.000247105
-            zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"]
-            display_df = zones_gdf[["Zone","Calculated Acres","Override Acres"]]
-            edited = st.data_editor(
-                display_df,
-                num_rows="fixed",
-                use_container_width=True,
-                hide_index=True,
-                key="zone_acres_editor"
-            )
-            zones_gdf["Override Acres"] = edited["Override Acres"].values
+            # detect/create zone column
+            zone_col = None
+            for cand in ["Zone", "zone", "ZONE", "Name", "name"]:
+                if cand in zones_gdf.columns:
+                    zone_col = cand
+                    break
+            if zone_col is None:
+                zones_gdf["ZoneIndex"] = range(1, len(zones_gdf) + 1)
+                zone_col = "ZoneIndex"
+            zones_gdf["Zone"] = zones_gdf[zone_col]
+
+            # acre calculation
+            gdf_area = zones_gdf.to_crs(epsg=5070)
+            zones_gdf["Calculated Acres"] = (gdf_area.geometry.area * 0.000247105).astype(float)
+            zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"]
+
+            # store
             st.session_state["zones_gdf"] = zones_gdf
+
+            # compact summary table
+            st.caption("Zone Acres")
+            st.dataframe(
+                zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].round(2),
+                use_container_width=True,
+                hide_index=True
+            )
         else:
-            st.error("❌ Invalid or empty zone file")
+            st.warning("⚠️ Invalid or empty zone map.")
     else:
         st.caption("No zone file uploaded yet.")
 
-# ---- Yield Upload ----
+
+# =========================================================
+# YIELD UPLOAD (col2)
+# =========================================================
 with col2:
     st.subheader("Yield Map Upload")
     yield_files = st.file_uploader(
         "Upload Yield Map(s)",
-        type=["csv","geojson","json","zip"],
-        key="yield_files",
+        type=["csv", "geojson", "json", "zip"],
+        key="yield",
         accept_multiple_files=True
     )
     st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
     st.session_state.setdefault("yield_files_list", [])
+
     if yield_files:
         st.session_state["yield_files_list"].clear()
+        summary = []
+
         for yf in yield_files:
             try:
                 df_temp = None
@@ -200,72 +219,86 @@ with col2:
                     gdf_temp = load_vector_file(yf)
                     if gdf_temp is not None and not gdf_temp.empty:
                         df_temp = pd.DataFrame(gdf_temp.drop(columns="geometry", errors="ignore"))
+
                 if df_temp is not None and not df_temp.empty:
-                    df_temp.columns = [c.strip().lower().replace(" ","_") for c in df_temp.columns]
-                    yield_cols = [c for c in df_temp.columns if "yield" in c]
+                    df_temp.columns = [c.strip().lower().replace(" ", "_") for c in df_temp.columns]
+                    yield_cols = [c for c in df_temp.columns if any(k in c for k in ["yld_vol_dr","yld_mass_dr","yield_dry","dry_yield"])]
+                    if not yield_cols:
+                        yield_cols = [c for c in df_temp.columns if any(k in c for k in ["yield","yld_vol_wt","yld_mass_wt","wet_yield"])]
                     if yield_cols:
-                        df_temp.rename(columns={yield_cols[0]:"Yield"}, inplace=True)
+                        df_temp.rename(columns={yield_cols[0]: "Yield"}, inplace=True)
                     else:
                         df_temp["Yield"] = 0.0
-                    st.session_state["yield_files_list"].append({"name": yf.name, "rows": len(df_temp)})
-                    st.success(f"✅ Loaded {yf.name} ({len(df_temp)} rows)")
+
+                    summary.append({"File": yf.name, "Rows": len(df_temp)})
+                else:
+                    st.warning(f"⚠️ {yf.name} had no usable data.")
             except Exception as e:
                 st.warning(f"⚠️ Skipped {yf.name}: {e}")
-        if st.session_state["yield_files_list"]:
-            st.info("**Loaded Yield Files:**")
-            for f in st.session_state["yield_files_list"]:
-                st.markdown(f"- {f['name']} ({f['rows']} rows)")
+
+        if summary:
+            st.caption("Loaded Yield Files")
+            st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
     else:
         st.caption("No yield files uploaded yet.")
+
 st.session_state["yield_df"] = None
 
-# ---- Fertilizer Upload ----
+
+# =========================================================
+# FERTILIZER UPLOAD (col3)
+# =========================================================
 with col3:
     st.subheader("Fertilizer Prescription Upload")
     fert_files = st.file_uploader(
         "Upload Fertilizer Map(s)",
         type=["csv","geojson","json","zip"],
-        key="fert_files",
+        key="fert",
         accept_multiple_files=True
     )
     st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
     st.session_state["fert_layers_store"] = {}
     if fert_files:
+        summary = []
         for f in fert_files:
-            grouped = process_prescription(f,"fertilizer")
+            grouped = process_prescription(f, "fertilizer")
             if not grouped.empty:
-                key = os.path.splitext(f.name)[0].lower().replace(" ","_")
+                key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
                 st.session_state["fert_layers_store"][key] = grouped
-                st.success(f"✅ {f.name}")
-        if st.session_state["fert_layers_store"]:
-            st.info("**Loaded Fertilizer Maps:**")
-            for k in st.session_state["fert_layers_store"].keys():
-                st.markdown(f"- {k}")
+                summary.append({"File": f.name, "Products": len(grouped)})
+        if summary:
+            st.caption("Loaded Fertilizer Files")
+            st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
     else:
         st.caption("No fertilizer files uploaded yet.")
 
-# ---- Seed Upload ----
+
+# =========================================================
+# SEED UPLOAD (col4)
+# =========================================================
 with col4:
     st.subheader("Seed Prescription Upload")
     seed_files = st.file_uploader(
         "Upload Seed Map(s)",
         type=["csv","geojson","json","zip"],
-        key="seed_files",
+        key="seed",
         accept_multiple_files=True
     )
     st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
     st.session_state["seed_layers_store"] = {}
     if seed_files:
+        summary = []
         for f in seed_files:
-            grouped = process_prescription(f,"seed")
+            grouped = process_prescription(f, "seed")
             if not grouped.empty:
-                key = os.path.splitext(f.name)[0].lower().replace(" ","_")
+                key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
                 st.session_state["seed_layers_store"][key] = grouped
-                st.success(f"✅ {f.name}")
-        if st.session_state["seed_layers_store"]:
-            st.info("**Loaded Seed Maps:**")
-            for k in st.session_state["seed_layers_store"].keys():
-                st.markdown(f"- {k}")
+                summary.append({"File": f.name, "Products": len(grouped)})
+        if summary:
+            st.caption("Loaded Seed Files")
+            st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
     else:
         st.caption("No seed files uploaded yet.")
 
