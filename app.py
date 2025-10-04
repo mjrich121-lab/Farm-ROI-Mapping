@@ -41,26 +41,60 @@ st.markdown(
     unsafe_allow_html=True
 )
 # =========================================================
-# HELPER FUNCTION: Load Shapefiles or GeoJSON
+# HELPER FUNCTION: Load Shapefiles or GeoJSON (bulletproof)
 # =========================================================
+import tempfile
+
 def load_vector_file(uploaded_file):
-    """Load shapefile (.zip), GeoJSON, or JSON into a GeoDataFrame"""
-    gdf = None
-    if uploaded_file.name.endswith((".geojson", ".json")):
-        gdf = gpd.read_file(uploaded_file)
-    elif uploaded_file.name.endswith(".zip"):
-        with open("temp.zip", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        with zipfile.ZipFile("temp.zip", "r") as zip_ref:
-            zip_ref.extractall("temp_shp")
-        for f_name in os.listdir("temp_shp"):
-            if f_name.endswith(".shp"):
-                gdf = gpd.read_file(os.path.join("temp_shp", f_name))
-                break
-        os.remove("temp.zip")
-        import shutil
-        shutil.rmtree("temp_shp", ignore_errors=True)
-    return gdf
+    """
+    Load shapefile (.zip), GeoJSON, or JSON into a GeoDataFrame safely.
+    - Handles missing .prj by assuming WGS84.
+    - Guarantees temp cleanup.
+    - Always returns WGS84 (EPSG:4326).
+    """
+    try:
+        # GeoJSON / JSON direct
+        if uploaded_file.name.lower().endswith((".geojson", ".json")):
+            gdf = gpd.read_file(uploaded_file)
+        elif uploaded_file.name.lower().endswith(".zip"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zip_path = os.path.join(tmpdir, "in.zip")
+                with open(zip_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    zf.extractall(tmpdir)
+
+                shp_path = None
+                for f_name in os.listdir(tmpdir):
+                    if f_name.lower().endswith(".shp"):
+                        shp_path = os.path.join(tmpdir, f_name)
+                        break
+                if shp_path is None:
+                    return None  # no .shp inside
+
+                gdf = gpd.read_file(shp_path)
+        else:
+            # Support stray .shp (rare, but safer to catch)
+            if uploaded_file.name.lower().endswith(".shp"):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    shp_path = os.path.join(tmpdir, uploaded_file.name)
+                    with open(shp_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    gdf = gpd.read_file(shp_path)
+            else:
+                return None
+
+        if gdf is None or gdf.empty:
+            return None
+
+        # CRS safety: assume WGS84 if missing; convert to 4326 for folium
+        if gdf.crs is None:
+            gdf.set_crs(epsg=4326, inplace=True)
+        gdf = gdf.to_crs(epsg=4326)
+        return gdf
+
+    except Exception:
+        return None
 
 # =========================================================
 # HELPER: AUTO-ZOOM
@@ -174,22 +208,57 @@ if zone_file is not None:
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
 # =========================================================
-# 2. YIELD MAP UPLOAD
+# 2. YIELD MAP UPLOAD  (multi-file + crash-proof)
 # =========================================================
 st.header("Yield Map Upload")
-yield_file = st.file_uploader(
-    "Upload Yield Map",
+
+yield_files = st.file_uploader(
+    "Upload Yield Map(s)",
     type=["csv", "geojson", "json", "zip"],
-    key="yield"
+    key="yield",
+    accept_multiple_files=True
 )
 st.markdown(
     "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
     "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
-df = None
-if yield_file is not None:
-    try:
+# --- Initialize persistent list in session state ---
+st.session_state.setdefault("yield_files_list", [])
+
+if yield_files:
+    for yf in yield_files:
+        try:
+            df_temp = None
+            # --- CSV case ---
+            if yf.name.lower().endswith(".csv"):
+                df_temp = pd.read_csv(yf)
+            else:
+                # --- Vector file case ---
+                gdf_temp = load_vector_file(yf)
+                if gdf_temp is not None and not gdf_temp.empty:
+                    df_temp = pd.DataFrame(gdf_temp.drop(columns="geometry", errors="ignore"))
+
+            if df_temp is not None and not df_temp.empty:
+                df_temp.columns = [c.strip().lower().replace(" ", "_") for c in df_temp.columns]
+                st.session_state["yield_files_list"].append({"name": yf.name, "rows": len(df_temp)})
+                st.success(f"✅ Loaded {yf.name} ({len(df_temp)} rows)")
+            else:
+                st.warning(f"⚠️ {yf.name} contained no usable data.")
+        except Exception as e:
+            st.warning(f"⚠️ Skipped {yf.name}: {e}")
+
+# --- Show currently loaded yield files ---
+if st.session_state["yield_files_list"]:
+    st.info("### Loaded Yield Files")
+    for f in st.session_state["yield_files_list"]:
+        st.markdown(f"- **{f['name']}** ({f['rows']} rows)")
+else:
+    st.caption("No yield files loaded yet.")
+
+# --- Keep backward compatibility for downstream sections ---
+st.session_state["yield_df"] = None  # ensures map won't error even if no yield selected
+
         # ======================================
         # Case 1: CSV
         # ======================================
@@ -263,31 +332,36 @@ else:
     st.session_state["yield_df"] = None
 
 # =========================================================
-# 3. PRESCRIPTION MAP UPLOADS
+# 3. PRESCRIPTION MAP UPLOADS  (multi-file + crash-proof)
 # =========================================================
 st.header("Prescription Map Uploads")
 
-fert_file = st.file_uploader(
-    "Upload Fertilizer Prescription Map",
+# --- Multi-file uploaders ---
+fert_files = st.file_uploader(
+    "Upload Fertilizer Prescription Map(s)",
     type=["csv", "geojson", "json", "zip"],
-    key="fert"
+    key="fert",
+    accept_multiple_files=True
 )
+seed_files = st.file_uploader(
+    "Upload Seed Prescription Map(s)",
+    type=["csv", "geojson", "json", "zip"],
+    key="seed",
+    accept_multiple_files=True
+)
+
 st.markdown(
     "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
     "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
 )
 
-seed_file = st.file_uploader(
-    "Upload Seed Prescription Map",
-    type=["csv", "geojson", "json", "zip"],
-    key="seed"
-)
-st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
-    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
-)
+# --- Persistent stores for all uploaded layers ---
+st.session_state.setdefault("fert_layers_store", {})
+st.session_state.setdefault("seed_layers_store", {})
 
-
+# =========================================================
+# HELPER: Process One Prescription File (existing logic kept)
+# =========================================================
 def process_prescription(file, prescrip_type="fertilizer"):
     """Process fertilizer/seed prescription maps safely (CSV or polygons)."""
     if file is None:
@@ -300,7 +374,6 @@ def process_prescription(file, prescrip_type="fertilizer"):
             st.error(f"❌ Could not read {prescrip_type} prescription map.")
             return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-        # Normalize column names
         gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
 
         # Ensure CRS WGS84
@@ -311,19 +384,10 @@ def process_prescription(file, prescrip_type="fertilizer"):
                 gdf.set_crs(epsg=4326, inplace=True)
 
         # Add centroids for later (map bounds + tooltips)
-        gdf["Longitude"] = gdf.geometry.centroid.x
-        gdf["Latitude"]  = gdf.geometry.centroid.y
+        gdf["Longitude"] = gdf.geometry.representative_point().x
+        gdf["Latitude"]  = gdf.geometry.representative_point().y
 
-        # Save polygons into session_state for Section 7 overlays
-        if prescrip_type == "seed":
-            st.session_state["seed_gdf"] = gdf.copy()
-        elif prescrip_type == "fertilizer":
-            layer_key = os.path.splitext(file.name)[0].lower().replace(" ", "_")
-            st.session_state.setdefault("fert_gdfs", {})[layer_key] = gdf.copy()
-
-        # Convert to DataFrame (drop geometry) for cost calculations
-        df = pd.DataFrame(gdf.drop(columns="geometry"))
-
+        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
     else:
         # --- CSV handling ---
         df = pd.read_csv(file)
@@ -344,8 +408,8 @@ def process_prescription(file, prescrip_type="fertilizer"):
 
     # --- Manual override (per-upload acres) ---
     avg_acres_override = st.number_input(
-        f"Override Acres Per Polygon for {prescrip_type.capitalize()} Map",
-        min_value=0.0, value=0.0, step=0.1
+        f"Override Acres Per Polygon for {prescrip_type.capitalize()} Map ({file.name})",
+        min_value=0.0, value=0.0, step=0.1, key=f"{prescrip_type}_{file.name}_override"
     )
     if avg_acres_override > 0:
         df["acres"] = avg_acres_override
@@ -372,24 +436,50 @@ def process_prescription(file, prescrip_type="fertilizer"):
 
     return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
+# =========================================================
+# PROCESS ALL UPLOADED FILES  (multi-file support)
+# =========================================================
 
-# --- Store results in session state safely ---
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+st.session_state.setdefault("fert_products", pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]))
+st.session_state.setdefault("seed_products", pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]))
 
-if fert_file is not None:
-    st.session_state["fert_products"] = process_prescription(fert_file, "fertilizer")
+# --- Fertilizer files ---
+if fert_files:
+    for f in fert_files:
+        try:
+            grouped = process_prescription(f, "fertilizer")
+            if not grouped.empty:
+                layer_key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                st.session_state["fert_layers_store"][layer_key] = grouped
+                st.success(f"✅ Fertilizer file loaded: {f.name}")
+        except Exception as e:
+            st.warning(f"⚠️ Skipped fertilizer file {f.name}: {e}")
 
-if seed_file is not None:
-    st.session_state["seed_products"] = process_prescription(seed_file, "seed")
+# --- Seed files ---
+if seed_files:
+    for f in seed_files:
+        try:
+            grouped = process_prescription(f, "seed")
+            if not grouped.empty:
+                layer_key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                st.session_state["seed_layers_store"][layer_key] = grouped
+                st.success(f"✅ Seed file loaded: {f.name}")
+        except Exception as e:
+            st.warning(f"⚠️ Skipped seed file {f.name}: {e}")
 
-# --- Feedback (safe checks) ---
-if not st.session_state["fert_products"].empty:
-    st.success("✅ Fertilizer prescription uploaded successfully")
-if not st.session_state["seed_products"].empty:
-    st.success("✅ Seed prescription uploaded successfully")
+# =========================================================
+# FEEDBACK LISTS (summary of all uploads)
+# =========================================================
+if st.session_state["fert_layers_store"]:
+    st.info("### Loaded Fertilizer Maps")
+    for k in st.session_state["fert_layers_store"].keys():
+        st.markdown(f"- {k}")
+
+if st.session_state["seed_layers_store"]:
+    st.info("### Loaded Seed Maps")
+    for k in st.session_state["seed_layers_store"].keys():
+        st.markdown(f"- {k}")
+
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
@@ -681,24 +771,33 @@ def add_zones_overlay(m):
             )
         ).add_to(m)
 
-        # Zone legend bottom-left
-        legend_parts = [
-            '<div style="position:absolute; bottom:20px; left:20px; z-index:9999;'
-            'background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;'
-            'font-size:13px; color:white;">',
-            "<b>Zone Colors</b><br>"
-        ]
-        for z in unique_vals:
-            legend_parts.append(
-                f"<div style='display:flex; align-items:center; margin:2px 0;'>"
-                f"<div style='background:{color_map[z]}; width:14px; height:14px; margin-right:6px;'></div>"
-                f"{z}</div>"
-            )
-        legend_parts.append("</div>")
-        m.get_root().html.add_child(folium.Element("".join(legend_parts)))
-    except Exception as e:
-        st.warning(f"⚠️ Skipping zones overlay: {e}")
-    return m
+              # --- Zone legend bottom-right, collapsible ---
+        unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
+        color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
+
+        legend_items = "".join([
+            f"<div style='display:flex; align-items:center; margin:2px 0;'>"
+            f"<div style='background:{color_map[z]}; width:14px; height:14px; margin-right:6px;'></div>{z}</div>"
+            for z in unique_vals
+        ])
+
+        legend_html = f"""
+        <div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
+                     font-family:sans-serif; font-size:13px; color:white;
+                     background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
+                     width:160px;">
+          <div style="font-weight:600; margin-bottom:4px; cursor:pointer;" onclick="
+              var x = document.getElementById('zone-legend-items');
+              if (x.style.display === 'none') { x.style.display = 'block'; } 
+              else { x.style.display = 'none'; }">
+            Zone Colors ▼
+          </div>
+          <div id="zone-legend-items" style="display:block;">
+            {legend_items}
+          </div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
 
 
 # =========================================================
@@ -755,22 +854,23 @@ def safe_fit_bounds(m, bounds):
     except Exception:
         pass
 
+
 # =========================================================
 # 7B. PRESCRIPTION OVERLAYS (Seed + Fert) + Gradient Legends
 # =========================================================
-from matplotlib import colors as mpl_colors
-
-# One stacked gradient legend (top-left). Keep only this version in the whole file.
-def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
+def add_gradient_legend(name, vmin, vmax, cmap, index):
+    """Add a gradient legend of consistent size, stacked in the top-left."""
+    top_offset = 20 + (index * 80)
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
     legend_html = f"""
-    <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
+    <div style="position:absolute; top:{top_offset}px; left:10px; z-index:9999;
                 font-family:sans-serif; font-size:12px; color:white;
-                background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;">
-      <div style="font-weight:600; margin-bottom:2px;">{name}</div>
+                background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
+                width:180px;">
+      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
       <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
-                  border-radius:2px; margin-bottom:2px;"></div>
+                  border-radius:2px; margin-bottom:4px;"></div>
       <div style="display:flex; justify-content:space-between;">
         <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
       </div>
@@ -778,34 +878,19 @@ def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-def detect_rate_type(gdf):
-    """Return 'Fixed Rate' if all rate values equal, else 'Variable Rate'."""
-    rate_col = None
-    for c in gdf.columns:
-        cl = str(c).lower()
-        if "tgt" in cl or "rate" in cl:
-            rate_col = c
-            break
-    if rate_col is not None and gdf[rate_col].nunique(dropna=True) == 1:
-        return "Fixed Rate"
-    return "Variable Rate"
 
-# --- NEW: best-effort Unit detection (column > header name > product hint)
 def infer_unit(gdf, rate_col, product_col):
-    # explicit unit columns
     for cand in ["unit", "units", "uom", "rate_uom", "rateunit", "rate_unit"]:
         if cand in gdf.columns:
             vals = gdf[cand].dropna().astype(str).str.strip()
             if not vals.empty and vals.iloc[0] != "":
                 return vals.iloc[0]
 
-    # based on rate column name
     rc = str(rate_col or "").lower()
     if any(k in rc for k in ["gpa", "gal", "uan"]): return "gal/ac"
     if any(k in rc for k in ["lb", "lbs", "dry", "nh3", "ammonia"]): return "lb/ac"
     if "kg" in rc: return "kg/ha"
     if any(k in rc for k in ["seed", "pop", "plant", "ksds", "kseed", "kseeds"]):
-        # Heuristic: if median looks like 20–50 → probably thousands
         try:
             med = pd.to_numeric(gdf[rate_col], errors="coerce").median()
             if 10 <= float(med) <= 90:
@@ -814,7 +899,6 @@ def infer_unit(gdf, rate_col, product_col):
             pass
         return "seeds/ac"
 
-    # product hint (very light touch; only if obvious)
     prod_val = ""
     if product_col and product_col in gdf.columns:
         try:
@@ -822,10 +906,10 @@ def infer_unit(gdf, rate_col, product_col):
         except Exception:
             prod_val = ""
     if "uan" in prod_val or "10-34-0" in prod_val: return "gal/ac"
+    return None
 
-    return None  # unknown is fine
 
-def add_prescription_overlay(gdf, name, cmap):
+def add_prescription_overlay(gdf, name, cmap, index):
     """Add Seed/Fert prescription polygons with gradient fill + tooltip + legend."""
     if gdf is None or gdf.empty:
         return
@@ -841,10 +925,8 @@ def add_prescription_overlay(gdf, name, cmap):
         if rate_col is None and ("tgt" in cl or "rate" in cl):
             rate_col = c
 
-    # rate type
     gdf["RateType"] = detect_rate_type(gdf)
 
-    # legend range
     if rate_col and pd.to_numeric(gdf[rate_col], errors="coerce").notna().any():
         vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
         vmin, vmax = float(vals.min()), float(vals.max())
@@ -853,12 +935,10 @@ def add_prescription_overlay(gdf, name, cmap):
     else:
         vmin, vmax = 0.0, 1.0
 
-    # units (for tooltip + legend label)
     unit = infer_unit(gdf, rate_col, product_col)
     rate_alias = f"Target Rate ({unit})" if unit else "Target Rate"
     legend_name = f"{name} — {rate_alias}"
 
-    # style (no black checkerboard: disable stroke)
     def style_fn(feat):
         val = feat["properties"].get(rate_col) if rate_col else None
         if val is None or pd.isna(val):
@@ -870,19 +950,13 @@ def add_prescription_overlay(gdf, name, cmap):
                 fill = mpl_colors.rgb2hex(cmap(norm)[:3])
             except Exception:
                 fill = "#808080"
-        return {
-            "stroke": False,      # ✅ no outlines → no checkerboard
-            "opacity": 0,         # just in case
-            "weight": 0,
-            "fillColor": fill,
-            "fillOpacity": 0.55,
-        }
+        return {"stroke": False, "opacity": 0, "weight": 0,
+                "fillColor": fill, "fillOpacity": 0.55}
 
-    # tooltip
     fields, aliases = [], []
     if product_col: fields.append(product_col); aliases.append("Product")
     if rate_col:    fields.append(rate_col);    aliases.append(rate_alias)
-    fields.append("RateType");                  aliases.append("Type")
+    fields.append("RateType"); aliases.append("Type")
 
     folium.GeoJson(
         gdf,
@@ -891,25 +965,23 @@ def add_prescription_overlay(gdf, name, cmap):
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
     ).add_to(m)
 
-    # legend (stacked top-left)
-    st.session_state["legend_offset"] = st.session_state.get("legend_offset", 90)
-    add_gradient_legend(legend_name, vmin, vmax, cmap, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+    add_gradient_legend(legend_name, vmin, vmax, cmap, index)
 
 
 # --- Draw prescription layers ---
-st.session_state["legend_offset"] = 90  # start stack at top-left each run
+st.session_state["legend_index"] = 0  # unified counter start
 
 seed_gdf    = st.session_state.get("seed_gdf")
 fert_layers = st.session_state.get("fert_gdfs", {})
 
 if seed_gdf is not None and not seed_gdf.empty:
-    add_prescription_overlay(seed_gdf, "Seed RX", plt.cm.Greens)
+    add_prescription_overlay(seed_gdf, "Seed RX", plt.cm.Greens, st.session_state["legend_index"])
+    st.session_state["legend_index"] += 1
 
 for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
-        add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues)
-
+        add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues, st.session_state["legend_index"])
+        st.session_state["legend_index"] += 1
 
 
 # =========================================================
@@ -918,60 +990,36 @@ for k, fgdf in fert_layers.items():
 from scipy.interpolate import griddata
 
 def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
-    """
-    Add a rasterized heatmap overlay to folium map.
-    Will skip gracefully if data is invalid.
-    """
+    """Add a rasterized heatmap overlay to folium map."""
     try:
         if df is None or df.empty:
             return None, None
-
-        # --- Clean bounds ---
-        try:
-            south, west, north, east = bounds
-        except Exception:
-            return None, None
-
-        # --- Clean values ---
+        south, west, north, east = bounds
         vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
         if vals.empty: return None, None
+        mask = (df[["Latitude", "Longitude"]].applymap(np.isfinite).all(axis=1)) & vals.notna()
+        if mask.sum() < 3: return None, None
 
-        mask = (
-            df[["Latitude", "Longitude"]]
-            .applymap(np.isfinite)
-            .all(axis=1)
-        ) & vals.notna()
-        if mask.sum() < 3:
-            return None, None
-
-        # --- Extract points ---
         pts_lon = df.loc[mask, "Longitude"].astype(float).values
         pts_lat = df.loc[mask, "Latitude"].astype(float).values
         vals_ok = vals.loc[mask].astype(float).values
 
-        # --- Interpolation grid ---
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        try:
-            grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
-            grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-            grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
-        except Exception:
-            return None, None
+        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+        grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+        if grid is None or np.all(np.isnan(grid)): return None, None
 
-        if grid is None or np.all(np.isnan(grid)):
-            return None, None
-
-        # --- Value scaling ---
         vmin = float(np.nanpercentile(vals_ok, 5)) if len(vals_ok) > 0 else 0.0
         vmax = float(np.nanpercentile(vals_ok, 95)) if len(vals_ok) > 0 else 1.0
         if vmin == vmax: vmax = vmin + 1.0
 
         rgba = cmap((grid - vmin) / (vmax - vmin))
-        rgba = np.flipud(rgba)       # align north-up
+        rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
         folium.raster_layers.ImageOverlay(
@@ -982,7 +1030,6 @@ def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
             overlay=True,
             show=show_default
         ).add_to(m)
-
         return vmin, vmax
     except Exception as e:
         st.warning(f"⚠️ Skipping heatmap {name}: {e}")
@@ -991,74 +1038,53 @@ def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
 
 # --- MAIN EXECUTION FOR HEATMAPS ---
 bounds = compute_bounds_for_heatmaps()
-
-# Build dataframe safely
 df = None
 yield_df = st.session_state.get("yield_df")
-if yield_df is not None and not yield_df.empty and "Yield" in yield_df.columns:
-    if {"Latitude", "Longitude"}.issubset(yield_df.columns):
-        df = yield_df.copy()
+if yield_df is not None and not yield_df.empty and "Yield" in yield_df.columns and {"Latitude","Longitude"}.issubset(yield_df.columns):
+    df = yield_df.copy()
 
-# Fallback if no yield data
 if df is None or df.empty:
     lat_center = (bounds[0] + bounds[2]) / 2.0
     lon_center = (bounds[1] + bounds[3]) / 2.0
     target_yield = st.number_input("Set Target Yield (bu/ac)", min_value=0.0, value=200.0, step=1.0)
-    df = pd.DataFrame({
-        "Yield": [target_yield],
-        "Latitude": [lat_center],
-        "Longitude": [lon_center],
-    })
+    df = pd.DataFrame({"Yield":[target_yield],"Latitude":[lat_center],"Longitude":[lon_center]})
 
-# --- Profit calculations ---
 try:
     df["Revenue_per_acre"] = df["Yield"].astype(float) * float(sell_price or 0)
-
-    fert_var = float(st.session_state["fert_products"]["CostPerAcre"].sum()) \
-               if not st.session_state["fert_products"].empty else 0.0
-    seed_var = float(st.session_state["seed_products"]["CostPerAcre"].sum()) \
-               if not st.session_state["seed_products"].empty else 0.0
-
-    df["NetProfit_per_acre_variable"] = (
-        df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fert_var + seed_var)
-    )
-
+    fert_var = float(st.session_state["fert_products"]["CostPerAcre"].sum()) if not st.session_state["fert_products"].empty else 0.0
+    seed_var = float(st.session_state["seed_products"]["CostPerAcre"].sum()) if not st.session_state["seed_products"].empty else 0.0
+    df["NetProfit_per_acre_variable"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fert_var + seed_var)
     fixed_costs = 0.0
     if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
-        try:
-            fx = st.session_state["fixed_products"].copy()
-            fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0) * (r.get("CostPerUnit",0) or 0), axis=1)
-            fixed_costs = float(fx["$/ac"].sum())
-        except Exception:
-            fixed_costs = 0.0
-
-    df["NetProfit_per_acre_fixed"] = (
-        df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fixed_costs)
-    )
+        fx = st.session_state["fixed_products"].copy()
+        fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0)*(r.get("CostPerUnit",0) or 0), axis=1)
+        fixed_costs = float(fx["$/ac"].sum())
+    df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fixed_costs)
 except Exception:
     st.warning("⚠️ Could not compute profit metrics, using defaults.")
     df["Revenue_per_acre"] = 0.0
     df["NetProfit_per_acre_variable"] = 0.0
     df["NetProfit_per_acre_fixed"] = 0.0
 
+# --- Overlays with legends (unified stacking) ---
+if "legend_index" not in st.session_state:
+    st.session_state["legend_index"] = 0
 
-# --- Overlays with legends ---
-st.session_state["legend_offset"] = 90
-
-y_min, y_max = add_heatmap_overlay(df, df["Yield"].values, "Yield (bu/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
+y_min, y_max = add_heatmap_overlay(df, df["Yield"].values, "Yield (bu/ac)", plt.cm.RdYlGn, False, bounds)
 if y_min is not None:
-    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_index"])
+    st.session_state["legend_index"] += 1
 
-v_min, v_max = add_heatmap_overlay(df, df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=True, bounds=bounds)
+v_min, v_max = add_heatmap_overlay(df, df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, True, bounds)
 if v_min is not None:
-    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_index"])
+    st.session_state["legend_index"] += 1
 
-f_min, f_max = add_heatmap_overlay(df, df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
+f_min, f_max = add_heatmap_overlay(df, df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False, bounds)
 if f_min is not None:
-    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_index"])
+    st.session_state["legend_index"] += 1
+
 
 # =========================================================
 # 7D. LAYER CONTROL
