@@ -694,8 +694,6 @@ def make_base_map():
 # Init base map
 m = make_base_map()
 st.session_state["layer_control_added"] = False
-
-
 # =========================================================
 # 6. ZONES OVERLAY
 # =========================================================
@@ -705,43 +703,49 @@ def add_zones_overlay(m):
         return m
 
     try:
+        # --- Ensure projection ---
         zones_gdf = zones_gdf.to_crs(epsg=4326)
 
+        # --- Guarantee a 'Zone' column ---
         if "Zone" not in zones_gdf.columns:
             zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
 
+        # --- Auto center and zoom ---
         zb = zones_gdf.total_bounds
         m.location = [(zb[1] + zb[3]) / 2, (zb[0] + zb[2]) / 2]
         m.zoom_start = 15
 
+        # --- Color palette and mapping ---
         palette = ["#FF0000","#FF8C00","#FFFF00","#32CD32","#006400",
                    "#1E90FF","#8A2BE2","#FFC0CB","#A52A2A","#00CED1"]
         unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
         color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
 
+        # --- Add polygon overlay ---
         folium.GeoJson(
             zones_gdf,
             name="Zones",
             style_function=lambda feature: {
-                "fillColor": color_map.get(str(feature["properties"].get("Zone","")), "#808080"),
-                "color": "black", "weight": 1, "fillOpacity": 0.08,
+                "fillColor": color_map.get(str(feature["properties"].get("Zone", "")), "#808080"),
+                "color": "black",
+                "weight": 1,
+                "fillOpacity": 0.08,
             },
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone","Calculated Acres","Override Acres"] if c in zones_gdf.columns]
             )
         ).add_to(m)
 
-              # --- Zone legend bottom-right, collapsible ---
-        unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
-        color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
+        # --- Build legend items ---
+        legend_items = ""
+        for z in unique_vals:
+            legend_items += (
+                f"<div style='display:flex; align-items:center; margin:2px 0;'>"
+                f"<div style='background:{color_map[z]}; width:14px; height:14px; margin-right:6px;'></div>"
+                f"{z}</div>"
+            )
 
-        legend_items = "".join([
-            f"<div style='display:flex; align-items:center; margin:2px 0;'>"
-            f"<div style='background:{color_map[z]}; width:14px; height:14px; margin-right:6px;'></div>{z}</div>"
-            for z in unique_vals
-        ])
-
-         # --- Collapsible zone legend (bottom-right) ---
+        # --- Collapsible zone legend (bottom-right) ---
         legend_html = f"""
         <div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
                      font-family:sans-serif; font-size:13px; color:white;
@@ -749,7 +753,7 @@ def add_zones_overlay(m):
                      width:160px;">
           <div style="font-weight:600; margin-bottom:4px; cursor:pointer;" onclick="
               var x = document.getElementById('zone-legend-items');
-              if (x.style.display === 'none') {{ x.style.display = 'block'; }} 
+              if (x.style.display === 'none') {{ x.style.display = 'block'; }}
               else {{ x.style.display = 'none'; }}">
             Zone Colors ▼
           </div>
@@ -760,6 +764,10 @@ def add_zones_overlay(m):
         """
         m.get_root().html.add_child(folium.Element(legend_html))
 
+    except Exception as e:
+        st.warning(f"⚠️ Skipping zones overlay: {e}")
+
+    return m
 
 # =========================================================
 # 7A. HELPERS + BOUNDS
