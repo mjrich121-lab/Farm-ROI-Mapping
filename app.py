@@ -17,63 +17,51 @@ import tempfile
 st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
 st.title("Farm Profit Mapping Tool V4")
 # =========================================================
-# STYLING OVERRIDES – COMPACT LAYOUT
+# COMPACT UI STYLING (affects ONLY controls/tables above map)
 # =========================================================
 st.markdown(
     """
     <style>
-    /* Reduce padding inside Streamlit expanders */
-    .streamlit-expanderHeader {
-        font-size: 0.9rem !important;
-        padding: 0.2rem 0.5rem !important;
+    /* Tighten column gutters (left/right padding) */
+    div[data-testid="column"] { padding-left: .25rem !important; padding-right: .25rem !important; }
+
+    /* Reduce vertical spacing between stacked blocks */
+    section[data-testid="stVerticalBlock"] > div { padding-top: .25rem !important; padding-bottom: .25rem !important; }
+
+    /* Compact headers */
+    h2, h3 { margin: .35rem 0 .2rem 0 !important; }
+
+    /* Super-compact expander headers and bodies */
+    div[data-testid="stExpander"] details summary { padding: .25rem .5rem !important; }
+    div[data-testid="stExpander"] details > div { padding: .25rem .5rem !important; }
+
+    /* Compact number inputs (height + font + +/- buttons) */
+    div[data-testid="stNumberInput"] label { font-size: .78rem !important; margin-bottom: .1rem !important; }
+    div[data-testid="stNumberInput"] div[role="spinbutton"] {
+        min-height: 28px !important; height: 28px !important; padding: 0 6px !important; font-size: .85rem !important;
     }
-    .streamlit-expanderContent {
-        padding: 0.2rem 0.5rem !important;
+    div[data-testid="stNumberInput"] button { padding: 0 !important; min-width: 22px !important; }
+
+    /* Compact select/text inputs for future use */
+    div[data-baseweb="select"] div[role="combobox"],
+    input[type="text"] { min-height: 28px !important; height: 28px !important; }
+
+    /* Compact dataframes / editors (Excel-like row height) */
+    div[data-testid="stDataFrame"] table { font-size: .82rem !important; }
+    div[data-testid="stDataFrame"] th, div[data-testid="stDataFrame"] td {
+        padding: 2px 6px !important; line-height: 1.2rem !important;
+    }
+    div[data-testid="stDataEditor"] table { font-size: .82rem !important; }
+    div[data-testid="stDataEditor"] th, div[data-testid="stDataEditor"] td {
+        padding: 2px 6px !important; line-height: 1.2rem !important;
     }
 
-    /* Compact number inputs */
-    div[data-baseweb="input"] {
-        min-height: 28px !important;
-        height: 28px !important;
-        padding: 0 0.25rem !important;
-    }
-
-    /* Compact labels */
-    label, .stMarkdown p {
-        font-size: 0.8rem !important;
-        margin-bottom: 0.1rem !important;
-    }
-
-    /* Compact dataframes / data editors like Excel */
-    .stDataFrame, .stDataEditor {
-        font-size: 0.8rem !important;
-    }
-    .stDataFrame th, .stDataFrame td, 
-    .stDataEditor th, .stDataEditor td {
-        padding: 2px 6px !important;
-    }
-
-    /* Remove excess white space around headers */
-    h2, h3, h4 {
-        margin-top: 0.5rem !important;
-        margin-bottom: 0.3rem !important;
-    }
+    /* Keep captions tiny */
+    div[data-testid="stCaptionContainer"] { margin: .2rem 0 !important; }
     </style>
     """,
     unsafe_allow_html=True
 )
-
-# --- Initialize session state defaults once ---
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "zones_gdf" not in st.session_state:
-    st.session_state["zones_gdf"] = None
-if "yield_df" not in st.session_state:
-    st.session_state["yield_df"] = None
-if "fixed_products" not in st.session_state:
-    st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
 
 # =========================================================
 # HELPER: Load Vector File (zip, shp, geojson, json)
@@ -378,54 +366,34 @@ with col4:
         st.caption("No seed files uploaded yet.")
 
 # =========================================================
-# 4. EXPENSE INPUTS (PER ACRE $)
+# 4. COMPACT CONTROLS ABOVE MAP
 # =========================================================
-st.header("Expense Inputs (Per Acre $)")
 
-cols = st.columns(6)
-with cols[0]:
-    st.markdown("**Sell Price ($/bu)**")
-    sell_price = st.number_input("sell", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols[1]:
-    st.markdown("**Chemicals ($/ac)**")
-    chemicals = st.number_input("chem", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols[2]:
-    st.markdown("**Insurance ($/ac)**")
-    insurance = st.number_input("ins", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols[3]:
-    st.markdown("**Insect/Fungicide ($/ac)**")
-    insecticide = st.number_input("insect", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols[4]:
-    st.markdown("**Fertilizer (Flat $/ac)**")
-    fertilizer = st.number_input("fert", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols[5]:
-    st.markdown("**Seed (Flat $/ac)**")
-    seed = st.number_input("seed", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
+    """Tiny number input with a small label."""
+    st.caption(label)
+    return st.number_input(key, min_value=0.0, value=float(default), step=step, label_visibility="collapsed")
 
-cols2 = st.columns(6)
-with cols2[0]:
-    st.markdown("**Machinery ($/ac)**")
-    machinery = st.number_input("mach", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols2[1]:
-    st.markdown("**Labor ($/ac)**")
-    labor = st.number_input("labor", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols2[2]:
-    st.markdown("**Cost of Living ($/ac)**")
-    cost_of_living = st.number_input("col", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols2[3]:
-    st.markdown("**Extra Fuel ($/ac)**")
-    extra_fuel = st.number_input("fuel", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols2[4]:
-    st.markdown("**Extra Interest ($/ac)**")
-    extra_interest = st.number_input("int", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
-with cols2[5]:
-    st.markdown("**Truck Fuel ($/ac)**")
-    truck_fuel = st.number_input("truck", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+st.markdown("### Expense Inputs (Per Acre $)")
 
-cols3 = st.columns(6)
-with cols3[0]:
-    st.markdown("**Cash Rent ($/ac)**")
-    cash_rent = st.number_input("rent", min_value=0.0, value=0.0, step=0.1, label_visibility="collapsed")
+# Put everything into just TWO tight rows: 7 + 6
+row1 = st.columns(7)
+row2 = st.columns(6)
+
+with row1[0]:  sell_price    = _mini_num("Sell Price ($/bu)",           "sell",   0.0)
+with row1[1]:  chemicals     = _mini_num("Chemicals ($/ac)",            "chem",   0.0)
+with row1[2]:  insurance     = _mini_num("Insurance ($/ac)",            "ins",    0.0)
+with row1[3]:  insecticide   = _mini_num("Insect/Fungicide ($/ac)",     "insect", 0.0)
+with row1[4]:  fertilizer    = _mini_num("Fertilizer (Flat $/ac)",      "fert",   0.0)
+with row1[5]:  seed          = _mini_num("Seed (Flat $/ac)",            "seed",   0.0)
+with row1[6]:  cash_rent     = _mini_num("Cash Rent ($/ac)",            "rent",   0.0)
+
+with row2[0]:  machinery     = _mini_num("Machinery ($/ac)",            "mach",   0.0)
+with row2[1]:  labor         = _mini_num("Labor ($/ac)",                "labor",  0.0)
+with row2[2]:  cost_of_living= _mini_num("Cost of Living ($/ac)",       "col",    0.0)
+with row2[3]:  extra_fuel    = _mini_num("Extra Fuel ($/ac)",           "fuel",   0.0)
+with row2[4]:  extra_interest= _mini_num("Extra Interest ($/ac)",       "int",    0.0)
+with row2[5]:  truck_fuel    = _mini_num("Truck Fuel ($/ac)",           "truck",  0.0)
 
 expenses = {
     "Chemicals": chemicals,
@@ -441,143 +409,100 @@ expenses = {
     "Truck Fuel": truck_fuel,
     "Cash Rent": cash_rent
 }
-base_expenses_per_acre = sum(expenses.values())
+base_expenses_per_acre = float(sum(expenses.values()))
 
-# =========================================================
-# 4B. FIXED RATE INPUTS (Manual Seed & Fertilizer Table)
-# =========================================================
-st.header("Fixed Rate Prescription Inputs")
-
+# ---------------- Fixed / Variable sections kept, but with smaller headers and collapsed by default
+st.markdown("### Fixed Rate Prescription Inputs")
 with st.expander("Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
-    # Initialize session state if missing
-    if "fixed_products" not in st.session_state:
+    if "fixed_products" not in st.session_state or st.session_state["fixed_products"].empty:
         st.session_state["fixed_products"] = pd.DataFrame(
-            {
-                "Type": ["Seed", "Fertilizer"],
-                "Product": ["", ""],
-                "Rate": [0.0, 0.0],
-                "CostPerUnit": [0.0, 0.0],
-                "$/ac": [0.0, 0.0]
-            }
+            {"Type": ["Seed", "Fertilizer"], "Product": ["", ""], "Rate": [0.0, 0.0],
+             "CostPerUnit": [0.0, 0.0], "$/ac": [0.0, 0.0]}
         )
-
-    # Show editable table
     fixed_entries = st.data_editor(
         st.session_state["fixed_products"],
         num_rows="dynamic",
         use_container_width=True,
         key="fixed_editor"
     )
+    st.session_state["fixed_products"] = fixed_entries.copy().reset_index(drop=True)
 
-    # Safely store back into session state
-    st.session_state["fixed_products"] = (
-        fixed_entries.copy().reset_index(drop=True)
-    )
-# =========================================================
-# 4C. VARIABLE RATE INPUTS (Summary Tables)
-# =========================================================
-st.header("Variable Rate Prescription Inputs")
-
+st.markdown("### Variable Rate Prescription Inputs")
 with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
-    fert_df = st.session_state["fert_products"]
-    seed_df = st.session_state["seed_products"]
+    fert_df = st.session_state.get("fert_products", pd.DataFrame())
+    seed_df = st.session_state.get("seed_products", pd.DataFrame())
 
     if fert_df is not None and not fert_df.empty:
-        st.subheader("Fertilizer Products (Variable Rate)")
+        st.caption("Fertilizer Products (Variable Rate)")
         st.dataframe(
-            fert_df.style.format({
-                "Acres": "{:,.1f}",
-                "CostTotal": "${:,.2f}",
-                "CostPerAcre": "${:,.2f}"
-            }),
-            use_container_width=True,
-            hide_index=True
+            fert_df.style.format({"Acres": "{:,.1f}", "CostTotal": "${:,.2f}", "CostPerAcre": "${:,.2f}"}),
+            use_container_width=True, hide_index=True
         )
-
     if seed_df is not None and not seed_df.empty:
-        st.subheader("Seed Products (Variable Rate)")
+        st.caption("Seed Products (Variable Rate)")
         st.dataframe(
-            seed_df.style.format({
-                "Acres": "{:,.1f}",
-                "CostTotal": "${:,.2f}",
-                "CostPerAcre": "${:,.2f}"
-            }),
-            use_container_width=True,
-            hide_index=True
+            seed_df.style.format({"Acres": "{:,.1f}", "CostTotal": "${:,.2f}", "CostPerAcre": "${:,.2f}"}),
+            use_container_width=True, hide_index=True
         )
-
     if (fert_df is None or fert_df.empty) and (seed_df is None or seed_df.empty):
         st.info("No variable rate prescription maps uploaded yet.")
-# =========================================================
-# 4D. OPTIONAL: Compare Crop Profitability Before Mapping
-# =========================================================
-st.header("Compare Crop Profitability (Optional)")
 
+# ---------------- Compare Crop Profitability (tight: inputs at left, table at right)
+st.markdown("### Compare Crop Profitability (Optional)")
 with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False):
-    st.markdown("_Any values you enter here will also be reflected in the Profit Summary section below._")
+    left, right = st.columns([1, 2])
 
-    st.session_state["corn_yield"] = st.number_input(
-        "Corn Yield Goal (bu/ac)", 
-        min_value=0.0, 
-        value=st.session_state.get("corn_yield", 200.0), 
-        step=1.0
-    )
-    st.session_state["corn_price"] = st.number_input(
-        "Corn Sell Price ($/bu)", 
-        min_value=0.0, 
-        value=st.session_state.get("corn_price", 5.0), 
-        step=0.1
-    )
-    st.session_state["bean_yield"] = st.number_input(
-        "Soybean Yield Goal (bu/ac)", 
-        min_value=0.0, 
-        value=st.session_state.get("bean_yield", 60.0), 
-        step=1.0
-    )
-    st.session_state["bean_price"] = st.number_input(
-        "Soybean Sell Price ($/bu)", 
-        min_value=0.0, 
-        value=st.session_state.get("bean_price", 12.0), 
-        step=0.1
-    )
-# --- Preview chart with same highlighting as Section 9 ---
-preview_df = pd.DataFrame({
-    "Crop": ["Corn", "Soybeans"],
-    "Yield Goal (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-    "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
-    "Revenue ($/ac)": [
-        st.session_state["corn_yield"] * st.session_state["corn_price"],
-        st.session_state["bean_yield"] * st.session_state["bean_price"]
-    ],
-    "Fixed Inputs ($/ac)": [base_expenses_per_acre, base_expenses_per_acre],
-    "Breakeven Budget ($/ac)": [
-        (st.session_state["corn_yield"] * st.session_state["corn_price"]) - base_expenses_per_acre,
-        (st.session_state["bean_yield"] * st.session_state["bean_price"]) - base_expenses_per_acre
-    ]
-})
+    with left:
+        st.caption("Corn")
+        st.session_state["corn_yield"] = st.number_input(
+            "corn_yld", min_value=0.0, value=st.session_state.get("corn_yield", 200.0),
+            step=1.0, label_visibility="collapsed"
+        )
+        st.caption("Corn Sell Price ($/bu)")
+        st.session_state["corn_price"] = st.number_input(
+            "corn_px", min_value=0.0, value=st.session_state.get("corn_price", 5.0),
+            step=0.1, label_visibility="collapsed"
+        )
 
-def highlight_budget(val):
-    if isinstance(val, (int, float)):
-        if val > 0:
-            return "color: green; font-weight: bold;"
-        elif val < 0:
-            return "color: red; font-weight: bold;"
-    return "font-weight: bold;"
+        st.caption("Soybeans")
+        st.session_state["bean_yield"] = st.number_input(
+            "bean_yld", min_value=0.0, value=st.session_state.get("bean_yield", 60.0),
+            step=1.0, label_visibility="collapsed"
+        )
+        st.caption("Soybean Sell Price ($/bu)")
+        st.session_state["bean_price"] = st.number_input(
+            "bean_px", min_value=0.0, value=st.session_state.get("bean_price", 12.0),
+            step=0.1, label_visibility="collapsed"
+        )
 
-st.dataframe(
-    preview_df.style.applymap(
-        highlight_budget,
-        subset=["Breakeven Budget ($/ac)"]
-    ).format({
-        "Yield Goal (bu/ac)": "{:,.1f}",
-        "Sell Price ($/bu)": "${:,.2f}",
-        "Revenue ($/ac)": "${:,.2f}",
-        "Fixed Inputs ($/ac)": "${:,.2f}",
-        "Breakeven Budget ($/ac)": "${:,.2f}"
-    }),
-    use_container_width=True,
-    hide_index=True
-)
+    with right:
+        preview_df = pd.DataFrame({
+            "Crop": ["Corn", "Soybeans"],
+            "Yield Goal (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+            "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
+            "Revenue ($/ac)": [
+                st.session_state["corn_yield"] * st.session_state["corn_price"],
+                st.session_state["bean_yield"] * st.session_state["bean_price"]
+            ],
+            "Fixed Inputs ($/ac)": [base_expenses_per_acre, base_expenses_per_acre],
+        })
+        preview_df["Breakeven Budget ($/ac)"] = preview_df["Revenue ($/ac)"] - preview_df["Fixed Inputs ($/ac)"]
+
+        def _hl_budget(val):
+            if isinstance(val, (int, float)):
+                if val > 0:  return "color: green; font-weight: bold;"
+                if val < 0:  return "color: red; font-weight: bold;"
+            return "font-weight: bold;"
+
+        st.dataframe(
+            preview_df.style.applymap(_hl_budget, subset=["Breakeven Budget ($/ac)"]).format({
+                "Yield Goal (bu/ac)": "{:,.1f}", "Sell Price ($/bu)": "${:,.2f}",
+                "Revenue ($/ac)": "${:,.2f}", "Fixed Inputs ($/ac)": "${:,.2f}",
+                "Breakeven Budget ($/ac)": "${:,.2f}"
+            }),
+            use_container_width=True, hide_index=True
+        )
+
 # =========================================================
 # 5. BASE MAP
 # =========================================================
