@@ -213,58 +213,6 @@ if zone_file is not None:
 # =========================================================
 st.header("Upload Maps")
 
-# ---- First row: Zone + Yield ----
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("Zone Map Upload")
-    zone_file = st.file_uploader(
-        "Upload Zone Map",
-        type=["geojson", "json", "zip"],
-        key="zone",
-        accept_multiple_files=False
-    )
-    st.caption("Formats: GeoJSON, JSON, or zipped Shapefile (.shp+.shx+.dbf+.prj)")
-
-with col2:
-    st.subheader("Yield Map Upload")
-    yield_files = st.file_uploader(
-        "Upload Yield Map(s)",
-        type=["csv", "geojson", "json", "zip"],
-        key="yield",
-        accept_multiple_files=True
-    )
-    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
-
-# ---- Second row: Fert + Seed ----
-col3, col4 = st.columns(2)
-
-with col3:
-    st.subheader("Fertilizer Prescription Upload")
-    fert_files = st.file_uploader(
-        "Upload Fertilizer Map(s)",
-        type=["csv", "geojson", "json", "zip"],
-        key="fert",
-        accept_multiple_files=True
-    )
-    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
-
-with col4:
-    st.subheader("Seed Prescription Upload")
-    seed_files = st.file_uploader(
-        "Upload Seed Map(s)",
-        type=["csv", "geojson", "json", "zip"],
-        key="seed",
-        accept_multiple_files=True
-    )
-    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
-
-                    df_temp = pd.DataFrame(gdf_temp.drop(columns="geometry", errors="ignore"))
-# =========================================================
-# 2–3. FILE UPLOADS (Compact 4-square Layout, Section-local listings)
-# =========================================================
-st.header("Upload Maps")
-
 # ---------- Layout ----------
 col1, col2 = st.columns(2)
 col3, col4 = st.columns(2)
@@ -284,13 +232,13 @@ with col1:
 
     if zone_file:
         st.success(f"✅ Loaded {zone_file.name}")
-        # store for later use
         st.session_state["zone_file"] = zone_file
     else:
         st.caption("No zone file uploaded yet.")
 
+
 # =========================================================
-# YIELD UPLOAD (multi-file, crash-proof, clean indent)
+# YIELD UPLOAD (multi-file, crash-proof)
 # =========================================================
 with col2:
     st.subheader("Yield Map Upload")
@@ -302,7 +250,6 @@ with col2:
     )
     st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile (.zip).")
 
-    # --- Initialize store ---
     st.session_state.setdefault("yield_files_list", [])
 
     if yield_files:
@@ -315,9 +262,8 @@ with col2:
                 # --- CSV case ---
                 if yf.name.lower().endswith(".csv"):
                     df_temp = pd.read_csv(yf)
-
-                # --- Vector file case ---
                 else:
+                    # --- Vector file case ---
                     gdf_temp = load_vector_file(yf)
                     if gdf_temp is not None and not gdf_temp.empty:
                         df_temp = pd.DataFrame(
@@ -326,46 +272,38 @@ with col2:
 
                 # --- Validate dataframe ---
                 if df_temp is not None and not df_temp.empty:
-                    # normalize column names
                     df_temp.columns = [
                         c.strip().lower().replace(" ", "_") for c in df_temp.columns
                     ]
 
                     # --- Detect dry yield (highest priority) ---
                     dry_candidates = [
-                        c
-                        for c in df_temp.columns
+                        c for c in df_temp.columns
                         if any(k in c for k in ["yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield"])
                     ]
-
                     # --- Fallback to general yield ---
                     if not dry_candidates:
                         dry_candidates = [
-                            c
-                            for c in df_temp.columns
+                            c for c in df_temp.columns
                             if any(k in c for k in ["yield", "yld_vol_wt", "yld_mass_wt", "wet_yield"])
                         ]
 
-                    # --- Apply best available yield column ---
                     if dry_candidates:
                         chosen = dry_candidates[0]
                         df_temp.rename(columns={chosen: "Yield"}, inplace=True)
                     else:
                         df_temp["Yield"] = 0.0  # fallback → triggers manual Target Yield later
 
-                    # --- Save metadata for display ---
                     st.session_state["yield_files_list"].append(
                         {"name": yf.name, "rows": len(df_temp)}
                     )
                     st.success(f"✅ Loaded {yf.name} ({len(df_temp)} rows)")
-
                 else:
-                    st.warning(f"⚠️ {yf.name} contained no usable data or geometry.")
-
+                    st.warning(f"⚠️ {yf.name} contained no usable data.")
             except Exception as e:
                 st.warning(f"⚠️ Skipped {yf.name}: {e}")
 
-        # --- Display file list below uploader ---
+        # --- Display file list ---
         if st.session_state["yield_files_list"]:
             st.info("**Loaded Yield Files:**")
             for f in st.session_state["yield_files_list"]:
@@ -375,8 +313,8 @@ with col2:
     else:
         st.caption("No yield files uploaded yet.")
 
-# --- Downstream safety placeholder ---
 st.session_state["yield_df"] = None
+
 
 # =========================================================
 # HELPER: Process Prescription File
@@ -387,7 +325,6 @@ def process_prescription(file, prescrip_type="fertilizer"):
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
     try:
-        # --- Load file ---
         if file.name.lower().endswith((".geojson",".json",".zip",".shp")):
             gdf = load_vector_file(file)
             if gdf is None or gdf.empty:
@@ -420,7 +357,6 @@ def process_prescription(file, prescrip_type="fertilizer"):
     if "acres" not in df.columns:
         df["acres"] = 0.0
 
-    # override option (collapsed)
     with st.expander(f"⚙️ {prescrip_type.capitalize()} Map Options — {file.name}", expanded=False):
         override = st.number_input(
             "Override Acres Per Polygon",
@@ -430,7 +366,6 @@ def process_prescription(file, prescrip_type="fertilizer"):
         if override > 0:
             df["acres"] = override
 
-    # cost calc
     if "costtotal" not in df.columns:
         if {"price_per_unit","units"}.issubset(df.columns):
             df["costtotal"] = df["price_per_unit"] * df["units"]
@@ -452,7 +387,7 @@ def process_prescription(file, prescrip_type="fertilizer"):
 
 
 # =========================================================
-# FERTILIZER + SEED UPLOADS (local listings)
+# FERTILIZER + SEED UPLOADS
 # =========================================================
 st.session_state["fert_layers_store"] = {}
 st.session_state["seed_layers_store"] = {}
@@ -469,17 +404,13 @@ with col3:
 
     if fert_files:
         for f in fert_files:
-            try:
-                grouped = process_prescription(f, "fertilizer")
-                if not grouped.empty:
-                    key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
-                    st.session_state["fert_layers_store"][key] = grouped
-                    st.success(f"✅ {f.name}")
-                else:
-                    st.warning(f"⚠️ {f.name} had no valid data.")
-            except Exception as e:
-                st.warning(f"⚠️ Skipped {f.name}: {e}")
-
+            grouped = process_prescription(f, "fertilizer")
+            if not grouped.empty:
+                key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                st.session_state["fert_layers_store"][key] = grouped
+                st.success(f"✅ {f.name}")
+            else:
+                st.warning(f"⚠️ {f.name} had no valid data.")
         if st.session_state["fert_layers_store"]:
             st.info("**Loaded Fertilizer Maps:**")
             for k in st.session_state["fert_layers_store"].keys():
@@ -500,25 +431,23 @@ with col4:
 
     if seed_files:
         for f in seed_files:
-            try:
-                grouped = process_prescription(f, "seed")
-                if not grouped.empty:
-                    key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
-                    st.session_state["seed_layers_store"][key] = grouped
-                    st.success(f"✅ {f.name}")
-                else:
-                    st.warning(f"⚠️ {f.name} had no valid data.")
-            except Exception as e:
-                st.warning(f"⚠️ Skipped {f.name}: {e}")
-
+            grouped = process_prescription(f, "seed")
+            if not grouped.empty:
+                key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                st.session_state["seed_layers_store"][key] = grouped
+                st.success(f"✅ {f.name}")
+            else:
+                st.warning(f"⚠️ {f.name} had no valid data.")
         if st.session_state["seed_layers_store"]:
             st.info("**Loaded Seed Maps:**")
             for k in st.session_state["seed_layers_store"].keys():
                 st.markdown(f"- {k}")
     else:
         st.caption("No seed files uploaded yet.")
+
+
 # =========================================================
-# AUTO-BOUNDS SAFETY CHECK (ensures map centers correctly)
+# AUTO-BOUNDS SAFETY CHECK
 # =========================================================
 try:
     bounds = compute_bounds_for_heatmaps()
@@ -529,6 +458,7 @@ try:
         st.info("📍 No valid spatial data yet — upload map files to enable auto-zoom.")
 except Exception as e:
     st.warning(f"⚠️ Could not compute bounds automatically: {e}")
+
 
 # =========================================================
 # 4. EXPENSE INPUTS (PER ACRE $)
