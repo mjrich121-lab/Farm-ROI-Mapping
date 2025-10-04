@@ -16,6 +16,52 @@ import tempfile
 
 st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
 st.title("Farm Profit Mapping Tool V4")
+# =========================================================
+# STYLING OVERRIDES – COMPACT LAYOUT
+# =========================================================
+st.markdown(
+    """
+    <style>
+    /* Reduce padding inside Streamlit expanders */
+    .streamlit-expanderHeader {
+        font-size: 0.9rem !important;
+        padding: 0.2rem 0.5rem !important;
+    }
+    .streamlit-expanderContent {
+        padding: 0.2rem 0.5rem !important;
+    }
+
+    /* Compact number inputs */
+    div[data-baseweb="input"] {
+        min-height: 28px !important;
+        height: 28px !important;
+        padding: 0 0.25rem !important;
+    }
+
+    /* Compact labels */
+    label, .stMarkdown p {
+        font-size: 0.8rem !important;
+        margin-bottom: 0.1rem !important;
+    }
+
+    /* Compact dataframes / data editors like Excel */
+    .stDataFrame, .stDataEditor {
+        font-size: 0.8rem !important;
+    }
+    .stDataFrame th, .stDataFrame td, 
+    .stDataEditor th, .stDataEditor td {
+        padding: 2px 6px !important;
+    }
+
+    /* Remove excess white space around headers */
+    h2, h3, h4 {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.3rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- Initialize session state defaults once ---
 if "fert_products" not in st.session_state:
