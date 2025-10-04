@@ -593,96 +593,95 @@ st.dataframe(
     hide_index=True
 )
 # =========================================================
-# 5. BASE MAP (rebuild clean each run but persist data state)
+# 5. BASE MAP
 # =========================================================
-from branca.element import MacroElement, Template, Element
+from branca.element import MacroElement, Template
 
 def make_base_map():
-    m = folium.Map(
-        location=[39.5, -98.35],  # Center of continental US
-        zoom_start=5,             # Default zoom
-        min_zoom=2,               # Prevent zooming too far out
-        tiles=None,
-        scrollWheelZoom=False,    # Disabled by default
-        prefer_canvas=True
-    )
+    try:
+        m = folium.Map(
+            location=[39.5, -98.35],  # Continental US center
+            zoom_start=5,
+            min_zoom=2,
+            tiles=None,
+            scrollWheelZoom=False,
+            prefer_canvas=True
+        )
 
-    # Add locked base layers (satellite + labels)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", overlay=False, control=False
-    ).add_to(m)
+        # Base layers (safe guarded)
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri", overlay=False, control=False
+            ).add_to(m)
+        except Exception:
+            pass
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri", overlay=True, control=False
+            ).add_to(m)
+        except Exception:
+            pass
 
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", overlay=True, control=False
-    ).add_to(m)
-
-    # ✅ Click-to-enable scroll wheel (disable again on mouseout)
-    template = Template("""
-        {% macro script(this, kwargs) %}
-        var map = {{this._parent.get_name()}};
-        map.scrollWheelZoom.disable();
-        map.on('click', function() {
-            map.scrollWheelZoom.enable();
-        });
-        map.on('mouseout', function() {
+        # Enable scrollwheel only on click
+        template = Template("""
+            {% macro script(this, kwargs) %}
+            var map = {{this._parent.get_name()}};
             map.scrollWheelZoom.disable();
-        });
-        {% endmacro %}
-    """)
-    macro = MacroElement()
-    macro._template = template
-    m.get_root().add_child(macro)
+            map.on('click', function() { map.scrollWheelZoom.enable(); });
+            map.on('mouseout', function() { map.scrollWheelZoom.disable(); });
+            {% endmacro %}
+        """)
+        macro = MacroElement()
+        macro._template = template
+        m.get_root().add_child(macro)
+        return m
+    except Exception as e:
+        st.error(f"❌ Failed to build base map: {e}")
+        return folium.Map(location=[39.5, -98.35], zoom_start=4)
 
-    return m
-
-# Always start with a fresh map each run
+# Init base map
 m = make_base_map()
 st.session_state["layer_control_added"] = False
-# =========================================================
-# 6. MAP DISPLAY (Zones overlay + legend; adds to base map)
-# =========================================================
-if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
-    zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
-    if not zones_gdf.empty:
-        # Ensure there is a 'Zone' column
+
+# =========================================================
+# 6. ZONES OVERLAY
+# =========================================================
+def add_zones_overlay(m):
+    zones_gdf = st.session_state.get("zones_gdf")
+    if zones_gdf is None or zones_gdf.empty:
+        return m
+
+    try:
+        zones_gdf = zones_gdf.to_crs(epsg=4326)
+
         if "Zone" not in zones_gdf.columns:
-            for cand in ["zone", "ZONE", "Name", "name"]:
-                if cand in zones_gdf.columns:
-                    zones_gdf["Zone"] = zones_gdf[cand]
-                    break
-            else:
-                zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
+            zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
 
-        # Center map on zone bounds
-        zb = zones_gdf.total_bounds  # [minx, miny, maxx, maxy]
+        zb = zones_gdf.total_bounds
         m.location = [(zb[1] + zb[3]) / 2, (zb[0] + zb[2]) / 2]
         m.zoom_start = 15
 
-        # Color palette
         palette = ["#FF0000","#FF8C00","#FFFF00","#32CD32","#006400",
                    "#1E90FF","#8A2BE2","#FFC0CB","#A52A2A","#00CED1"]
         unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
         color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
 
-        # Zones overlay (transparent so heatmaps show underneath)
         folium.GeoJson(
             zones_gdf,
             name="Zones",
             style_function=lambda feature: {
                 "fillColor": color_map.get(str(feature["properties"].get("Zone","")), "#808080"),
-                "color": "black",
-                "weight": 1,
-                "fillOpacity": 0.08,
+                "color": "black", "weight": 1, "fillOpacity": 0.08,
             },
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone","Calculated Acres","Override Acres"] if c in zones_gdf.columns]
             )
         ).add_to(m)
 
-        # Zone legend (bottom-left)
+        # Zone legend bottom-left
         legend_parts = [
             '<div style="position:absolute; bottom:20px; left:20px; z-index:9999;'
             'background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;'
@@ -697,195 +696,48 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             )
         legend_parts.append("</div>")
         m.get_root().html.add_child(folium.Element("".join(legend_parts)))
+    except Exception as e:
+        st.warning(f"⚠️ Skipping zones overlay: {e}")
+    return m
+
+
 # =========================================================
-# 7. YIELD + PROFIT (Variable + Fixed overlays + legend)
+# 7A. HELPERS + BOUNDS
 # =========================================================
-# -------------------------------
-# 7A. Helpers + Bounds Gathering
-# -------------------------------
-from matplotlib import colors  # ✅ colormap handling
-
-def detect_rate_type(gdf):
-    """Return 'Fixed Rate' if all tgt_rate (or rate) values equal, else 'Variable Rate'."""
-    rate_col = None
-    for c in gdf.columns:
-        if "tgt" in c.lower() or "rate" in c.lower():
-            rate_col = c
-            break
-    if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
-        return "Fixed Rate"
-    return "Variable Rate"
-
-def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
-    """Generic stacked gradient legend."""
-    stops = [f"{colors.rgb2hex(cmap(i/100.0))} {i}%" for i in range(0,101,10)]
-    gradient_css = ", ".join(stops)
-
-    legend_html = f"""
-    <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
-                display:flex; flex-direction:column; gap:6px;
-                font-family:sans-serif; font-size:12px; color:white;
-                background-color: rgba(0,0,0,0.6);
-                padding:6px 10px; border-radius:5px;">
-      <div>
-        <div style="font-weight:600; margin-bottom:2px;">{name}</div>
-        <div style="height:14px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
-        <div style="display:flex; justify-content:space-between;">
-          <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
-        </div>
-      </div>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-# ✅ reset offset at start of section 7
-st.session_state["legend_offset"] = 90
-
-# -------------------------------
-# 7B. Prescription Overlays (Seed + Fert) + Legend helper
-# -------------------------------
 from matplotlib import colors as mpl_colors
 
-# Unified stacked gradient legend (top-left)
-def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
-    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0,101,10)]
-    gradient_css = ", ".join(stops)
-    legend_html = f"""
-    <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
-                display:flex; flex-direction:column;
-                font-family:sans-serif; font-size:12px; color:white;
-                background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;">
-      <div style="font-weight:600; margin-bottom:2px;">{name}</div>
-      <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
-                  border-radius:2px; margin-bottom:2px;"></div>
-      <div style="display:flex; justify-content:space-between;">
-        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
-      </div>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-# Detect fixed vs variable by rate column
 def detect_rate_type(gdf):
-    rate_col = None
-    for c in gdf.columns:
-        cl = c.lower()
-        if "tgt" in cl or "rate" in cl:
-            rate_col = c; break
-    if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
-        return "Fixed Rate"
+    """Detect fixed vs variable rate from rate-like columns."""
+    try:
+        rate_col = None
+        for c in gdf.columns:
+            if "tgt" in c.lower() or "rate" in c.lower():
+                rate_col = c; break
+        if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
+            return "Fixed Rate"
+    except Exception:
+        pass
     return "Variable Rate"
 
-# Seed/Fert prescription overlay with gradient fill + tooltip + legend
-def add_prescription_overlay(gdf, name, cmap):
-    if gdf is None or gdf.empty:
-        return
-
-    product_col, rate_col = None, None
-    for c in gdf.columns:
-        cl = c.lower()
-        if product_col is None and "product" in cl:
-            product_col = c
-        if rate_col is None and ("tgt" in cl or "rate" in cl):
-            rate_col = c
-
-    rate_type = detect_rate_type(gdf)
-    gdf = gdf.copy()
-    gdf["RateType"] = rate_type
-
-    # Legend range from actual numeric rate values
-    if rate_col:
-        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
-        vmin, vmax = (float(vals.min()), float(vals.max())) if not vals.empty else (0.0, 1.0)
-    else:
-        vmin, vmax = 0.0, 1.0
-
-    def style_fn(feat):
-        val = feat["properties"].get(rate_col) if rate_col else None
-        if val is None or pd.isna(val):
-            fill = "#808080"
-        else:
-            try:
-                norm = (float(val) - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-                norm = max(0.0, min(1.0, norm))
-                fill = mpl_colors.rgb2hex(cmap(norm)[:3])
-            except Exception:
-                fill = "#808080"
-        return {"color": "black", "weight": 0.5, "fillColor": fill, "fillOpacity": 0.55}
-
-    fields, aliases = [], []
-    if product_col: fields.append(product_col); aliases.append("Product")
-    if rate_col:    fields.append(rate_col);    aliases.append("Target Rate")
-    fields.append("RateType");                  aliases.append("Type")
-
-    folium.GeoJson(
-        gdf,
-        name=name,
-        style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
-    ).add_to(m)
-
-    # Individual legend for this layer (stacked, top-left)
-    add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
-
-
-# Fetch session layers used below
-seed_gdf    = st.session_state.get("seed_gdf")
-fert_layers = st.session_state.get("fert_gdfs", {})
-
-# Reset legend stack offset (top-left)
-st.session_state["legend_offset"] = 90
-
-# Draw Seed RX (zones-like polygons with gradient)
-if seed_gdf is not None and not seed_gdf.empty:
-    add_prescription_overlay(seed_gdf, "Seed RX", plt.cm.Greens)
-
-# Draw *all* Fert RX layers (stackable)
-for k, fgdf in fert_layers.items():
-    if fgdf is not None and not fgdf.empty:
-        add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues)
-
-# -------------------------------
-# 7C. Yield / Profit Heatmaps (Crash-Proof)
-# -------------------------------
-
 def compute_bounds_for_heatmaps():
-    """
-    Safely return (south, west, north, east).
-    Tries zones, seed, fert, yield; else defaults to US extent.
-    """
+    """Safely collect bounds from all available layers."""
     try:
         bnds = []
-
-        # Zones
-        z = st.session_state.get("zones_gdf")
-        if z is not None and not z.empty:
-            zb = z.total_bounds
-            if zb is not None and len(zb) == 4 and not any(pd.isna(zb)):
-                bnds.append([[zb[1], zb[0]], [zb[3], zb[2]]])
-
-        # Seed
-        sg = st.session_state.get("seed_gdf")
-        if sg is not None and not sg.empty:
-            sb = sg.total_bounds
-            if sb is not None and len(sb) == 4 and not any(pd.isna(sb)):
-                bnds.append([[sb[1], sb[0]], [sb[3], sb[2]]])
-
-        # Fert
+        for key in ["zones_gdf","seed_gdf"]:
+            g = st.session_state.get(key)
+            if g is not None and not g.empty:
+                tb = g.total_bounds
+                if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                    bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
         for _k, fg in st.session_state.get("fert_gdfs", {}).items():
             if fg is not None and not fg.empty:
-                fb = fg.total_bounds
-                if fb is not None and len(fb) == 4 and not any(pd.isna(fb)):
-                    bnds.append([[fb[1], fb[0]], [fb[3], fb[2]]])
-
-        # Yield
+                tb = fg.total_bounds
+                if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                    bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
         ydf = st.session_state.get("yield_df")
         if ydf is not None and not ydf.empty and {"Latitude","Longitude"}.issubset(ydf.columns):
-            if ydf[["Latitude","Longitude"]].notnull().all().all():
-                bnds.append([[ydf["Latitude"].min(), ydf["Longitude"].min()],
-                             [ydf["Latitude"].max(), ydf["Longitude"].max()]])
-
+            bnds.append([[ydf["Latitude"].min(), ydf["Longitude"].min()],
+                         [ydf["Latitude"].max(), ydf["Longitude"].max()]])
         if bnds:
             south = min(b[0][0] for b in bnds)
             west  = min(b[0][1] for b in bnds)
@@ -894,48 +746,145 @@ def compute_bounds_for_heatmaps():
             return south, west, north, east
     except Exception:
         pass
+    return 25.0, -125.0, 49.0, -66.0  # fallback
 
-    # Absolute fallback: continental US box
-    return 25.0, -125.0, 49.0, -66.0
-
-
-def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
-    """Safe raster overlay with robust guards."""
+def safe_fit_bounds(m, bounds):
     try:
         south, west, north, east = bounds
+        m.fit_bounds([[south, west],[north, east]])
+    except Exception:
+        pass
 
+
+# =========================================================
+# 7B. PRESCRIPTION OVERLAYS
+# =========================================================
+def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
+    try:
+        stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0,101,10)]
+        gradient_css = ", ".join(stops)
+        legend_html = f"""
+        <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
+                    display:flex; flex-direction:column;
+                    font-family:sans-serif; font-size:12px; color:white;
+                    background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;">
+          <div style="font-weight:600; margin-bottom:2px;">{name}</div>
+          <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
+                      border-radius:2px; margin-bottom:2px;"></div>
+          <div style="display:flex; justify-content:space-between;">
+            <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+          </div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
+    except Exception:
+        pass
+
+def add_prescription_overlay(gdf, name, cmap):
+    if gdf is None or gdf.empty: return
+    try:
+        product_col, rate_col = None, None
+        for c in gdf.columns:
+            cl = c.lower()
+            if product_col is None and "product" in cl: product_col = c
+            if rate_col is None and ("tgt" in cl or "rate" in cl): rate_col = c
+
+        gdf = gdf.copy()
+        gdf["RateType"] = detect_rate_type(gdf)
+
+        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna() if rate_col else []
+        vmin, vmax = (float(vals.min()), float(vals.max())) if len(vals) else (0.0, 1.0)
+
+        def style_fn(feat):
+            val = feat["properties"].get(rate_col) if rate_col else None
+            if val is None or pd.isna(val):
+                return {"color":"black","weight":0.5,"fillColor":"#808080","fillOpacity":0.55}
+            try:
+                norm = (float(val)-vmin)/(vmax-vmin) if vmax>vmin else 0.5
+                norm = max(0.0,min(1.0,norm))
+                fill = mpl_colors.rgb2hex(cmap(norm)[:3])
+                return {"color":"black","weight":0.5,"fillColor":fill,"fillOpacity":0.55}
+            except Exception:
+                return {"color":"black","weight":0.5,"fillColor":"#808080","fillOpacity":0.55}
+
+        fields, aliases = [], []
+        if product_col: fields.append(product_col); aliases.append("Product")
+        if rate_col: fields.append(rate_col); aliases.append("Target Rate")
+        fields.append("RateType"); aliases.append("Type")
+
+        folium.GeoJson(
+            gdf,
+            name=name,
+            style_function=style_fn,
+            tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+        ).add_to(m)
+
+        add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
+        st.session_state["legend_offset"] += 80
+    except Exception as e:
+        st.warning(f"⚠️ Skipping prescription overlay {name}: {e}")
+
+
+# =========================================================
+# 7C. YIELD + PROFIT HEATMAPS (Crash-Proof)
+# =========================================================
+from scipy.interpolate import griddata
+
+def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
+    """
+    Add a rasterized heatmap overlay to folium map.
+    Will skip gracefully if data is invalid.
+    """
+    try:
+        if df is None or df.empty:
+            return None, None
+
+        # --- Clean bounds ---
+        try:
+            south, west, north, east = bounds
+        except Exception:
+            return None, None
+
+        # --- Clean values ---
         vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
-        mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
+        if vals.empty: return None, None
+
+        mask = (
+            df[["Latitude", "Longitude"]]
+            .applymap(np.isfinite)
+            .all(axis=1)
+        ) & vals.notna()
         if mask.sum() < 3:
             return None, None
 
-        pts_lon = df.loc[mask, "Longitude"].values
-        pts_lat = df.loc[mask, "Latitude"].values
-        vals_ok = vals.loc[mask].values
+        # --- Extract points ---
+        pts_lon = df.loc[mask, "Longitude"].astype(float).values
+        pts_lat = df.loc[mask, "Latitude"].astype(float).values
+        vals_ok = vals.loc[mask].astype(float).values
 
+        # --- Interpolation grid ---
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        grid_lin, grid_nn, grid = None, None, None
         try:
             grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
             grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
             grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
         except Exception:
-            grid = None
+            return None, None
 
         if grid is None or np.all(np.isnan(grid)):
             return None, None
 
-        # robust bounds
+        # --- Value scaling ---
         vmin = float(np.nanpercentile(vals_ok, 5)) if len(vals_ok) > 0 else 0.0
         vmax = float(np.nanpercentile(vals_ok, 95)) if len(vals_ok) > 0 else 1.0
         if vmin == vmax: vmax = vmin + 1.0
 
         rgba = cmap((grid - vmin) / (vmax - vmin))
-        rgba = np.flipud(rgba)
+        rgba = np.flipud(rgba)       # align north-up
         rgba = (rgba * 255).astype(np.uint8)
 
         folium.raster_layers.ImageOverlay(
@@ -949,70 +898,95 @@ def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
 
         return vmin, vmax
     except Exception as e:
-        st.warning(f"⚠️ Skipping overlay {name}: {e}")
+        st.warning(f"⚠️ Skipping heatmap {name}: {e}")
         return None, None
 
 
-# --- MAIN EXECUTION ---
+# --- MAIN EXECUTION FOR HEATMAPS ---
 bounds = compute_bounds_for_heatmaps()
 
-# Prepare dataframe or fallback
+# Build dataframe safely
 df = None
-if st.session_state.get("yield_df") is not None and not st.session_state["yield_df"].empty:
-    df = st.session_state["yield_df"].copy()
+yield_df = st.session_state.get("yield_df")
+if yield_df is not None and not yield_df.empty and "Yield" in yield_df.columns:
+    if {"Latitude", "Longitude"}.issubset(yield_df.columns):
+        df = yield_df.copy()
 
-if df is None or df.empty or "Yield" not in df.columns or not {"Latitude","Longitude"}.issubset(df.columns):
+# Fallback if no yield data
+if df is None or df.empty:
     lat_center = (bounds[0] + bounds[2]) / 2.0
     lon_center = (bounds[1] + bounds[3]) / 2.0
     target_yield = st.number_input("Set Target Yield (bu/ac)", min_value=0.0, value=200.0, step=1.0)
-
     df = pd.DataFrame({
         "Yield": [target_yield],
         "Latitude": [lat_center],
         "Longitude": [lon_center],
     })
 
-# Profit calcs (safe float conversion)
-df["Revenue_per_acre"] = df["Yield"].astype(float) * float(sell_price or 0)
-fert_var = float(st.session_state["fert_products"]["CostPerAcre"].sum()) if not st.session_state["fert_products"].empty else 0.0
-seed_var = float(st.session_state["seed_products"]["CostPerAcre"].sum()) if not st.session_state["seed_products"].empty else 0.0
-df["NetProfit_per_acre_variable"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fert_var + seed_var)
+# --- Profit calculations ---
+try:
+    df["Revenue_per_acre"] = df["Yield"].astype(float) * float(sell_price or 0)
 
-fixed_costs = 0.0
-if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
-    try:
-        fx = st.session_state["fixed_products"].copy()
-        fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0) * (r.get("CostPerUnit",0) or 0), axis=1)
-        fixed_costs = float(fx["$/ac"].sum())
-    except Exception:
-        fixed_costs = 0.0
-df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fixed_costs)
+    fert_var = float(st.session_state["fert_products"]["CostPerAcre"].sum()) \
+               if not st.session_state["fert_products"].empty else 0.0
+    seed_var = float(st.session_state["seed_products"]["CostPerAcre"].sum()) \
+               if not st.session_state["seed_products"].empty else 0.0
 
-# --- Add overlays (with stacked legends) ---
+    df["NetProfit_per_acre_variable"] = (
+        df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fert_var + seed_var)
+    )
+
+    fixed_costs = 0.0
+    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
+        try:
+            fx = st.session_state["fixed_products"].copy()
+            fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0) * (r.get("CostPerUnit",0) or 0), axis=1)
+            fixed_costs = float(fx["$/ac"].sum())
+        except Exception:
+            fixed_costs = 0.0
+
+    df["NetProfit_per_acre_fixed"] = (
+        df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fixed_costs)
+    )
+except Exception:
+    st.warning("⚠️ Could not compute profit metrics, using defaults.")
+    df["Revenue_per_acre"] = 0.0
+    df["NetProfit_per_acre_variable"] = 0.0
+    df["NetProfit_per_acre_fixed"] = 0.0
+
+
+# --- Overlays with legends ---
+st.session_state["legend_offset"] = 90
+
 y_min, y_max = add_heatmap_overlay(df, df["Yield"].values, "Yield (bu/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
-if y_min is not None: 
-    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
+if y_min is not None:
+    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
 
 v_min, v_max = add_heatmap_overlay(df, df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=True, bounds=bounds)
-if v_min is not None: 
-    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
+if v_min is not None:
+    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
 
 f_min, f_max = add_heatmap_overlay(df, df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
-if f_min is not None: 
-    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
+if f_min is not None:
+    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
 
-
-# -------------------------------
-# 7D. Layer Control
-# -------------------------------
-folium.LayerControl(collapsed=False, position="topright").add_to(m)
+# =========================================================
+# 7D. LAYER CONTROL
+# =========================================================
+try:
+    folium.LayerControl(collapsed=False, position="topright").add_to(m)
+except Exception:
+    pass
 
 
 # =========================================================
 # 8. DISPLAY MAP
 # =========================================================
+safe_fit_bounds(m, compute_bounds_for_heatmaps())
 st_folium(m, use_container_width=True, height=600)
-
 
 # =========================================================
 # 9. PROFIT SUMMARY
