@@ -209,25 +209,63 @@ if zone_file is not None:
         st.error(f"❌ Error processing zone map: {e}")
 
 # =========================================================
-# 2. YIELD MAP UPLOAD  (multi-file + crash-proof)
+# 2–3. FILE UPLOADS (Compact 4-square Layout, Crash-Proof)
 # =========================================================
-st.header("Yield Map Upload")
+st.header("Upload Maps")
 
-yield_files = st.file_uploader(
-    "Upload Yield Map(s)",
-    type=["csv", "geojson", "json", "zip"],
-    key="yield",
-    accept_multiple_files=True
-)
-st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
-    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
-)
+# ---- First row: Zone + Yield ----
+col1, col2 = st.columns(2)
 
-# --- Initialize persistent list in session state ---
+with col1:
+    st.subheader("Zone Map Upload")
+    zone_file = st.file_uploader(
+        "Upload Zone Map",
+        type=["geojson", "json", "zip"],
+        key="zone",
+        accept_multiple_files=False
+    )
+    st.caption("Formats: GeoJSON, JSON, or zipped Shapefile (.shp+.shx+.dbf+.prj)")
+
+with col2:
+    st.subheader("Yield Map Upload")
+    yield_files = st.file_uploader(
+        "Upload Yield Map(s)",
+        type=["csv", "geojson", "json", "zip"],
+        key="yield",
+        accept_multiple_files=True
+    )
+    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
+# ---- Second row: Fert + Seed ----
+col3, col4 = st.columns(2)
+
+with col3:
+    st.subheader("Fertilizer Prescription Upload")
+    fert_files = st.file_uploader(
+        "Upload Fertilizer Map(s)",
+        type=["csv", "geojson", "json", "zip"],
+        key="fert",
+        accept_multiple_files=True
+    )
+    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
+with col4:
+    st.subheader("Seed Prescription Upload")
+    seed_files = st.file_uploader(
+        "Upload Seed Map(s)",
+        type=["csv", "geojson", "json", "zip"],
+        key="seed",
+        accept_multiple_files=True
+    )
+    st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile")
+
+# =========================================================
+# YIELD FILE HANDLING
+# =========================================================
 st.session_state.setdefault("yield_files_list", [])
 
 if yield_files:
+    st.session_state["yield_files_list"].clear()  # reset fresh
     for yf in yield_files:
         try:
             df_temp = None
@@ -248,24 +286,19 @@ if yield_files:
 
                 # --- Intelligent yield column detection ---
                 yield_candidates = []
-
-                # Priority 1 – Dry yield (best accuracy)
                 for key in ["yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield"]:
                     if key in df_temp.columns:
                         yield_candidates.append(key)
-
-                # Priority 2 – Other yield-like columns
                 if not yield_candidates:
                     for key in ["yield", "yld_vol_wt", "yld_mass_wt", "wet_yield"]:
                         if key in df_temp.columns:
                             yield_candidates.append(key)
 
-                # Apply first match, else placeholder
                 if yield_candidates:
                     chosen = yield_candidates[0]
                     df_temp.rename(columns={chosen: "Yield"}, inplace=True)
                 else:
-                    df_temp["Yield"] = 0.0  # triggers manual Target Yield later
+                    df_temp["Yield"] = 0.0  # fallback → triggers manual Target Yield later
 
                 # record successful load
                 st.session_state["yield_files_list"].append(
@@ -287,47 +320,22 @@ if st.session_state["yield_files_list"]:
 else:
     st.caption("No yield files loaded yet.")
 
-# --- Keep backward compatibility for downstream sections ---
-st.session_state["yield_df"] = None  # ensures map won't error even if no yield selected
+# Keep downstream compatibility
+st.session_state["yield_df"] = None
 
 # =========================================================
-# 3. PRESCRIPTION MAP UPLOADS  (multi-file fert + multi-file seed, crash-proof)
+# PRESCRIPTION MAP HANDLING
 # =========================================================
-st.header("Prescription Map Uploads")
-
-# --- Uploaders ---
-fert_files = st.file_uploader(
-    "Upload Fertilizer Prescription Map(s)",
-    type=["csv", "geojson", "json", "zip"],
-    key="fert",
-    accept_multiple_files=True
-)
-seed_files = st.file_uploader(
-    "Upload Seed Prescription Map(s)",
-    type=["csv", "geojson", "json", "zip"],
-    key="seed",
-    accept_multiple_files=True
-)
-
-st.markdown(
-    "_Accepted formats: **CSV, GeoJSON, JSON, or a zipped Shapefile "
-    "(.zip containing .shp, .shx, .dbf, .prj)**. ⚠️ Uploading just a single .shp file will not work._"
-)
-
-# --- Reset stores fresh every run (prevents ghost files if user deletes one) ---
+# Reset stores fresh each run (prevents ghost files if deleted)
 st.session_state["fert_layers_store"] = {}
 st.session_state["seed_layers_store"] = {}
-       
 
-# =========================================================
-# HELPER: Process One Prescription File (existing logic kept)
-# =========================================================
 def process_prescription(file, prescrip_type="fertilizer"):
     """Process fertilizer/seed prescription maps safely (CSV or polygons)."""
     if file is None:
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-    # --- Handle vector files (shapefile/geojson/json/zip) ---
+    # --- Vector files ---
     if file.name.lower().endswith((".geojson",".json",".zip",".shp")):
         gdf = load_vector_file(file)
         if gdf is None or gdf.empty:
@@ -335,21 +343,17 @@ def process_prescription(file, prescrip_type="fertilizer"):
             return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
         gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
-
-        # Ensure CRS WGS84
         try:
             gdf = gdf.to_crs(epsg=4326)
         except Exception:
             if gdf.crs is None:
                 gdf.set_crs(epsg=4326, inplace=True)
 
-        # Add centroids for later (map bounds + tooltips)
         gdf["Longitude"] = gdf.geometry.representative_point().x
         gdf["Latitude"]  = gdf.geometry.representative_point().y
-
         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
     else:
-        # --- CSV handling ---
+        # --- CSV files ---
         df = pd.read_csv(file)
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
@@ -362,17 +366,20 @@ def process_prescription(file, prescrip_type="fertilizer"):
         else:
             df["product"] = prescrip_type.capitalize()
 
-    # --- Ensure acres column exists ---
+    # --- Ensure acres column ---
     if "acres" not in df.columns:
         df["acres"] = 0.0
 
-    # --- Manual override (per-upload acres) ---
+   # --- Override acres input (collapsed under expander) ---
+with st.expander(f"⚙️ Options for {prescrip_type.capitalize()} Map: {file.name}", expanded=False):
     avg_acres_override = st.number_input(
-        f"Override Acres Per Polygon for {prescrip_type.capitalize()} Map ({file.name})",
-        min_value=0.0, value=0.0, step=0.1, key=f"{prescrip_type}_{file.name}_override"
+        "Override Acres Per Polygon",
+        min_value=0.0, value=0.0, step=0.1,
+        key=f"{prescrip_type}_{file.name}_override"
     )
     if avg_acres_override > 0:
         df["acres"] = avg_acres_override
+
 
     # --- Calculate costs ---
     if "costtotal" not in df.columns:
@@ -383,7 +390,7 @@ def process_prescription(file, prescrip_type="fertilizer"):
         else:
             df["costtotal"] = 0
 
-    # --- Aggregate ---
+    # --- Aggregate by product ---
     if not df.empty:
         grouped = df.groupby("product", as_index=False).agg(
             Acres=("acres","sum"),
@@ -396,49 +403,6 @@ def process_prescription(file, prescrip_type="fertilizer"):
 
     return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
 
-# =========================================================
-# PROCESS ALL UPLOADED FILES  (multi-file support)
-# =========================================================
-
-st.session_state.setdefault("fert_products", pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]))
-st.session_state.setdefault("seed_products", pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]))
-
-# --- Fertilizer files ---
-if fert_files:
-    for f in fert_files:
-        try:
-            grouped = process_prescription(f, "fertilizer")
-            if not grouped.empty:
-                layer_key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
-                st.session_state["fert_layers_store"][layer_key] = grouped
-                st.success(f"✅ Fertilizer file loaded: {f.name}")
-        except Exception as e:
-            st.warning(f"⚠️ Skipped fertilizer file {f.name}: {e}")
-
-# --- Seed files ---
-if seed_files:
-    for f in seed_files:
-        try:
-            grouped = process_prescription(f, "seed")
-            if not grouped.empty:
-                layer_key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
-                st.session_state["seed_layers_store"][layer_key] = grouped
-                st.success(f"✅ Seed file loaded: {f.name}")
-        except Exception as e:
-            st.warning(f"⚠️ Skipped seed file {f.name}: {e}")
-
-# =========================================================
-# FEEDBACK LISTS (summary of all uploads)
-# =========================================================
-if st.session_state["fert_layers_store"]:
-    st.info("### Loaded Fertilizer Maps")
-    for k in st.session_state["fert_layers_store"].keys():
-        st.markdown(f"- {k}")
-
-if st.session_state["seed_layers_store"]:
-    st.info("### Loaded Seed Maps")
-    for k in st.session_state["seed_layers_store"].keys():
-        st.markdown(f"- {k}")
 
 
 # =========================================================
