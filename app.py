@@ -716,6 +716,7 @@ def detect_rate_type(gdf):
         return "Fixed Rate"
     return "Variable Rate"
 
+
 def add_polygon_overlay(gdf, name, line_color="black", fill_color="#ff0000", fill_opacity=0.06):
     """Draw transparent polygons with tooltip showing product + tgt_rate + fixed/variable."""
     if gdf is None or gdf.empty:
@@ -753,6 +754,87 @@ def add_polygon_overlay(gdf, name, line_color="black", fill_color="#ff0000", fil
         },
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
     ).add_to(m)
+
+
+def add_fert_overlay(gdf, layer_name):
+    """Choropleth-style overlay for fertilizer prescriptions, colored by target rate."""
+    if gdf is None or gdf.empty:
+        return
+
+    # detect rate + product columns
+    rate_col = None
+    product_col = None
+    for c in gdf.columns:
+        if rate_col is None and ("tgt" in c.lower() or "rate" in c.lower()):
+            rate_col = c
+        if product_col is None and "product" in c.lower():
+            product_col = c
+
+    if rate_col is None:
+        # fallback to generic polygon overlay
+        add_polygon_overlay(gdf, layer_name, line_color="black", fill_color="#FFD700", fill_opacity=0.06)
+        return
+
+    # compute legend range
+    vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
+    if vals.empty:
+        add_polygon_overlay(gdf, layer_name, line_color="black", fill_color="#FFD700", fill_opacity=0.06)
+        return
+
+    vmin, vmax = float(vals.min()), float(vals.max())
+    if vmin == vmax:
+        vmax = vmin + 1.0
+
+    # pick colormap
+    cmap = plt.cm.get_cmap("YlOrBr")
+
+    def style_function(feat):
+        val = feat["properties"].get(rate_col)
+        try:
+            val = float(val)
+            color = cmap((val - vmin) / (vmax - vmin))
+            color_hex = matplotlib.colors.rgb2hex(color)
+        except Exception:
+            color_hex = "#FFD700"
+        return {
+            "color": "black",
+            "weight": 0.5,
+            "fillColor": color_hex,
+            "fillOpacity": 0.6,
+        }
+
+    fields = []
+    aliases = []
+    if product_col:
+        fields.append(product_col); aliases.append("Product")
+    fields.append(rate_col); aliases.append("Target Rate")
+    fields.append("RateType"); aliases.append("Type")
+
+    gdf["RateType"] = detect_rate_type(gdf)
+
+    folium.GeoJson(
+        gdf,
+        name=layer_name,
+        style_function=style_function,
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+    ).add_to(m)
+
+    # add legend for this fert layer
+    stops = [f"{matplotlib.colors.rgb2hex(cmap(i/100.0))} {i}%" for i in range(0,101,20)]
+    gradient_css = ", ".join(stops)
+    legend_html = f"""
+    <div style="position:absolute; bottom:10px; left:10px; z-index:9999;
+                font-family:sans-serif; font-size:12px; color:white;
+                background-color: rgba(0,0,0,0.5);
+                padding:6px 10px; border-radius:6px;">
+      <div style="font-weight:600; margin-bottom:2px;">{layer_name} (Target Rate)</div>
+      <div style="height:12px; background:linear-gradient(90deg, {gradient_css}); border-radius:2px;"></div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+      </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
 
 # Collect bounds
 bounds_list = []
@@ -796,19 +878,25 @@ if bounds_list:
     m.fit_bounds([[south, west], [north, east]])
 else:
     south, west, north, east = 25, -125, 49, -66  # fallback US view
-
-
 # -------------------------------
 # 7B. Draw Prescription Overlays
 # -------------------------------
 
+# --- Seed RX (zones-like shading in blue) ---
 if seed_gdf is not None and not seed_gdf.empty:
-    add_polygon_overlay(seed_gdf, name="Seed RX", line_color="black", fill_color="#1E90FF", fill_opacity=0.06)
+    add_polygon_overlay(
+        seed_gdf,
+        name="Seed RX",
+        line_color="black",
+        fill_color="#1E90FF",
+        fill_opacity=0.06
+    )
 
+# --- Fert RX (choropleth-style overlays, multiple allowed) ---
+fert_layers = st.session_state.get("fert_gdfs", {})
 for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
-        add_polygon_overlay(fgdf, name=f"Fertilizer RX: {k}", line_color="black", fill_color="#FFD700", fill_opacity=0.06)
-
+        add_fert_overlay(fgdf, layer_name=f"Fertilizer RX: {k}")
 
 # -------------------------------
 # 7C. Yield / Profit Heatmaps
