@@ -873,21 +873,28 @@ def add_prescription_overlay(gdf, name, cmap, show_default=False):
     else:
         vmin, vmax = 0.0, 1.0
 
-    # --- style function ---
+       # --- style function ---
     def style_function(feat):
-        val = None
-        if rate_col and "properties" in feat and rate_col in feat["properties"]:
-            try:
-                val = float(feat["properties"][rate_col])
-            except Exception:
-                val = None
+        try:
+            val = None
+            if rate_col and "properties" in feat and rate_col in feat["properties"]:
+                val_raw = feat["properties"][rate_col]
+                if val_raw is not None:
+                    val = float(val_raw)
+        except Exception:
+            val = None
 
         if val is None or pd.isna(val):
-            fill = "#808080"  # gray if missing
+            fill = "#808080"  # gray fallback
         else:
             norm_val = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-            norm_val = max(0.0, min(1.0, norm_val))  # clamp between 0–1
-            fill = matplotlib.colors.rgb2hex(cmap(norm_val)[:3])
+            norm_val = max(0.0, min(1.0, norm_val))  # clamp
+            try:
+                rgb = cmap(norm_val)
+                fill = matplotlib.colors.rgb2hex(rgb[:3])  # safe conversion
+            except Exception:
+                fill = "#808080"
+
         return {
             "color": "black",
             "weight": 0.5,
