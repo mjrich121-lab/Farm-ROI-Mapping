@@ -757,72 +757,112 @@ def safe_fit_bounds(m, bounds):
 
 
 # =========================================================
-# 7B. PRESCRIPTION OVERLAYS
+# 7B. PRESCRIPTION OVERLAYS (Seed + Fert) with Gradient Legends
 # =========================================================
+from matplotlib import colors as mpl_colors
+
 def add_gradient_legend(name, vmin, vmax, cmap, offset_px):
-    try:
-        stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0,101,10)]
-        gradient_css = ", ".join(stops)
-        legend_html = f"""
-        <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
-                    display:flex; flex-direction:column;
-                    font-family:sans-serif; font-size:12px; color:white;
-                    background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;">
-          <div style="font-weight:600; margin-bottom:2px;">{name}</div>
-          <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
-                      border-radius:2px; margin-bottom:2px;"></div>
-          <div style="display:flex; justify-content:space-between;">
-            <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
-          </div>
-        </div>
-        """
-        m.get_root().html.add_child(folium.Element(legend_html))
-    except Exception:
-        pass
+    """Stacked gradient legend (top-left)."""
+    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
+    legend_html = f"""
+    <div style="position:absolute; top:{offset_px}px; left:10px; z-index:9999;
+                font-family:sans-serif; font-size:12px; color:white;
+                background-color: rgba(0,0,0,0.6); padding:6px 10px; border-radius:5px;">
+      <div style="font-weight:600; margin-bottom:2px;">{name}</div>
+      <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
+                  border-radius:2px; margin-bottom:2px;"></div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+      </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+
+def detect_rate_type(gdf):
+    """Return 'Fixed Rate' if all rate values equal, else 'Variable Rate'."""
+    rate_col = None
+    for c in gdf.columns:
+        cl = c.lower()
+        if "tgt" in cl or "rate" in cl:
+            rate_col = c
+            break
+    if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
+        return "Fixed Rate"
+    return "Variable Rate"
+
 
 def add_prescription_overlay(gdf, name, cmap):
-    if gdf is None or gdf.empty: return
-    try:
-        product_col, rate_col = None, None
-        for c in gdf.columns:
-            cl = c.lower()
-            if product_col is None and "product" in cl: product_col = c
-            if rate_col is None and ("tgt" in cl or "rate" in cl): rate_col = c
+    """Add Seed/Fert prescription polygons with gradient coloring + legend."""
+    if gdf is None or gdf.empty:
+        return
 
-        gdf = gdf.copy()
-        gdf["RateType"] = detect_rate_type(gdf)
+    gdf = gdf.copy()
 
-        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna() if rate_col else []
-        vmin, vmax = (float(vals.min()), float(vals.max())) if len(vals) else (0.0, 1.0)
+    # Detect columns
+    product_col, rate_col = None, None
+    for c in gdf.columns:
+        cl = c.lower()
+        if product_col is None and "product" in cl:
+            product_col = c
+        if rate_col is None and ("tgt" in cl or "rate" in cl):
+            rate_col = c
 
-        def style_fn(feat):
-            val = feat["properties"].get(rate_col) if rate_col else None
-            if val is None or pd.isna(val):
-                return {"color":"black","weight":0.5,"fillColor":"#808080","fillOpacity":0.55}
+    # Assign rate type
+    gdf["RateType"] = detect_rate_type(gdf)
+
+    # Legend range
+    if rate_col and pd.to_numeric(gdf[rate_col], errors="coerce").notna().any():
+        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
+        vmin, vmax = float(vals.min()), float(vals.max())
+        if vmin == vmax: vmax = vmin + 1.0
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    # Style polygons
+    def style_fn(feat):
+        val = feat["properties"].get(rate_col) if rate_col else None
+        if val is None or pd.isna(val):
+            fill = "#808080"
+        else:
             try:
-                norm = (float(val)-vmin)/(vmax-vmin) if vmax>vmin else 0.5
-                norm = max(0.0,min(1.0,norm))
+                norm = (float(val) - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+                norm = max(0.0, min(1.0, norm))
                 fill = mpl_colors.rgb2hex(cmap(norm)[:3])
-                return {"color":"black","weight":0.5,"fillColor":fill,"fillOpacity":0.55}
             except Exception:
-                return {"color":"black","weight":0.5,"fillColor":"#808080","fillOpacity":0.55}
+                fill = "#808080"
+        return {"color": "black", "weight": 0.5, "fillColor": fill, "fillOpacity": 0.55}
 
-        fields, aliases = [], []
-        if product_col: fields.append(product_col); aliases.append("Product")
-        if rate_col: fields.append(rate_col); aliases.append("Target Rate")
-        fields.append("RateType"); aliases.append("Type")
+    fields, aliases = [], []
+    if product_col: fields.append(product_col); aliases.append("Product")
+    if rate_col:    fields.append(rate_col);    aliases.append("Target Rate")
+    fields.append("RateType"); aliases.append("Type")
 
-        folium.GeoJson(
-            gdf,
-            name=name,
-            style_function=style_fn,
-            tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
-        ).add_to(m)
+    folium.GeoJson(
+        gdf,
+        name=name,
+        style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+    ).add_to(m)
 
-        add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
-        st.session_state["legend_offset"] += 80
-    except Exception as e:
-        st.warning(f"⚠️ Skipping prescription overlay {name}: {e}")
+    # Add legend stacked top-left
+    add_gradient_legend(name, vmin, vmax, cmap, st.session_state["legend_offset"])
+    st.session_state["legend_offset"] += 80
+
+
+# --- Draw Prescription Layers ---
+st.session_state["legend_offset"] = 90
+
+seed_gdf = st.session_state.get("seed_gdf")
+fert_layers = st.session_state.get("fert_gdfs", {})
+
+if seed_gdf is not None and not seed_gdf.empty:
+    add_prescription_overlay(seed_gdf, "Seed RX", plt.cm.Greens)
+
+for k, fgdf in fert_layers.items():
+    if fgdf is not None and not fgdf.empty:
+        add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues)
 
 
 # =========================================================
