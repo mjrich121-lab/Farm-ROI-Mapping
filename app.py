@@ -290,7 +290,7 @@ with col1:
         st.caption("No zone file uploaded yet.")
 
 # =========================================================
-# YIELD UPLOAD
+# YIELD UPLOAD (multi-file, crash-proof, clean indent)
 # =========================================================
 with col2:
     st.subheader("Yield Map Upload")
@@ -302,48 +302,81 @@ with col2:
     )
     st.caption("Formats: CSV, GeoJSON, JSON, or zipped Shapefile (.zip).")
 
+    # --- Initialize store ---
     st.session_state.setdefault("yield_files_list", [])
 
     if yield_files:
         st.session_state["yield_files_list"].clear()
+
         for yf in yield_files:
             try:
+                df_temp = None
+
+                # --- CSV case ---
                 if yf.name.lower().endswith(".csv"):
                     df_temp = pd.read_csv(yf)
+
+                # --- Vector file case ---
                 else:
                     gdf_temp = load_vector_file(yf)
-                    df_temp = pd.DataFrame(gdf_temp.drop(columns="geometry", errors="ignore")) if gdf_temp is not None else None
+                    if gdf_temp is not None and not gdf_temp.empty:
+                        df_temp = pd.DataFrame(
+                            gdf_temp.drop(columns="geometry", errors="ignore")
+                        )
 
+                # --- Validate dataframe ---
                 if df_temp is not None and not df_temp.empty:
-                    df_temp.columns = [c.strip().lower().replace(" ", "_") for c in df_temp.columns]
+                    # normalize column names
+                    df_temp.columns = [
+                        c.strip().lower().replace(" ", "_") for c in df_temp.columns
+                    ]
 
-                    # detect dry yield first
-                    yield_cols = [c for c in df_temp.columns if any(k in c for k in ["yld_vol_dr","yld_mass_dr","yield_dry","dry_yield"])]
-                    if not yield_cols:
-                        yield_cols = [c for c in df_temp.columns if any(k in c for k in ["yield","yld_vol_wt","yld_mass_wt","wet_yield"])]
+                    # --- Detect dry yield (highest priority) ---
+                    dry_candidates = [
+                        c
+                        for c in df_temp.columns
+                        if any(k in c for k in ["yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield"])
+                    ]
 
-                    if yield_cols:
-                        df_temp.rename(columns={yield_cols[0]: "Yield"}, inplace=True)
+                    # --- Fallback to general yield ---
+                    if not dry_candidates:
+                        dry_candidates = [
+                            c
+                            for c in df_temp.columns
+                            if any(k in c for k in ["yield", "yld_vol_wt", "yld_mass_wt", "wet_yield"])
+                        ]
+
+                    # --- Apply best available yield column ---
+                    if dry_candidates:
+                        chosen = dry_candidates[0]
+                        df_temp.rename(columns={chosen: "Yield"}, inplace=True)
                     else:
-                        df_temp["Yield"] = 0.0  # fallback → manual target yield later
+                        df_temp["Yield"] = 0.0  # fallback → triggers manual Target Yield later
 
-                    st.session_state["yield_files_list"].append({"name": yf.name, "rows": len(df_temp)})
-                    st.success(f"✅ {yf.name} ({len(df_temp)} rows)")
+                    # --- Save metadata for display ---
+                    st.session_state["yield_files_list"].append(
+                        {"name": yf.name, "rows": len(df_temp)}
+                    )
+                    st.success(f"✅ Loaded {yf.name} ({len(df_temp)} rows)")
+
                 else:
-                    st.warning(f"⚠️ {yf.name} contained no usable data.")
+                    st.warning(f"⚠️ {yf.name} contained no usable data or geometry.")
+
             except Exception as e:
                 st.warning(f"⚠️ Skipped {yf.name}: {e}")
 
-        # list files right below uploader
+        # --- Display file list below uploader ---
         if st.session_state["yield_files_list"]:
             st.info("**Loaded Yield Files:**")
             for f in st.session_state["yield_files_list"]:
                 st.markdown(f"- {f['name']} ({f['rows']} rows)")
+        else:
+            st.caption("No valid yield data found.")
     else:
         st.caption("No yield files uploaded yet.")
 
-st.session_state["yield_df"] = None  # downstream safety
-
+# --- Downstream safety placeholder ---
+st.session_state["yield_df"] = None
 
 # =========================================================
 # HELPER: Process Prescription File
