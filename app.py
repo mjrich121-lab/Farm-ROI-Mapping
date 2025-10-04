@@ -846,117 +846,122 @@ for k, fgdf in fert_layers.items():
     if fgdf is not None and not fgdf.empty:
         add_prescription_overlay(fgdf, f"Fertilizer RX: {k}", plt.cm.Blues)
 
-
 # -------------------------------
-# 7C. Yield / Profit Heatmaps
+# 7C. Yield / Profit Heatmaps (Crash-Proof)
 # -------------------------------
 
 def compute_bounds_for_heatmaps():
     """
-    Safely return (south, west, north, east) for heatmaps.
-    Prefer combined bounds from zones/seed/fert/yield when available; else fallback.
+    Safely return (south, west, north, east).
+    Tries zones, seed, fert, yield; else defaults to US extent.
     """
-    bnds = []
+    try:
+        bnds = []
 
-    # Zones
-    z = st.session_state.get("zones_gdf")
-    if z is not None and not z.empty:
-        zb = z.total_bounds
-        if not any(pd.isna(zb)): bnds.append([[zb[1], zb[0]], [zb[3], zb[2]]])
+        # Zones
+        z = st.session_state.get("zones_gdf")
+        if z is not None and not z.empty:
+            zb = z.total_bounds
+            if zb is not None and len(zb) == 4 and not any(pd.isna(zb)):
+                bnds.append([[zb[1], zb[0]], [zb[3], zb[2]]])
 
-    # Seed
-    if seed_gdf is not None and not seed_gdf.empty:
-        sb = seed_gdf.total_bounds
-        if not any(pd.isna(sb)): bnds.append([[sb[1], sb[0]], [sb[3], sb[2]]])
+        # Seed
+        sg = st.session_state.get("seed_gdf")
+        if sg is not None and not sg.empty:
+            sb = sg.total_bounds
+            if sb is not None and len(sb) == 4 and not any(pd.isna(sb)):
+                bnds.append([[sb[1], sb[0]], [sb[3], sb[2]]])
 
-    # Fert (all)
-    for _k, fg in fert_layers.items():
-        if fg is not None and not fg.empty:
-            fb = fg.total_bounds
-            if not any(pd.isna(fb)): bnds.append([[fb[1], fb[0]], [fb[3], fb[2]]])
+        # Fert
+        for _k, fg in st.session_state.get("fert_gdfs", {}).items():
+            if fg is not None and not fg.empty:
+                fb = fg.total_bounds
+                if fb is not None and len(fb) == 4 and not any(pd.isna(fb)):
+                    bnds.append([[fb[1], fb[0]], [fb[3], fb[2]]])
 
-    # Yield (points)
-    ydf = st.session_state.get("yield_df")
-    if ydf is not None and not ydf.empty and {"Latitude","Longitude"}.issubset(ydf.columns):
-        if ydf[["Latitude","Longitude"]].notnull().all().all():
-            bnds.append([[ydf["Latitude"].min(), ydf["Longitude"].min()],
-                         [ydf["Latitude"].max(), ydf["Longitude"].max()]])
+        # Yield
+        ydf = st.session_state.get("yield_df")
+        if ydf is not None and not ydf.empty and {"Latitude","Longitude"}.issubset(ydf.columns):
+            if ydf[["Latitude","Longitude"]].notnull().all().all():
+                bnds.append([[ydf["Latitude"].min(), ydf["Longitude"].min()],
+                             [ydf["Latitude"].max(), ydf["Longitude"].max()]])
 
-    if bnds:
-        south = min(b[0][0] for b in bnds); west  = min(b[0][1] for b in bnds)
-        north = max(b[1][0] for b in bnds); east  = max(b[1][1] for b in bnds)
-        return south, west, north, east
+        if bnds:
+            south = min(b[0][0] for b in bnds)
+            west  = min(b[0][1] for b in bnds)
+            north = max(b[1][0] for b in bnds)
+            east  = max(b[1][1] for b in bnds)
+            return south, west, north, east
+    except Exception:
+        pass
 
-    # Fallback = continental US window
+    # Absolute fallback: continental US box
     return 25.0, -125.0, 49.0, -66.0
 
+
 def add_heatmap_overlay(df, values, name, cmap, show_default, bounds):
-    south, west, north, east = bounds
-
-    vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
-    mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
-    if mask.sum() < 3:
-        return None, None
-
-    pts_lon = df.loc[mask, "Longitude"].values
-    pts_lat = df.loc[mask, "Latitude"].values
-    vals_ok = vals.loc[mask].values
-
-    n = 200
-    lon_lin = np.linspace(west, east, n)
-    lat_lin = np.linspace(south, north, n)
-    lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-
+    """Safe raster overlay with robust guards."""
     try:
-        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
-        grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+        south, west, north, east = bounds
+
+        vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+        mask = df[["Latitude","Longitude"]].applymap(np.isfinite).all(axis=1) & vals.notna()
+        if mask.sum() < 3:
+            return None, None
+
+        pts_lon = df.loc[mask, "Longitude"].values
+        pts_lat = df.loc[mask, "Latitude"].values
+        vals_ok = vals.loc[mask].values
+
+        n = 200
+        lon_lin = np.linspace(west, east, n)
+        lat_lin = np.linspace(south, north, n)
+        lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+
+        grid_lin, grid_nn, grid = None, None, None
+        try:
+            grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+            grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+            grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+        except Exception:
+            grid = None
+
+        if grid is None or np.all(np.isnan(grid)):
+            return None, None
+
+        # robust bounds
+        vmin = float(np.nanpercentile(vals_ok, 5)) if len(vals_ok) > 0 else 0.0
+        vmax = float(np.nanpercentile(vals_ok, 95)) if len(vals_ok) > 0 else 1.0
+        if vmin == vmax: vmax = vmin + 1.0
+
+        rgba = cmap((grid - vmin) / (vmax - vmin))
+        rgba = np.flipud(rgba)
+        rgba = (rgba * 255).astype(np.uint8)
+
+        folium.raster_layers.ImageOverlay(
+            image=rgba,
+            bounds=[[south, west],[north, east]],
+            opacity=0.5,
+            name=name,
+            overlay=True,
+            show=show_default
+        ).add_to(m)
+
+        return vmin, vmax
     except Exception as e:
-        st.warning(f"⚠️ Skipping {name} overlay (interpolation error: {e})")
+        st.warning(f"⚠️ Skipping overlay {name}: {e}")
         return None, None
 
-    # 5–95% robust legend bounds
-    vmin = float(np.nanpercentile(vals_ok, 5))
-    vmax = float(np.nanpercentile(vals_ok, 95))
-    if vmin == vmax:
-        vmax = vmin + 1.0
 
-    rgba = cmap((grid - vmin) / (vmax - vmin))
-    rgba = np.flipud(rgba)
-    rgba = (rgba * 255).astype(np.uint8)
-
-    folium.raster_layers.ImageOverlay(
-        image=rgba,
-        bounds=[[south, west], [north, east]],
-        opacity=0.5,
-        name=name,
-        overlay=True,
-        show=show_default
-    ).add_to(m)
-
-    return vmin, vmax
-
-# Prepare Yield/Profit dataframe (or Target Yield fallback)
-df = None
-if yield_df_present:
-    df = st.session_state["yield_df"].copy()
-    if "Yield" not in df.columns:
-        # Try to find a yield-like column
-        cand = None
-        for probe in ["Dry_Yield","DryYield","DryYld","Yld_Dry","YIELD","Yield","Yld","YLD","YLD_BuAc","USBU_AC","WET_YLD"]:
-            for col in df.columns:
-                if probe.lower() in col.lower():
-                    cand = col; break
-            if cand: break
-        if cand:
-            df.rename(columns={cand: "Yield"}, inplace=True)
-        else:
-            df = None  # force fallback
-
+# --- MAIN EXECUTION ---
 bounds = compute_bounds_for_heatmaps()
 
+# Prepare dataframe or fallback
+df = None
+if st.session_state.get("yield_df") is not None and not st.session_state["yield_df"].empty:
+    df = st.session_state["yield_df"].copy()
+
 if df is None or df.empty or "Yield" not in df.columns or not {"Latitude","Longitude"}.issubset(df.columns):
-    # Target Yield fallback (no need for south/north/east/west names here)
     lat_center = (bounds[0] + bounds[2]) / 2.0
     lon_center = (bounds[1] + bounds[3]) / 2.0
     target_yield = st.number_input("Set Target Yield (bu/ac)", min_value=0.0, value=200.0, step=1.0)
@@ -967,34 +972,34 @@ if df is None or df.empty or "Yield" not in df.columns or not {"Latitude","Longi
         "Longitude": [lon_center],
     })
 
-# Profit columns (variable + fixed)
-df["Revenue_per_acre"] = df["Yield"] * sell_price
-fert_var = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0.0
-seed_var = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0.0
-df["NetProfit_per_acre_variable"] = df["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
+# Profit calcs (safe float conversion)
+df["Revenue_per_acre"] = df["Yield"].astype(float) * float(sell_price or 0)
+fert_var = float(st.session_state["fert_products"]["CostPerAcre"].sum()) if not st.session_state["fert_products"].empty else 0.0
+seed_var = float(st.session_state["seed_products"]["CostPerAcre"].sum()) if not st.session_state["seed_products"].empty else 0.0
+df["NetProfit_per_acre_variable"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fert_var + seed_var)
 
 fixed_costs = 0.0
-if not st.session_state["fixed_products"].empty:
-    fx = st.session_state["fixed_products"].copy()
-    fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0) * (r.get("CostPerUnit",0) or 0), axis=1)
-    fixed_costs = float(fx["$/ac"].sum())
-df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
+if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
+    try:
+        fx = st.session_state["fixed_products"].copy()
+        fx["$/ac"] = fx.apply(lambda r: (r.get("Rate",0) or 0) * (r.get("CostPerUnit",0) or 0), axis=1)
+        fixed_costs = float(fx["$/ac"].sum())
+    except Exception:
+        fixed_costs = 0.0
+df["NetProfit_per_acre_fixed"] = df["Revenue_per_acre"] - (float(base_expenses_per_acre or 0) + fixed_costs)
 
-# Add heatmap overlays + legends (top-left, stacked)
+# --- Add overlays (with stacked legends) ---
 y_min, y_max = add_heatmap_overlay(df, df["Yield"].values, "Yield (bu/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
-if y_min is not None:
-    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+if y_min is not None: 
+    add_gradient_legend("Yield (bu/ac)", y_min, y_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
 
 v_min, v_max = add_heatmap_overlay(df, df["NetProfit_per_acre_variable"].values, "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=True, bounds=bounds)
-if v_min is not None:
-    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+if v_min is not None: 
+    add_gradient_legend("Variable Rate Profit ($/ac)", v_min, v_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
 
 f_min, f_max = add_heatmap_overlay(df, df["NetProfit_per_acre_fixed"].values, "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, show_default=False, bounds=bounds)
-if f_min is not None:
-    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"])
-    st.session_state["legend_offset"] += 80
+if f_min is not None: 
+    add_gradient_legend("Fixed Rate Profit ($/ac)", f_min, f_max, plt.cm.RdYlGn, st.session_state["legend_offset"]); st.session_state["legend_offset"] += 80
 
 
 # -------------------------------
