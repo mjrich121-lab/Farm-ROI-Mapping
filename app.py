@@ -1053,81 +1053,72 @@ st_folium(m, use_container_width=True, height=600)
 # =========================================================
 # 9. PROFIT SUMMARY — centered, 50% width, no internal scroll
 # =========================================================
-
-# --- Inject simple CSS wrapper ---
-st.markdown("""
-<style>
-#profit-summary {
-    max-width: 50%;
-    margin: 0 auto;
-    padding-top: 1rem;
-}
-.dataframe tbody tr td {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
 def render_profit_summary():
-    """Centered Profit Summary section under map (50% width, two columns)."""
-    st.markdown('<div id="profit-summary">', unsafe_allow_html=True)
-    st.header("Profit Summary")
-
-    # --- compute data ---
-    expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
-
-    corn_yield = float(st.session_state.get("corn_yield", 200))
-    corn_price = float(st.session_state.get("corn_price", 5))
-    bean_yield = float(st.session_state.get("bean_yield", 60))
-    bean_price = float(st.session_state.get("bean_price", 12))
-    target_yield = float(st.session_state.get("target_yield", 200))
-    sell_price  = float(st.session_state.get("sell_price", corn_price))
-
-    # helper: exact pixel height to avoid scrollbars
-    def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
-
-    # --- Breakeven + Profit tables ---
-    breakeven_df = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
-    })
-    breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
-    breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
-
-    revenue_overall  = target_yield * sell_price
-    expenses_overall = base_exp
-    profit_overall   = revenue_overall - expenses_overall
-
-    comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Breakeven Budget": [revenue_overall, expenses_overall, profit_overall],
-    })
-
-    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
-    if not fixed_df.empty:
-        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
-        fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
-
-    # --- Center layout: 1-2-1 columns for centering ---
-    left_pad, center, right_pad = st.columns([1, 2, 1])
+    # ---------- OUTER LAYOUT: force 50% width, centered (no CSS) ----------
+    pad_left, center, pad_right = st.columns([1, 2, 1])
     with center:
+        st.header("Profit Summary")
+
+        # --- compute data (safe defaults pulled from session) ---
+        expenses = st.session_state.get("expenses_dict", {})
+        base_exp = float(st.session_state.get(
+            "base_expenses_per_acre",
+            sum(expenses.values()) if expenses else 0.0
+        ))
+
+        corn_yield = float(st.session_state.get("corn_yield", 200))
+        corn_price = float(st.session_state.get("corn_price", 5))
+        bean_yield = float(st.session_state.get("bean_yield", 60))
+        bean_price = float(st.session_state.get("bean_price", 12))
+        target_yield = float(st.session_state.get("target_yield", 200))
+        sell_price  = float(st.session_state.get("sell_price", corn_price))
+
+        # helper: exact pixel height so tables never scroll internally
+        def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
+
+        # --- tables ---
+        breakeven_df = pd.DataFrame({
+            "Crop": ["Corn", "Soybeans"],
+            "Yield Goal (bu/ac)": [corn_yield, bean_yield],
+            "Sell Price ($/bu)":  [corn_price, bean_price],
+        })
+        breakeven_df["Revenue ($/ac)"] = [
+            corn_yield * corn_price,
+            bean_yield * bean_price
+        ]
+        breakeven_df["Fixed Inputs ($/ac)"] = base_exp
+        breakeven_df["Breakeven Budget ($/ac)"] = (
+            breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+        )
+
+        revenue_overall  = target_yield * sell_price
+        expenses_overall = base_exp
+        profit_overall   = revenue_overall - expenses_overall
+
+        comparison = pd.DataFrame({
+            "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+            "Breakeven Budget": [revenue_overall, expenses_overall, profit_overall],
+        })
+
+        fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+        if not fixed_df.empty:
+            total_row = pd.DataFrame([{
+                "Expense": "Total Fixed Costs",
+                "$/ac": fixed_df["$/ac"].sum()
+            }])
+            fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+
+        # ---------- INNER LAYOUT: two columns inside the 50% center ----------
         col_left, col_right = st.columns(2, gap="large")
 
-        # Left: Corn vs Bean breakeven & profit comparison
         with col_left:
             st.subheader("Breakeven Budget (Corn vs Beans)")
             st.dataframe(
                 breakeven_df.style.format({
-                    "Yield Goal (bu/ac)": "{:,.0f}",
-                    "Sell Price ($/bu)": "${:,.2f}",
-                    "Revenue ($/ac)": "${:,.0f}",
-                    "Fixed Inputs ($/ac)": "${:,.0f}",
+                    "Yield Goal (bu/ac)":      "{:,.0f}",
+                    "Sell Price ($/bu)":       "${:,.2f}",
+                    "Revenue ($/ac)":          "${:,.0f}",
+                    "Fixed Inputs ($/ac)":     "${:,.0f}",
                     "Breakeven Budget ($/ac)": "${:,.0f}",
                 }),
                 hide_index=True,
@@ -1141,7 +1132,6 @@ def render_profit_summary():
                 height=_h(len(comparison))
             )
 
-        # Right: Fixed Input Costs
         with col_right:
             st.subheader("Fixed Input Costs")
             if fixed_df.empty:
@@ -1155,9 +1145,6 @@ def render_profit_summary():
                     hide_index=True,
                     height=_h(len(fixed_df))
                 )
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
 
 # ---------- render summary (call once) ----------
 render_profit_summary()
