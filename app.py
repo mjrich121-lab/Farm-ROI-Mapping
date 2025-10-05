@@ -1103,7 +1103,7 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — Left / Right layout (compact, no-scroll, stable)
+# 9. PROFIT SUMMARY — Fully centered, no-scroll, stable layout
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
@@ -1181,8 +1181,19 @@ def render_profit_summary():
     expenses_overall = base_exp
     profit_overall = revenue_overall - expenses_overall
 
-    # ===== L / R columns =====
-    col_left, col_right = st.columns([3.5, 1.5])   # right column ~40% narrower
+    # ===== L / R columns (left = 40% narrower)
+    col_left, col_right = st.columns([1.5, 3.5])
+
+    # ---------- GLOBAL STYLE FIX: remove all scrollbars, center content ----------
+    st.markdown("""
+        <style>
+        .stDataFrame [data-testid="stVerticalBlock"] {align-items: center;}
+        .stDataFrame {overflow: visible !important;}
+        .stDataFrame table {margin-left:auto;margin-right:auto;}
+        div[data-testid="stHorizontalBlock"] > div:first-child {flex:1.5;}
+        div[data-testid="stHorizontalBlock"] > div:last-child {flex:3.5;}
+        </style>
+    """, unsafe_allow_html=True)
 
     # ---------------- LEFT ----------------
     with col_left:
@@ -1203,10 +1214,8 @@ def render_profit_summary():
                 "Fixed Inputs ($/ac)": "${:,.2f}",
                 "Breakeven Budget ($/ac)": "${:,.2f}",
             }),
-            use_container_width=True, hide_index=True,
-            height=_h(len(breakeven_df))
+            use_container_width=True, hide_index=True, height=_h(len(breakeven_df))
         )
-        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
         st.subheader("Profit Metrics Comparison")
         comparison = pd.DataFrame({
@@ -1227,10 +1236,8 @@ def render_profit_summary():
             comparison.style.applymap(_hl_profit, subset=["Breakeven Budget","Variable Rate","Fixed Rate"]).format({
                 "Breakeven Budget":"${:,.2f}", "Variable Rate":"${:,.2f}", "Fixed Rate":"${:,.2f}"
             }),
-            use_container_width=True, hide_index=True,
-            height=_h(len(comparison))
+            use_container_width=True, hide_index=True, height=_h(len(comparison))
         )
-        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
         with st.expander("Show Calculation Formulas", expanded=False):
             st.markdown("""
@@ -1251,7 +1258,6 @@ def render_profit_summary():
     # ---------------- RIGHT ----------------
     with col_right:
         st.subheader("Fixed Input Costs")
-        # build expenses dict if missing
         if not expenses:
             keys = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
             labels = ["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
@@ -1274,7 +1280,6 @@ def render_profit_summary():
             use_container_width=True, hide_index=True,
             height=_h(len(fixed_df))
         )
-        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
 # ---------- render summary ----------
 render_profit_summary()
