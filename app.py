@@ -1232,84 +1232,81 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — 50% WIDTH CENTERED, NO SCROLLBARS
+# 9. PROFIT SUMMARY — FORCE 50% WIDTH CENTERED, NO SCROLL
 # =========================================================
 def render_profit_summary():
-    st.markdown("## Profit Summary", anchor=False)
+    # inject section-specific CSS *after render* so it overrides the theme
+    st.markdown("""
+    <style>
+      /* target only this block's container dynamically */
+      div[data-testid="stVerticalBlock"] h2:contains('Profit Summary') {
+          text-align: center !important;
+      }
+      div[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')) {
+          max-width: 50vw !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          overflow: visible !important;
+      }
+      /* dataframes and expanders centered, no scroll */
+      .stDataFrame {overflow: visible !important;}
+      .stDataFrame table {margin-left:auto;margin-right:auto;}
+      div[data-testid="stExpander"]{max-width:50vw;margin-left:auto;margin-right:auto;}
+      iframe[title="st_folium"]{max-width:85vw;margin:0 auto;display:block;}
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Create a centered container that only uses 50% of viewport
-    left_spacer, mid, right_spacer = st.columns([1, 2, 1], vertical_alignment="top")
-    with mid:
-        # --- make sure scrollbars never appear ---
-        st.markdown("""
-            <style>
-            .stDataFrame {overflow:visible !important;}
-            .stDataFrame table {margin-left:auto;margin-right:auto;}
-            div[data-testid="stHorizontalBlock"]{justify-content:center !important;}
-            </style>
-        """, unsafe_allow_html=True)
+    # everything else stays identical
+    st.header("Profit Summary")
 
-        # ---- get data from session state ----
-        expenses = st.session_state.get("expenses_dict", {})
-        base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values())))
-        corn_yield = float(st.session_state.get("corn_yield", 200))
-        corn_price = float(st.session_state.get("corn_price", 5))
-        bean_yield = float(st.session_state.get("bean_yield", 60))
-        bean_price = float(st.session_state.get("bean_price", 12))
-        target_yield = float(st.session_state.get("target_yield", 200))
-        sell_price = float(st.session_state.get("sell_price", corn_price))
+    expenses = st.session_state.get("expenses_dict", {})
+    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values())))
+    corn_yield = float(st.session_state.get("corn_yield", 200))
+    corn_price = float(st.session_state.get("corn_price", 5))
+    bean_yield = float(st.session_state.get("bean_yield", 60))
+    bean_price = float(st.session_state.get("bean_price", 12))
+    target_yield = float(st.session_state.get("target_yield", 200))
+    sell_price = float(st.session_state.get("sell_price", corn_price))
 
-        # ---- build dataframes ----
-        breakeven_df = pd.DataFrame({
-            "Crop": ["Corn", "Soybeans"],
-            "Yield Goal (bu/ac)": [corn_yield, bean_yield],
-            "Sell Price ($/bu)": [corn_price, bean_price],
-        })
-        breakeven_df["Revenue ($/ac)"] = breakeven_df["Yield Goal (bu/ac)"] * breakeven_df["Sell Price ($/bu)"]
-        breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-        breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    breakeven_df = pd.DataFrame({
+        "Crop": ["Corn", "Soybeans"],
+        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
+        "Sell Price ($/bu)": [corn_price, bean_price],
+    })
+    breakeven_df["Revenue ($/ac)"] = breakeven_df["Yield Goal (bu/ac)"] * breakeven_df["Sell Price ($/bu)"]
+    breakeven_df["Fixed Inputs ($/ac)"] = base_exp
+    breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
 
+    col_left, col_right = st.columns([1, 1], gap="large")
+
+    with col_left:
+        st.subheader("Breakeven Budget (Corn vs Beans)")
+        st.dataframe(
+            breakeven_df.style.format({
+                "Yield Goal (bu/ac)": "{:,.0f}",
+                "Sell Price ($/bu)": "${:,.2f}",
+                "Revenue ($/ac)": "${:,.0f}",
+                "Fixed Inputs ($/ac)": "${:,.0f}",
+                "Breakeven Budget ($/ac)": "${:,.0f}",
+            }),
+            use_container_width=True, hide_index=True
+        )
+
+    with col_right:
+        st.subheader("Fixed Input Costs")
         fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
         total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
         fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+        st.dataframe(
+            fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+                lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
+                subset=["Expense"]
+            ),
+            use_container_width=True, hide_index=True
+        )
 
-        # ---- two side-by-side tables in centered block ----
-        col_left, col_right = st.columns([1, 1], gap="large")
-
-        # ---- left table ----
-        with col_left:
-            st.subheader("Breakeven Budget (Corn vs Beans)")
-            def _hl(val):
-                try:
-                    v = float(val)
-                    if v > 0: return "color:#22c55e;font-weight:700;"
-                    if v < 0: return "color:#ef4444;font-weight:700;"
-                except: return ""
-                return "font-weight:700;"
-            st.dataframe(
-                breakeven_df.style.applymap(_hl, subset=["Breakeven Budget ($/ac)"]).format({
-                    "Yield Goal (bu/ac)": "{:,.0f}",
-                    "Sell Price ($/bu)": "${:,.2f}",
-                    "Revenue ($/ac)": "${:,.0f}",
-                    "Fixed Inputs ($/ac)": "${:,.0f}",
-                    "Breakeven Budget ($/ac)": "${:,.0f}",
-                }),
-                use_container_width=True, hide_index=True
-            )
-
-        # ---- right table ----
-        with col_right:
-            st.subheader("Fixed Input Costs")
-            st.dataframe(
-                fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-                    lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
-                    subset=["Expense"]
-                ),
-                use_container_width=True, hide_index=True
-            )
-
-    # allow page to scroll again
-    st.markdown("<style>html,body{overflow:auto!important;}</style>", unsafe_allow_html=True)
+# ---------- render summary ----------
+render_profit_summary()
 
 
 # ---------- render summary ----------
