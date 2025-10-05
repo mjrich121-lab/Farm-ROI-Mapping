@@ -70,6 +70,38 @@ div[data-testid="stCaptionContainer"]{
 }
 </style>
 """, unsafe_allow_html=True)
+st.markdown("""
+<style>
+/* pull page content up a bit */
+.block-container { padding-top:.35rem !important; }
+
+/* uploader: smaller footprint */
+div[data-testid="stFileUploader"] { margin-top:.15rem !important; }
+div[data-testid="stFileUploaderDropzone"]{
+  padding:.25rem !important;           /* tighter box */
+  min-height:42px !important;
+}
+div[data-testid="stFileUploaderDropzone"] p{
+  margin:0 !important; font-size:.78rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+zone_file = st.file_uploader(
+    "Zone", type=["geojson","json","zip"], key="up_zone",
+    accept_multiple_files=False, label_visibility="collapsed"
+)
+yield_files = st.file_uploader(
+    "Yield", type=["csv","geojson","json","zip"], key="up_yield",
+    accept_multiple_files=True, label_visibility="collapsed"
+)
+fert_files = st.file_uploader(
+    "Fert", type=["csv","geojson","json","zip"], key="up_fert",
+    accept_multiple_files=True, label_visibility="collapsed"
+)
+seed_files = st.file_uploader(
+    "Seed", type=["csv","geojson","json","zip"], key="up_seed",
+    accept_multiple_files=True, label_visibility="collapsed"
+)
 
 # ---------------------------------------------------------
 # Helpers
@@ -399,31 +431,37 @@ with c5:
         st.caption("Target Yield (from map)")
         st.markdown("<div style='opacity:.65;height:28px'></div>", unsafe_allow_html=True)
 
-# Tiny preview (no scroll)
+# ---- Corn/Soy tiny preview (no scroll, fits width) ----
 prev_df = pd.DataFrame({
-    "Crop":["Corn","Soybeans"],
-    "Yield":[st.session_state["corn_yield"], st.session_state["bean_yield"]],
-    "Price":[st.session_state["corn_price"], st.session_state["bean_price"]],
-    "Revenue":[st.session_state["corn_yield"]*st.session_state["corn_price"],
-               st.session_state["bean_yield"]*st.session_state["bean_price"]],
-    "Fixed":[base_expenses_per_acre, base_expenses_per_acre],
+    "Crop": ["Corn", "Soybeans"],
+    "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+    "Price": [st.session_state["corn_price"], st.session_state["bean_price"]],
+    "Revenue": [
+        st.session_state["corn_yield"] * st.session_state["corn_price"],
+        st.session_state["bean_yield"] * st.session_state["bean_price"],
+    ],
+    "Fixed": [base_expenses_per_acre, base_expenses_per_acre],
 })
 prev_df["Breakeven"] = prev_df["Revenue"] - prev_df["Fixed"]
 
-def _hl_be(v):
-    if pd.isna(v): return ""
-    if v>0: return "color:#22c55e;font-weight:700;"
-    if v<0: return "color:#ef4444;font-weight:700;"
-    return "font-weight:700;"
+# Pre-format as strings so st.table stays small and crisp
+prev_view = prev_df.copy()
+prev_view["Yield"]     = prev_view["Yield"].map(lambda v: f"{v:.0f}")
+prev_view["Price"]     = prev_view["Price"].map(lambda v: f"${v:,.2f}")
+prev_view["Revenue"]   = prev_view["Revenue"].map(lambda v: f"${v:,.0f}")
+prev_view["Fixed"]     = prev_view["Fixed"].map(lambda v: f"${v:,.0f}")
+prev_view["Breakeven"] = prev_view["Breakeven"].map(lambda v: f"${v:,.0f}")
 
-st.dataframe(
-    prev_df.style.applymap(_hl_be, subset=["Breakeven"]).format({
-        "Yield":"{:.0f}","Price":"${:.2f}",
-        "Revenue":"${:,.0f}","Fixed":"${:,.0f}","Breakeven":"${:,.0f}",
-    }),
-    use_container_width=True, hide_index=True,
-    height=df_px_height(2, row_h=26, header=30, pad=2)
-)
+# Slightly tighter table cells for this one table
+st.markdown("""
+<style>
+/* only affects static tables; keeps it compact */
+table { width:100%; }
+thead th, tbody td { padding:4px 8px !important; }
+</style>
+""", unsafe_allow_html=True)
+
+st.table(prev_view)
 
 # Single sell price to feed heatmaps/revenue (use Corn price)
 sell_price = float(st.session_state.get("corn_price", 5.0))
