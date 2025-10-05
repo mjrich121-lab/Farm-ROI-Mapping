@@ -1306,8 +1306,46 @@ def render_profit_summary():
 
 # ---------- render summary ----------
 render_profit_summary()
+# =========================================================
+# FINAL LAYOUT PATCH — Streamlit Cloud Safe (no scrolls, centered)
+# =========================================================
+st.markdown("""
+<style>
+/* Remove all outer scrollbars */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"], [data-testid="block-container"] {
+    overflow: hidden !important;
+}
 
+/* Center the Profit Summary section (always 50% of viewport width) */
+section[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')),
+section[data-testid="stVerticalBlock"]:has(h3:contains('Profit Summary')) {
+    width: 50vw !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
 
-# ---------- render summary ----------
-render_profit_summary()
+/* Center the dataframes themselves */
+div[data-testid="stDataFrame"] {
+    max-width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    overflow: visible !important;
+}
+
+/* Hide vertical scroll inside dataframes */
+div[data-testid="stDataFrame"] table {
+    overflow: visible !important;
+    display: inline-table !important;
+}
+
+/* Reduce outer padding so it fits cleanly */
+.block-container {
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
