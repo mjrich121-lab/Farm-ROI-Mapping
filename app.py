@@ -17,6 +17,9 @@ import folium
 from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
+import time
+st.warning(f"ACTIVE FILE CHECK — {__file__}", icon="🧭")
+time.sleep(2)
 
 st.cache_data.clear()
 st.cache_resource.clear()
