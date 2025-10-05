@@ -15,7 +15,6 @@ import shutil
 import tempfile
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
-
 st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
 st.title("Farm Profit Mapping Tool V4")
 
@@ -35,18 +34,18 @@ st.markdown(
     h1 { margin: .25rem 0 .25rem 0 !important; font-size: 1.2rem !important; }
     h2, h3 { margin: .2rem 0 .15rem 0 !important; font-size: 1rem !important; }
 
-    /* Super-compact expander headers and bodies */
+    /* Super-compact expanders */
     div[data-testid="stExpander"] details summary { padding: .2rem .4rem !important; font-size: .8rem !important; }
     div[data-testid="stExpander"] details > div { padding: .2rem .4rem !important; }
 
-    /* Compact number inputs (height + font + +/- buttons) */
+    /* Compact number inputs */
     div[data-testid="stNumberInput"] label { font-size: .72rem !important; margin-bottom: .05rem !important; }
     div[data-testid="stNumberInput"] div[role="spinbutton"] {
         min-height: 22px !important; height: 22px !important; padding: 0 4px !important; font-size: .75rem !important;
     }
     div[data-testid="stNumberInput"] button { padding: 0 !important; min-width: 18px !important; }
 
-    /* Compact select/text inputs */
+    /* Compact selects/text */
     div[data-baseweb="select"] div[role="combobox"],
     input[type="text"] { min-height: 22px !important; height: 22px !important; font-size: .8rem !important; }
 
@@ -54,7 +53,7 @@ st.markdown(
     div[data-testid="stFileUploaderDropzone"] { padding: .2rem !important; min-height: 32px !important; }
     div[data-testid="stFileUploaderDropzone"] p { font-size: .65rem !important; margin: 0 !important; }
 
-    /* Dataframes / editors (Excel-like row height) */
+    /* Dataframes / editors */
     div[data-testid="stDataFrame"] table { font-size: .75rem !important; }
     div[data-testid="stDataFrame"] th, div[data-testid="stDataFrame"] td {
         padding: 1px 4px !important; line-height: 1rem !important;
@@ -64,7 +63,7 @@ st.markdown(
         padding: 1px 4px !important; line-height: 1rem !important;
     }
 
-    /* Captions tiny */
+    /* Tiny captions */
     div[data-testid="stCaptionContainer"] { margin: .1rem 0 !important; font-size: .7rem !important; }
     </style>
     """,
@@ -74,7 +73,6 @@ st.markdown(
 st.markdown(
     """
     <style>
-    /* Narrow number inputs site-wide (corn/soy assumptions, etc.) */
     div[data-testid="stNumberInput"] { width: 132px !important; max-width: 132px !important; }
     div[data-testid="stNumberInput"] div[role="spinbutton"] {
         min-height: 20px !important; height: 20px !important; padding: 0 4px !important; font-size: .78rem !important;
@@ -88,6 +86,10 @@ st.markdown(
 # =========================================================
 # HELPERS
 # =========================================================
+def df_height(n_rows: int, row_h: int = 24, header: int = 30, pad: int = 0) -> int:
+    """Exact pixel height so Data Editor shows with NO internal scroll."""
+    return int(n_rows * row_h + header + pad)
+
 def load_vector_file(uploaded_file):
     try:
         if uploaded_file.name.lower().endswith((".geojson", ".json")):
@@ -161,7 +163,7 @@ def process_prescription(file, prescrip_type="fertilizer"):
     if "acres" not in df.columns:
         df["acres"] = 0.0
 
-    # ultra-compact options expander (left as-is functionally)
+    # compact options expander
     with st.expander(f"⚙️ {prescrip_type.capitalize()} Map Options — {file.name}", expanded=False):
         override = st.number_input(
             "Override Acres Per Polygon",
@@ -204,7 +206,7 @@ st.markdown("### Upload Maps")
 c1, c2, c3, c4 = st.columns(4)
 
 # ---------------------------
-# ZONE MAP (moved into c1)
+# ZONE MAP (c1)
 # ---------------------------
 with c1:
     zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"], key="zone_file", accept_multiple_files=False)
@@ -348,14 +350,10 @@ with c4:
         st.caption("No seed files")
 
 # =========================================================
-# 4A. Expense Inputs (Ultra-compact grid editor)
-#    - Drop-in replacement for the 12 number inputs
-#    - Keeps outputs: `expenses` dict and `base_expenses_per_acre` float
+# 4A. Expense Inputs — ULTRA COMPACT GRID (NO HEADER LINE)
+#    (Replaces the 12 individual number inputs)
 # =========================================================
 
-st.markdown("#### 4A. Expense Inputs (Per Acre $)")
-
-# Build defaults once, then preserve user edits in session
 _default_expense_rows = [
     ("Chemicals", 0.0),
     ("Insurance", 0.0),
@@ -371,17 +369,19 @@ _default_expense_rows = [
     ("Truck Fuel", 0.0),
 ]
 
-# Initialize or refresh structure if needed
 if "exp_df" not in st.session_state:
     st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
 else:
-    # Ensure we have the same 12 rows in correct order (robust to older state)
+    # keep same 12 rows / order
     cur = st.session_state["exp_df"]
     names = [r[0] for r in _default_expense_rows]
     if set(cur["Expense"].tolist()) != set(names):
         st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
+    else:
+        st.session_state["exp_df"] = (
+            cur.set_index("Expense").reindex(names).reset_index()
+        )
 
-# Render super-compact data editor (no scroll)
 exp_df = st.data_editor(
     st.session_state["exp_df"],
     hide_index=True,
@@ -392,18 +392,16 @@ exp_df = st.data_editor(
         "Expense": st.column_config.TextColumn(disabled=True),
         "$/ac": st.column_config.NumberColumn(format="%.2f", step=1.0, help="Per-acre cost"),
     },
-    height=df_height(12, row_h=24, header=30, pad=0),  # exact height = no internal scroll
+    height=df_height(12, row_h=24, header=30, pad=0),  # exact height => no internal scroll
 )
 
-# Sanitize numeric and persist
+# Sanitize numeric + persist
 exp_df["$/ac"] = pd.to_numeric(exp_df["$/ac"], errors="coerce").fillna(0.0)
 st.session_state["exp_df"] = exp_df.copy()
 
-# Outputs used elsewhere in your app (unchanged names/types)
+# Outputs used elsewhere
 expenses = dict(zip(exp_df["Expense"], exp_df["$/ac"]))
 base_expenses_per_acre = float(exp_df["$/ac"].sum())
-
-
 
 # ---- 4B–4D split layout (left: products, right: crop assumptions + preview) ----
 left, right = st.columns([1, 1])
@@ -458,7 +456,7 @@ with right:
             step=0.1, label_visibility="collapsed"
         )
 
-    # Compact preview table (linked to session_state values)
+    # Compact preview table
     preview_df = pd.DataFrame({
         "Crop": ["Corn", "Soybeans"],
         "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
@@ -479,10 +477,11 @@ with right:
         use_container_width=True, hide_index=True
     )
 
-
 # =========================================================
 # 5. BASE MAP  (UNCHANGED FUNCTIONALITY)
 # =========================================================
+from branca.element import MacroElement, Template  # <-- ensure available for map JS
+
 def make_base_map():
     try:
         m = folium.Map(
@@ -530,6 +529,7 @@ def make_base_map():
 # Init base map
 m = make_base_map()
 st.session_state["layer_control_added"] = False
+
 
 # =========================================================
 # 6. ZONES OVERLAY  (UNCHANGED)
