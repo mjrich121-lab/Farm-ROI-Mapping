@@ -76,6 +76,18 @@ def apply_compact_theme():
     </style>
     """, unsafe_allow_html=True)
 
+def _bootstrap_defaults():
+    for k in ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]:
+        st.session_state.setdefault(k, 0.0)
+    st.session_state.setdefault("corn_yield", 200.0)
+    st.session_state.setdefault("corn_price", 5.0)
+    st.session_state.setdefault("bean_yield", 60.0)
+    st.session_state.setdefault("bean_price", 12.0)
+    st.session_state.setdefault("sell_price", st.session_state["corn_price"])
+    st.session_state.setdefault("target_yield", 200.0)
+
+_bootstrap_defaults()
+
 # ===========================
 # HELPERS
 # ===========================
@@ -118,6 +130,17 @@ def load_vector_file(uploaded_file) -> Optional[gpd.GeoDataFrame]:
         return gdf.to_crs(epsg=4326)
     except Exception:
         return None
+        
+def find_col(df: pd.DataFrame, candidates) -> str | None:
+    """
+    Return the first column in df whose lowercased name matches any of the
+    lowercased strings in `candidates`. If nothing matches, return None.
+    """
+    lower_map = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+    return None
 
 def process_prescription(file, prescrip_type="fertilizer") -> Tuple[pd.DataFrame, Optional[gpd.GeoDataFrame]]:
     """Normalize seed/fert files → grouped cost table + original gdf for overlays (if vector)."""
@@ -684,6 +707,8 @@ try:
         if not d.empty: fert_var += float(d["CostPerAcre"].sum())
     for d in st.session_state.get("seed_layers_store", {}).values():
         if not d.empty: seed_var += float(d["CostPerAcre"].sum())
+            
+    sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
     df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
 
@@ -736,6 +761,14 @@ corn_yld = float(st.session_state.get("corn_yield", 200.0))
 corn_px  = float(st.session_state.get("corn_price", 5.0))
 bean_yld = float(st.session_state.get("bean_yield", 60.0))
 bean_px  = float(st.session_state.get("bean_price", 12.0))
+
+# SAFETY: compute fixed inputs total even if inputs were never touched.
+_fixed_keys = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
+base_expenses_per_acre = float(sum(
+    float(st.session_state.get(k, 0.0) or 0.0) for k in _fixed_keys
+))
+# Keep it in session so other sections (heatmaps/summary) can reuse it
+st.session_state["base_expenses_per_acre"] = base_expenses_per_acre
 
 corn_rev = corn_yld * corn_px
 bean_rev = bean_yld * bean_px
