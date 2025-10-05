@@ -294,35 +294,57 @@ with c4:
 # 4. ULTRA-COMPACT COSTS + ASSUMPTIONS
 # =========================================================
 st.markdown("### Costs & Assumptions")
+# ------------------------------
+# Fixed Inputs ($/ac) — 12 in ONE row (ultra-compact)
+# ------------------------------
+# If your helper is named _mini_num, this alias makes the same code work.
+num = (mini_num if "mini_num" in globals() else _mini_num)
 
-# Expense table (12 rows, no scroll)
-_default_expense_rows = [
-    ("Chemicals",0.0),("Insurance",0.0),("Insecticide/Fungicide",0.0),
-    ("Fertilizer (Flat)",0.0),("Seed (Flat)",0.0),("Cash Rent",0.0),
-    ("Machinery",0.0),("Labor",0.0),("Cost of Living",0.0),
-    ("Extra Fuel",0.0),("Extra Interest",0.0),("Truck Fuel",0.0),
-]
-if "exp_df" not in st.session_state:
-    st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense","$/ac"])
-else:
-    names = [r[0] for r in _default_expense_rows]
-    if set(st.session_state["exp_df"]["Expense"]) != set(names):
-        st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense","$/ac"])
-
-exp_df = st.data_editor(
-    st.session_state["exp_df"], hide_index=True, num_rows="fixed", use_container_width=True,
-    column_config={
-        "Expense": st.column_config.TextColumn(disabled=True),
-        "$/ac": st.column_config.NumberColumn(format="%.2f", step=1.0, help="Per-acre cost"),
-    },
-    key="exp_editor",
-    height=df_px_height(12, row_h=28, header=34, pad=2),
+# Make the number boxes narrower so 12 fit across
+st.markdown(
+    """
+    <style>
+      /* override any earlier width for this specific row */
+      div[data-testid="fixed-row"] div[data-testid="stNumberInput"]{
+          width:100px !important; max-width:100px !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
-exp_df["$/ac"] = pd.to_numeric(exp_df["$/ac"], errors="coerce").fillna(0.0)
-st.session_state["exp_df"] = exp_df.copy()
 
-expenses = dict(zip(exp_df["Expense"], exp_df["$/ac"]))
-base_expenses_per_acre = float(exp_df["$/ac"].sum())
+st.caption("Fixed Inputs ($/ac)")
+fixed_row = st.columns(12, gap="small")
+with fixed_row[0]:  chemicals      = num("Chem ($/ac)",        "chem",   0.0, 1.0)
+with fixed_row[1]:  insurance      = num("Insur ($/ac)",       "ins",    0.0, 1.0)
+with fixed_row[2]:  insecticide    = num("Insect/Fung ($/ac)", "insect", 0.0, 1.0)
+with fixed_row[3]:  fertilizer     = num("Fert Flat ($/ac)",   "fert",   0.0, 1.0)
+with fixed_row[4]:  seed           = num("Seed Flat ($/ac)",   "seed",   0.0, 1.0)
+with fixed_row[5]:  cash_rent      = num("Cash Rent ($/ac)",   "rent",   0.0, 1.0)
+with fixed_row[6]:  machinery      = num("Mach ($/ac)",        "mach",   0.0, 1.0)
+with fixed_row[7]:  labor          = num("Labor ($/ac)",       "labor",  0.0, 1.0)
+with fixed_row[8]:  coliving       = num("Living ($/ac)",      "col",    0.0, 1.0)
+with fixed_row[9]:  extra_fuel     = num("Fuel ($/ac)",        "fuel",   0.0, 1.0)
+with fixed_row[10]: extra_interest = num("Interest ($/ac)",    "int",    0.0, 1.0)
+with fixed_row[11]: truck_fuel     = num("Truck Fuel ($/ac)",  "truck",  0.0, 1.0)
+
+# Pack into the same dict/total the rest of your app expects
+expenses = {
+    "Chemicals": chemicals,
+    "Insurance": insurance,
+    "Insecticide/Fungicide": insecticide,
+    "Fertilizer (Flat)": fertilizer,
+    "Seed (Flat)": seed,
+    "Cash Rent": cash_rent,
+    "Machinery": machinery,
+    "Labor": labor,
+    "Cost of Living": coliving,
+    "Extra Fuel": extra_fuel,
+    "Extra Interest": extra_interest,
+    "Truck Fuel": truck_fuel,
+}
+base_expenses_per_acre = float(sum(expenses.values()))
+
 
 # One-row assumptions: Sell Price + (Target Yield only if no map)
 ass_cols = st.columns([1,1,2])
