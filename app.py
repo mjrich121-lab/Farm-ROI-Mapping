@@ -18,6 +18,61 @@ from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
 
+# =========================================================
+# GLOBAL THEME + LAYOUT OVERRIDES (STREAMLIT v1.39+)
+# =========================================================
+st.markdown("""
+<style>
+
+/* ---------- GLOBAL BASE: PREVENT ALL SCROLL ---------- */
+html, body, [data-testid="stAppViewContainer"], [data-testid="block-container"] {
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+/* ---------- MAP CONTAINER (85% WIDTH CENTERED) ---------- */
+iframe[title="st_folium"] {
+    max-width: 85vw !important;
+    display: block;
+    margin: 0 auto !important;
+    border-radius: 8px;
+}
+
+/* ---------- SECTION 9: PROFIT SUMMARY (50% WIDTH CENTERED) ---------- */
+div[data-testid="block-container"] h2:has(span:contains("Profit Summary")),
+div[data-testid="block-container"] h3:has(span:contains("Profit Summary")) {
+    text-align: center !important;
+}
+
+div[data-testid="block-container"] > div:has(h2:has(span:contains("Profit Summary"))) {
+    max-width: 50vw !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    overflow: hidden !important;
+    border-radius: 8px;
+}
+
+/* ---------- CORN vs SOY EXPANDER ---------- */
+div[data-testid="stExpander"]:has(div:contains("Corn vs Soy")),
+div[data-testid="stExpander"]:has(div:contains("Compare Crop Profitability")) {
+    max-width: 50vw !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    border-radius: 8px;
+    overflow: hidden !important;
+}
+
+/* ---------- TABLES CENTERED ---------- */
+.stDataFrame {
+    overflow: visible !important;
+}
+.stDataFrame table {
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
 
 # ===========================
 # COMPACT THEME + LAYOUT
