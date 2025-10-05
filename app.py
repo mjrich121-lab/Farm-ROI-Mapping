@@ -1087,24 +1087,21 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — centered, fixed height, colored profits
+# 9. PROFIT SUMMARY — centered, full-height tables, colored profits
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
     # === session defaults ===
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
+    base_exp = float(st.session_state.get("base_expenses_per_acre",
+                    sum(expenses.values()) if expenses else 0.0))
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
     bean_price = float(st.session_state.get("bean_price", 12))
     target_yield = float(st.session_state.get("target_yield", 200))
     sell_price  = float(st.session_state.get("sell_price", corn_price))
-
-    # === helpers ===
-    def _h(n):  # compute exact pixel height so tables never scroll
-        return int(34 + max(1, n) * 28 + 4)
 
     # === build dataframes ===
     breakeven_df = pd.DataFrame({
@@ -1114,7 +1111,9 @@ def render_profit_summary():
     })
     breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
     breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    breakeven_df["Breakeven Budget ($/ac)"] = (
+        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    )
 
     revenue_overall  = target_yield * sell_price
     expenses_overall = base_exp
@@ -1134,7 +1133,8 @@ def render_profit_summary():
 
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
     if not fixed_df.empty:
-        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
+        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs",
+                                   "$/ac": fixed_df["$/ac"].sum()}])
         fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
 
     # === Center section, half-width ===
@@ -1144,21 +1144,20 @@ def render_profit_summary():
 
         with c1:
             st.subheader("Breakeven Budget (Corn vs Beans)")
-            st.dataframe(
+            st.table(
                 breakeven_df.style.format({
                     "Yield Goal (bu/ac)": "{:,.0f}",
                     "Sell Price ($/bu)": "${:,.2f}",
                     "Revenue ($/ac)": "${:,.0f}",
                     "Fixed Inputs ($/ac)": "${:,.0f}",
                     "Breakeven Budget ($/ac)": "${:,.0f}",
-                }),
-                use_container_width=True, hide_index=True, height=_h(len(breakeven_df))
+                })
             )
 
             st.subheader("Profit Metrics Comparison")
-            st.dataframe(
-                comparison.style.format({"Value": "${:,.2f}"}).applymap(highlight_profit, subset=["Value"]),
-                use_container_width=True, hide_index=True, height=_h(len(comparison))
+            st.table(
+                comparison.style.format({"Value": "${:,.2f}"})
+                .applymap(highlight_profit, subset=["Value"])
             )
 
         with c2:
@@ -1166,12 +1165,12 @@ def render_profit_summary():
             if fixed_df.empty:
                 st.info("Enter your fixed inputs above to see totals here.")
             else:
-                st.dataframe(
-                    fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-                        lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
-                        subset=["Expense"]
-                    ),
-                    use_container_width=True, hide_index=True, height=_h(len(fixed_df))
+                st.table(
+                    fixed_df.style.format({"$/ac": "${:,.2f}"})
+                    .apply(lambda s:
+                           ["font-weight:bold;" if v == "Total Fixed Costs" else ""
+                            for v in s],
+                           subset=["Expense"])
                 )
 
 # ---------- render summary (call once) ----------
@@ -1193,7 +1192,6 @@ st.markdown(
             outer.style.paddingBottom = '1rem';
         }
     }
-    // Try immediately, and again after small delay for re-renders
     fixLayoutWidth();
     setTimeout(fixLayoutWidth, 1000);
     setTimeout(fixLayoutWidth, 3000);
@@ -1201,5 +1199,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-st.success("✅ Layout override script applied successfully (JS-based width enforcement).")
+
 
