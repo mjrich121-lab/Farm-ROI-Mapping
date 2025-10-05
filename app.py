@@ -15,103 +15,86 @@ import folium
 from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
+apply_compact_theme()
+render_uploaders()
+render_fixed_inputs_and_strip()
+# ===========================
+# COMPACT THEME + LAYOUT
+# ===========================
+import streamlit as st
+import pandas as pd
+import geopandas as gpd
+import zipfile, os, tempfile
+from typing import Optional, Tuple
 
-# ---------------------------------------------------------
-# Page + compact styling (tables & inputs only)
-# ---------------------------------------------------------
-st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
-st.title("Farm Profit Mapping Tool V4")
+def apply_compact_theme():
+    st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
+    st.title("Farm Profit Mapping Tool V4")
 
-st.markdown("""
-<style>
-/* Tighter gutters between columns */
-div[data-testid="column"]{
-  padding-left:.22rem !important;
-  padding-right:.22rem !important;
-}
-/* Reduce vertical whitespace between blocks */
-section[data-testid="stVerticalBlock"] > div{
-  padding-top:.22rem !important;
-  padding-bottom:.22rem !important;
-}
-/* Smaller headers, but readable */
-h1{ margin:.35rem 0 .3rem 0 !important; font-size:1.22rem !important; }
-h2,h3{ margin:.28rem 0 .2rem 0 !important; font-size:1.0rem !important; }
+    # Pull page up + compact everything (inputs, tables, uploaders)
+    st.markdown("""
+    <style>
+      .block-container{ padding-top:.28rem !important; }
 
-/* Compact number inputs */
-div[data-testid="stNumberInput"] label{
-  font-size:.78rem !important;
-  margin-bottom:.12rem !important;
-}
-div[data-testid="stNumberInput"] div[role="spinbutton"]{
-  min-height:28px !important;
-  height:28px !important;
-  padding:0 6px !important;
-  font-size:.86rem !important;
-}
-div[data-testid="stNumberInput"] button{
-  padding:0 !important; min-width:22px !important;
-}
+      /* tighter column gutters */
+      div[data-testid="column"]{ padding-left:.22rem !important; padding-right:.22rem !important; }
 
-/* Make DataFrame / DataEditor rows tighter */
-div[data-testid="stDataFrame"] table,
-div[data-testid="stDataEditor"] table{
-  font-size:.86rem !important;
-}
-div[data-testid="stDataFrame"] th, div[data-testid="stDataFrame"] td,
-div[data-testid="stDataEditor"] th, div[data-testid="stDataEditor"] td{
-  padding:2px 6px !important;     /* <- compact cells */
-  line-height:1.15rem !important; /* <- tighter rows */
-}
+      /* reduce block spacing */
+      section[data-testid="stVerticalBlock"] > div{
+        padding-top:.18rem !important; padding-bottom:.18rem !important;
+      }
 
-/* Tiny captions */
-div[data-testid="stCaptionContainer"]{
-  margin:.16rem 0 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-st.markdown("""
-<style>
-/* pull page content up a bit */
-.block-container { padding-top:.35rem !important; }
+      /* compact headers */
+      h1{ margin:.32rem 0 .28rem 0 !important; font-size:1.22rem !important; }
+      h2,h3{ margin:.24rem 0 .16rem 0 !important; font-size:1.0rem !important; }
+      div[data-testid="stCaptionContainer"]{ margin:.12rem 0 !important; }
 
-/* uploader: smaller footprint */
-div[data-testid="stFileUploader"] { margin-top:.15rem !important; }
-div[data-testid="stFileUploaderDropzone"]{
-  padding:.25rem !important;           /* tighter box */
-  min-height:42px !important;
-}
-div[data-testid="stFileUploaderDropzone"] p{
-  margin:0 !important; font-size:.78rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-zone_file = st.file_uploader(
-    "Zone", type=["geojson","json","zip"], key="up_zone",
-    accept_multiple_files=False, label_visibility="collapsed"
-)
-yield_files = st.file_uploader(
-    "Yield", type=["csv","geojson","json","zip"], key="up_yield",
-    accept_multiple_files=True, label_visibility="collapsed"
-)
-fert_files = st.file_uploader(
-    "Fert", type=["csv","geojson","json","zip"], key="up_fert",
-    accept_multiple_files=True, label_visibility="collapsed"
-)
-seed_files = st.file_uploader(
-    "Seed", type=["csv","geojson","json","zip"], key="up_seed",
-    accept_multiple_files=True, label_visibility="collapsed"
-)
+      /* number inputs */
+      div[data-testid="stNumberInput"] label{
+        font-size:.78rem !important; margin-bottom:.10rem !important;
+      }
+      div[data-testid="stNumberInput"] div[role="spinbutton"]{
+        min-height:26px !important; height:26px !important; padding:0 6px !important; font-size:.86rem !important;
+      }
+      div[data-testid="stNumberInput"] button{ padding:0 !important; min-width:20px !important; }
+      /* ensure 12 fixed-input boxes fit one line on most screens */
+      .fixed-12 div[data-testid="stNumberInput"]{ width:112px !important; max-width:112px !important; }
 
-# ---------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------
-def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) -> int:
-    """Exact height so tables don't scroll internally."""
-    nrows = max(1, int(nrows))
-    return int(header + nrows * row_h + pad)
+      /* uploader footprint */
+      div[data-testid="stFileUploader"]{ margin-top:.10rem !important; }
+      div[data-testid="stFileUploaderDropzone"]{ padding:.22rem !important; min-height:40px !important; }
+      div[data-testid="stFileUploaderDropzone"] p{ margin:0 !important; font-size:.78rem !important; }
 
-def load_vector_file(uploaded_file):
+      /* compact DataFrame & DataEditor cells (no wasted space) */
+      div[data-testid="stDataFrame"] table, div[data-testid="stDataEditor"] table{ font-size:.86rem !important; }
+      div[data-testid="stDataFrame"] th, div[data-testid="stDataFrame"] td,
+      div[data-testid="stDataEditor"] th, div[data-testid="stDataEditor"] td{
+        padding:2px 6px !important; line-height:1.12rem !important;
+      }
+
+      /* compact static tables (st.table) */
+      table { border-collapse:collapse; }
+      thead th, tbody td { padding:4px 8px !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# ===========================
+# HELPERS
+# ===========================
+def df_px_height(nrows: int, row_h: int = 26, header: int = 30, pad: int = 2) -> int:
+    """Exact pixel height so Streamlit tables/editors don't scroll internally."""
+    n = max(1, int(nrows))
+    return int(header + n*row_h + pad)
+
+def _find_col(df: pd.DataFrame, names) -> Optional[str]:
+    """Return the first matching column (case-insensitive), else None."""
+    lower_map = {c.lower(): c for c in df.columns}
+    for n in names:
+        if n in lower_map: return lower_map[n]
+    return None
+
+def load_vector_file(uploaded_file) -> Optional[gpd.GeoDataFrame]:
     """Read .geojson/.json/.zip(SHP)/.shp into EPSG:4326 GeoDataFrame."""
     try:
         name = uploaded_file.name.lower()
@@ -120,43 +103,27 @@ def load_vector_file(uploaded_file):
         elif name.endswith(".zip"):
             with tempfile.TemporaryDirectory() as tmpdir:
                 zpath = os.path.join(tmpdir, "in.zip")
-                with open(zpath, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                with zipfile.ZipFile(zpath, "r") as zf:
-                    zf.extractall(tmpdir)
-                shp_path = None
-                for fn in os.listdir(tmpdir):
-                    if fn.lower().endswith(".shp"):
-                        shp_path = os.path.join(tmpdir, fn)
-                        break
-                if not shp_path:
-                    return None
-                gdf = gpd.read_file(shp_path)
+                with open(zpath, "wb") as f: f.write(uploaded_file.getbuffer())
+                with zipfile.ZipFile(zpath, "r") as zf: zf.extractall(tmpdir)
+                shp = next((os.path.join(tmpdir, fn) for fn in os.listdir(tmpdir) if fn.lower().endswith(".shp")), None)
+                if not shp: return None
+                gdf = gpd.read_file(shp)
         elif name.endswith(".shp"):
             with tempfile.TemporaryDirectory() as tmpdir:
-                shp_path = os.path.join(tmpdir, uploaded_file.name)
-                with open(shp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                gdf = gpd.read_file(shp_path)
+                shp = os.path.join(tmpdir, uploaded_file.name)
+                with open(shp, "wb") as f: f.write(uploaded_file.getbuffer())
+                gdf = gpd.read_file(shp)
         else:
             return None
 
-        if gdf is None or gdf.empty:
-            return None
-        if gdf.crs is None:
-            gdf.set_crs(epsg=4326, inplace=True)
-        gdf = gdf.to_crs(epsg=4326)
-        return gdf
+        if gdf is None or gdf.empty: return None
+        if gdf.crs is None: gdf.set_crs(epsg=4326, inplace=True)
+        return gdf.to_crs(epsg=4326)
     except Exception:
         return None
 
-def process_prescription(file, prescrip_type="fertilizer"):
-    """
-    Returns: (grouped_table, original_gdf_or_None)
-
-    grouped_table columns: product, Acres, CostTotal, CostPerAcre
-    If CSV (no geometry), original_gdf_or_None will be None.
-    """
+def process_prescription(file, prescrip_type="fertilizer") -> Tuple[pd.DataFrame, Optional[gpd.GeoDataFrame]]:
+    """Normalize seed/fert files → grouped cost table + original gdf for overlays (if vector)."""
     if file is None:
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]), None
     try:
@@ -165,30 +132,20 @@ def process_prescription(file, prescrip_type="fertilizer"):
         if name.endswith((".geojson",".json",".zip",".shp")):
             gdf = load_vector_file(file)
             if gdf is None or gdf.empty:
-                st.error(f"❌ Could not read {prescrip_type} map.")
                 return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]), None
-            gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
-            # Keep the original gdf for overlay:
             gdf_orig = gdf.copy()
-            # Also make a flat table for costs:
+            gdf = gdf.copy()
             gdf["Longitude"] = gdf.geometry.representative_point().x
             gdf["Latitude"]  = gdf.geometry.representative_point().y
             df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
         else:
             df = pd.read_csv(file)
-            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
+        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
         if "product" not in df.columns:
-            for c in ["variety","hybrid","type","name","material"]:
-                if c in df.columns:
-                    df.rename(columns={c:"product"}, inplace=True)
-                    break
-            else:
-                df["product"] = prescrip_type.capitalize()
-        if "acres" not in df.columns:
-            df["acres"] = 0.0
-
-        # Estimate total cost if missing
+            alias = _find_col(df, ["variety","hybrid","type","name","material"])
+            df["product"] = df[alias] if alias else prescrip_type.capitalize()
+        if "acres" not in df.columns: df["acres"] = 0.0
         if "costtotal" not in df.columns:
             if {"price_per_unit","units"}.issubset(df.columns):
                 df["costtotal"] = df["price_per_unit"] * df["units"]
@@ -201,270 +158,214 @@ def process_prescription(file, prescrip_type="fertilizer"):
             return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]), gdf_orig
 
         grouped = df.groupby("product", as_index=False).agg(
-            Acres=("acres","sum"),
-            CostTotal=("costtotal","sum")
+            Acres=("acres","sum"), CostTotal=("costtotal","sum")
         )
         grouped["CostPerAcre"] = grouped.apply(
             lambda r: r["CostTotal"]/r["Acres"] if r["Acres"]>0 else 0, axis=1
         )
         return grouped, gdf_orig
-    except Exception as e:
-        st.warning(f"⚠️ Failed to read {file.name}: {e}")
+    except Exception:
         return pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"]), None
 
-def find_col(df, names):
-    """Return first matching column name (case-insensitive), else None."""
-    cols = {c.lower(): c for c in df.columns}
-    for n in names:
-        if n in cols: return cols[n]
-    return None
 
-# ---------------------------------------------------------
-# Uploaders (one tight row) + summaries per category
-# ---------------------------------------------------------
-st.subheader("Upload Maps")
-u1,u2,u3,u4 = st.columns(4)
+# ===========================
+# UPLOADERS ROW (ONE ROW)
+# ===========================
+def render_uploaders():
+    st.subheader("Upload Maps")
+    u1,u2,u3,u4 = st.columns(4)
 
-# --- Zones ---
-with u1:
-    st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
-    zone_file = st.file_uploader("Zone", type=["geojson","json","zip"], key="up_zone", accept_multiple_files=False)
-    if zone_file:
-        zones_gdf = load_vector_file(zone_file)
-        if zones_gdf is not None and not zones_gdf.empty:
-            # detect/create Zone col
-            zone_col = None
-            for cand in ["Zone","zone","ZONE","Name","name"]:
-                if cand in zones_gdf.columns:
-                    zone_col = cand; break
-            if zone_col is None:
-                zones_gdf["ZoneIndex"] = range(1, len(zones_gdf)+1)
-                zone_col = "ZoneIndex"
-            zones_gdf["Zone"] = zones_gdf[zone_col]
+    # ---- Zone ----
+    with u1:
+        st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
+        zf = st.file_uploader("Zone", type=["geojson","json","zip"], key="up_zone", accept_multiple_files=False)
+        if zf:
+            gdf = load_vector_file(zf)
+            if gdf is not None and not gdf.empty:
+                # zone id
+                cand = next((c for c in ["Zone","zone","ZONE","Name","name"] if c in gdf.columns), None)
+                if not cand:
+                    gdf["ZoneIndex"] = range(1, len(gdf)+1); cand="ZoneIndex"
+                gdf["Zone"] = gdf[cand]
 
-            # acres on equal-area
-            g2 = zones_gdf.copy()
-            if g2.crs is None: g2.set_crs(epsg=4326, inplace=True)
-            if g2.crs.is_geographic: g2 = g2.to_crs(epsg=5070)
-            zones_gdf["Calculated Acres"] = (g2.geometry.area * 0.000247105).astype(float)
-            zones_gdf["Override Acres"]   = zones_gdf["Calculated Acres"].astype(float)
+                # acres (equal-area)
+                g2 = gdf.copy()
+                if g2.crs is None: g2.set_crs(epsg=4326, inplace=True)
+                if g2.crs.is_geographic: g2 = g2.to_crs(epsg=5070)
+                gdf["Calculated Acres"] = (g2.geometry.area * 0.000247105).astype(float)
+                gdf["Override Acres"]   = gdf["Calculated Acres"].astype(float)
 
-            # editor (no scroll)
-            disp = zones_gdf[["Zone","Calculated Acres","Override Acres"]].copy()
-            edited = st.data_editor(
-                disp, num_rows="fixed", hide_index=True, use_container_width=True,
-                column_config={
-                    "Zone": st.column_config.TextColumn(disabled=True),
-                    "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Override Acres": st.column_config.NumberColumn(format="%.2f"),
-                },
-                height=df_px_height(len(disp))
-            )
-            edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
-                                         .fillna(edited["Calculated Acres"])
-            zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
-
-            st.caption(f"✅ Zones: {len(zones_gdf)}  |  Total Calc: {zones_gdf['Calculated Acres'].sum():,.2f} ac  |  "
-                       f"Override: {zones_gdf['Override Acres'].sum():,.2f} ac")
-            st.session_state["zones_gdf"] = zones_gdf
+                disp = gdf[["Zone","Calculated Acres","Override Acres"]]
+                ed = st.data_editor(
+                    disp, hide_index=True, num_rows="fixed", use_container_width=True,
+                    column_config={
+                        "Zone": st.column_config.TextColumn(disabled=True),
+                        "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                        "Override Acres": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    height=df_px_height(len(disp))
+                )
+                ed["Override Acres"] = pd.to_numeric(ed["Override Acres"], errors="coerce") \
+                                          .fillna(ed["Calculated Acres"])
+                gdf["Override Acres"] = ed["Override Acres"].astype(float).values
+                st.caption(f"✅ Zones: {len(gdf)} · Calc: {gdf['Calculated Acres'].sum():,.2f} ac · Override: {gdf['Override Acres'].sum():,.2f} ac")
+                st.session_state["zones_gdf"] = gdf
+            else:
+                st.caption("❌ Could not read zone file.")
         else:
-            st.error("❌ Could not read zone file.")
-    else:
-        st.caption("No zone file uploaded.")
+            st.caption("No zone file uploaded.")
 
-# --- Yield ---
-with u2:
-    st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
-    yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"], key="up_yield", accept_multiple_files=True)
-    st.session_state["yield_df"] = pd.DataFrame()
-    if yield_files:
-        frames, summary = [], []
-        for yf in yield_files:
-            try:
-                name = yf.name.lower()
-                if name.endswith(".csv"):
-                    df = pd.read_csv(yf)
-                else:
-                    yg = load_vector_file(yf)
-                    df = pd.DataFrame(yg.drop(columns="geometry", errors="ignore")) if yg is not None else pd.DataFrame()
-                if not df.empty:
-                    df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
-                    # normalize to "Yield"
-                    ycol = find_col(df, ["yield","yld_vol_dr","yld_mass_dr","yield_dry","dry_yield","wet_yield"])
-                    if ycol:
-                        if ycol != "Yield":
-                            df.rename(columns={ycol:"Yield"}, inplace=True)
+    # ---- Yield ----
+    with u2:
+        st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP")
+        yfs = st.file_uploader("Yield", type=["csv","geojson","json","zip"], key="up_yield", accept_multiple_files=True)
+        st.session_state["yield_df"] = pd.DataFrame()
+        if yfs:
+            frames, summ = [], []
+            for f in yfs:
+                try:
+                    nm = f.name.lower()
+                    if nm.endswith(".csv"):
+                        df = pd.read_csv(f)
                     else:
-                        df["Yield"] = 0.0
-                    frames.append(df)
-                    summary.append({"File": yf.name, "Rows": len(df)})
-            except Exception as e:
-                st.warning(f"⚠️ {yf.name}: {e}")
-        st.session_state["yield_df"] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        if summary:
-            st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True,
-                         height=df_px_height(len(summary)))
-    else:
-        st.caption("No yield files uploaded.")
+                        yg = load_vector_file(f)
+                        df = pd.DataFrame(yg.drop(columns="geometry", errors="ignore")) if yg is not None else pd.DataFrame()
+                    if not df.empty:
+                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                        ycol = _find_col(df, ["yield","yld_vol_dr","yld_mass_dr","yield_dry","dry_yield","wet_yield"])
+                        if ycol and ycol != "Yield": df.rename(columns={ycol:"Yield"}, inplace=True)
+                        elif not ycol: df["Yield"] = 0.0
+                        frames.append(df)
+                        summ.append({"File": f.name, "Rows": len(df)})
+                except Exception as e:
+                    summ.append({"File": f.name, "Rows": 0})
+            st.session_state["yield_df"] = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            if summ:
+                st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
+                             height=df_px_height(len(summ)))
+        else:
+            st.caption("No yield files uploaded.")
 
-# --- Fert ---
-with u3:
-    st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
-    fert_files = st.file_uploader("Fert", type=["csv","geojson","json","zip"], key="up_fert", accept_multiple_files=True)
-    st.session_state["fert_layers_store"] = {}
-    st.session_state["fert_gdfs"] = {}
-    if fert_files:
-        summ = []
-        for f in fert_files:
-            grouped, gdf_orig = process_prescription(f, "fertilizer")
-            if not grouped.empty:
-                key = os.path.splitext(f.name)[0].lower().replace(" ","_")
-                st.session_state["fert_layers_store"][key] = grouped
-                if gdf_orig is not None and not gdf_orig.empty:
-                    st.session_state["fert_gdfs"][key] = gdf_orig
-                summ.append({"File": f.name, "Products": len(grouped)})
-        if summ:
-            st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
-                         height=df_px_height(len(summ)))
-    else:
-        st.caption("No fertilizer files uploaded.")
+    # ---- Fert ----
+    with u3:
+        st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP")
+        ffs = st.file_uploader("Fert", type=["csv","geojson","json","zip"], key="up_fert", accept_multiple_files=True)
+        st.session_state["fert_layers_store"] = {}
+        st.session_state["fert_gdfs"] = {}
+        if ffs:
+            summ=[]
+            for f in ffs:
+                grp, gdf = process_prescription(f, "fertilizer")
+                if not grp.empty:
+                    key = os.path.splitext(f.name)[0].lower().replace(" ","_")
+                    st.session_state["fert_layers_store"][key] = grp
+                    if gdf is not None and not gdf.empty: st.session_state["fert_gdfs"][key] = gdf
+                    summ.append({"File": f.name, "Products": len(grp)})
+            if summ:
+                st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
+                             height=df_px_height(len(summ)))
+        else:
+            st.caption("No fertilizer files uploaded.")
 
-# --- Seed ---
-with u4:
-    st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
-    seed_files = st.file_uploader("Seed", type=["csv","geojson","json","zip"], key="up_seed", accept_multiple_files=True)
-    st.session_state["seed_layers_store"] = {}
-    st.session_state["seed_gdf"] = None
-    if seed_files:
-        summ = []
-        # If multiple vector seed files arrive, keep the last geometry for overlay
-        last_seed_gdf = None
-        for f in seed_files:
-            grouped, gdf_orig = process_prescription(f, "seed")
-            if not grouped.empty:
-                key = os.path.splitext(f.name)[0].lower().replace(" ","_")
-                st.session_state["seed_layers_store"][key] = grouped
-                if gdf_orig is not None and not gdf_orig.empty:
-                    last_seed_gdf = gdf_orig
-                summ.append({"File": f.name, "Products": len(grouped)})
-        if last_seed_gdf is not None and not last_seed_gdf.empty:
-            st.session_state["seed_gdf"] = last_seed_gdf
-        if summ:
-            st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
-                         height=df_px_height(len(summ)))
-    else:
-        st.caption("No seed files uploaded.")
+    # ---- Seed ----
+    with u4:
+        st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP")
+        sfs = st.file_uploader("Seed", type=["csv","geojson","json","zip"], key="up_seed", accept_multiple_files=True)
+        st.session_state["seed_layers_store"] = {}
+        st.session_state["seed_gdf"] = None
+        if sfs:
+            summ=[]; last_gdf=None
+            for f in sfs:
+                grp, gdf = process_prescription(f, "seed")
+                if not grp.empty:
+                    key = os.path.splitext(f.name)[0].lower().replace(" ","_")
+                    st.session_state["seed_layers_store"][key] = grp
+                    if gdf is not None and not gdf.empty: last_gdf = gdf
+                    summ.append({"File": f.name, "Products": len(grp)})
+            if last_gdf is not None and not last_gdf.empty:
+                st.session_state["seed_gdf"] = last_gdf
+            if summ:
+                st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
+                             height=df_px_height(len(summ)))
+        else:
+            st.caption("No seed files uploaded.")
 
-# ---------------------------------------------------------
-# Fixed Inputs — 12 inputs in one row (compact, no scroll)
-# ---------------------------------------------------------
-st.subheader("Fixed Inputs ($/ac)")
-r = st.columns(12, gap="small")
-def _v(state_key, default=0.0):  # persistent default without crashes
-    try:
-        return float(st.session_state.get(state_key, default))
-    except Exception:
-        return float(default)
 
-with r[0]:  chemicals      = st.number_input("Chem", min_value=0.0, value=_v("fi_chem"), step=1.0, key="fi_chem")
-with r[1]:  insurance      = st.number_input("Insur", min_value=0.0, value=_v("fi_ins"), step=1.0, key="fi_ins")
-with r[2]:  insecticide    = st.number_input("Insect/Fung", min_value=0.0, value=_v("fi_insect"), step=1.0, key="fi_insect")
-with r[3]:  fertilizer     = st.number_input("Fert Flat", min_value=0.0, value=_v("fi_fert"), step=1.0, key="fi_fert")
-with r[4]:  seed           = st.number_input("Seed Flat", min_value=0.0, value=_v("fi_seed"), step=1.0, key="fi_seed")
-with r[5]:  cash_rent      = st.number_input("Cash Rent", min_value=0.0, value=_v("fi_rent"), step=1.0, key="fi_rent")
-with r[6]:  machinery      = st.number_input("Mach", min_value=0.0, value=_v("fi_mach"), step=1.0, key="fi_mach")
-with r[7]:  labor          = st.number_input("Labor", min_value=0.0, value=_v("fi_labor"), step=1.0, key="fi_labor")
-with r[8]:  coliving       = st.number_input("Living", min_value=0.0, value=_v("fi_col"), step=1.0, key="fi_col")
-with r[9]:  extra_fuel     = st.number_input("Fuel", min_value=0.0, value=_v("fi_fuel"), step=1.0, key="fi_fuel")
-with r[10]: extra_interest = st.number_input("Interest", min_value=0.0, value=_v("fi_int"), step=1.0, key="fi_int")
-with r[11]: truck_fuel     = st.number_input("Truck Fuel", min_value=0.0, value=_v("fi_truck"), step=1.0, key="fi_truck")
+# ===========================
+# FIXED INPUTS + CORN/SOY STRIP
+# ===========================
+def render_fixed_inputs_and_strip():
+    st.subheader("Fixed Inputs ($/ac) & Compare Strip")
 
-expenses = {
-    "Chemicals": chemicals, "Insurance": insurance, "Insecticide/Fungicide": insecticide,
-    "Fertilizer (Flat)": fertilizer, "Seed (Flat)": seed, "Cash Rent": cash_rent,
-    "Machinery": machinery, "Labor": labor, "Cost of Living": coliving,
-    "Extra Fuel": extra_fuel, "Extra Interest": extra_interest, "Truck Fuel": truck_fuel,
-}
-base_expenses_per_acre = float(sum(expenses.values()))
+    # ---- 12 fixed inputs on one line ----
+    with st.container():
+        cols = st.columns(12, gap="small")
+        container = st.container()
+    with container:
+        st.markdown('<div class="fixed-12">', unsafe_allow_html=True)
+        labels = [
+            ("Chem", "chem"), ("Insur", "ins"), ("Insect/Fung", "insect"), ("Fert Flat", "fert"),
+            ("Seed Flat", "seed"), ("Cash Rent", "rent"), ("Mach", "mach"), ("Labor", "labor"),
+            ("Living", "col"), ("Fuel", "fuel"), ("Interest", "int"), ("Truck Fuel", "truck"),
+        ]
+        vals = {}
+        for (lab, key), c in zip(labels, cols):
+            with c:
+                st.caption(lab)
+                vals[key] = st.number_input(f"{key}_num", min_value=0.0, value=float(st.session_state.get(key, 0.0)),
+                                            step=1.0, label_visibility="collapsed")
+                st.session_state[key] = vals[key]
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# Corn/Soy strip (one row) + tiny preview (NO SCROLL)
-# ---------------------------------------------------------
-c1,c2,c3,c4,c5 = st.columns([1,1,1,1,1], gap="small")
+    expenses = {
+        "Chemicals": vals["chem"], "Insurance": vals["ins"], "Insecticide/Fungicide": vals["insect"],
+        "Fertilizer (Flat)": vals["fert"], "Seed (Flat)": vals["seed"], "Cash Rent": vals["rent"],
+        "Machinery": vals["mach"], "Labor": vals["labor"], "Cost of Living": vals["col"],
+        "Extra Fuel": vals["fuel"], "Extra Interest": vals["int"], "Truck Fuel": vals["truck"],
+    }
+    base_expenses_per_acre = float(sum(expenses.values()))
+    st.session_state["base_expenses_per_acre"] = base_expenses_per_acre
 
-with c1:
-    st.caption("Corn Yield (bu/ac)")
-    st.session_state["corn_yield"] = st.number_input(
-        "corn_yld", min_value=0.0, value=float(st.session_state.get("corn_yield",200.0)),
-        step=1.0, label_visibility="collapsed"
-    )
-with c2:
-    st.caption("Corn Price ($/bu)")
-    st.session_state["corn_price"] = st.number_input(
-        "corn_px", min_value=0.0, value=float(st.session_state.get("corn_price",5.0)),
-        step=0.05, label_visibility="collapsed"
-    )
-with c3:
-    st.caption("Soy Yield (bu/ac)")
-    st.session_state["bean_yield"] = st.number_input(
-        "bean_yld", min_value=0.0, value=float(st.session_state.get("bean_yield",60.0)),
-        step=1.0, label_visibility="collapsed"
-    )
-with c4:
-    st.caption("Soy Price ($/bu)")
-    st.session_state["bean_price"] = st.number_input(
-        "bean_px", min_value=0.0, value=float(st.session_state.get("bean_price",12.0)),
-        step=0.05, label_visibility="collapsed"
-    )
-with c5:
-    # Only show when no yield map
-    ydf = st.session_state.get("yield_df", pd.DataFrame())
-    has_yield = isinstance(ydf, pd.DataFrame) and not ydf.empty \
-                and {"latitude","longitude","yield"}.issubset({c.lower() for c in ydf.columns})
-    if not has_yield:
-        st.caption("Target Yield (bu/ac)")
-        st.session_state["target_yield"] = st.number_input(
-            "target_yld", min_value=0.0, value=float(st.session_state.get("target_yield",200.0)),
-            step=1.0, label_visibility="collapsed"
-        )
-    else:
-        st.caption("Target Yield (from map)")
-        st.markdown("<div style='opacity:.65;height:28px'></div>", unsafe_allow_html=True)
+    # ---- Corn/Soy inputs in one line + NO-SCROLL static table ----
+    c1,c2,c3,c4 = st.columns(4, gap="small")
+    with c1:
+        st.caption("Corn Yield (bu/ac)")
+        st.session_state["corn_yield"] = st.number_input("corn_yld", min_value=0.0, value=float(st.session_state.get("corn_yield", 200.0)),
+                                                         step=1.0, label_visibility="collapsed")
+    with c2:
+        st.caption("Corn Price ($/bu)")
+        st.session_state["corn_price"] = st.number_input("corn_px", min_value=0.0, value=float(st.session_state.get("corn_price", 5.0)),
+                                                         step=0.1, label_visibility="collapsed")
+    with c3:
+        st.caption("Soy Yield (bu/ac)")
+        st.session_state["bean_yield"] = st.number_input("bean_yld", min_value=0.0, value=float(st.session_state.get("bean_yield", 60.0)),
+                                                         step=1.0, label_visibility="collapsed")
+    with c4:
+        st.caption("Soy Price ($/bu)")
+        st.session_state["bean_price"] = st.number_input("bean_px", min_value=0.0, value=float(st.session_state.get("bean_price", 12.0)),
+                                                         step=0.1, label_visibility="collapsed")
 
-# ---- Corn/Soy tiny preview (no scroll, fits width) ----
-prev_df = pd.DataFrame({
-    "Crop": ["Corn", "Soybeans"],
-    "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-    "Price": [st.session_state["corn_price"], st.session_state["bean_price"]],
-    "Revenue": [
-        st.session_state["corn_yield"] * st.session_state["corn_price"],
-        st.session_state["bean_yield"] * st.session_state["bean_price"],
-    ],
-    "Fixed": [base_expenses_per_acre, base_expenses_per_acre],
-})
-prev_df["Breakeven"] = prev_df["Revenue"] - prev_df["Fixed"]
+    prev_df = pd.DataFrame({
+        "Crop": ["Corn", "Soybeans"],
+        "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+        "Price": [st.session_state["corn_price"], st.session_state["bean_price"]],
+        "Revenue": [
+            st.session_state["corn_yield"] * st.session_state["corn_price"],
+            st.session_state["bean_yield"] * st.session_state["bean_price"],
+        ],
+        "Fixed": [base_expenses_per_acre, base_expenses_per_acre],
+    })
+    prev_df["Breakeven"] = prev_df["Revenue"] - prev_df["Fixed"]
 
-# Pre-format as strings so st.table stays small and crisp
-prev_view = prev_df.copy()
-prev_view["Yield"]     = prev_view["Yield"].map(lambda v: f"{v:.0f}")
-prev_view["Price"]     = prev_view["Price"].map(lambda v: f"${v:,.2f}")
-prev_view["Revenue"]   = prev_view["Revenue"].map(lambda v: f"${v:,.0f}")
-prev_view["Fixed"]     = prev_view["Fixed"].map(lambda v: f"${v:,.0f}")
-prev_view["Breakeven"] = prev_view["Breakeven"].map(lambda v: f"${v:,.0f}")
+    # format → static table (no scroll)
+    pv = prev_df.copy()
+    pv["Yield"]     = pv["Yield"].map(lambda v: f"{v:.0f}")
+    pv["Price"]     = pv["Price"].map(lambda v: f"${v:,.2f}")
+    pv["Revenue"]   = pv["Revenue"].map(lambda v: f"${v:,.0f}")
+    pv["Fixed"]     = pv["Fixed"].map(lambda v: f"${v:,.0f}")
+    pv["Breakeven"] = pv["Breakeven"].map(lambda v: f"${v:,.0f}")
 
-# Slightly tighter table cells for this one table
-st.markdown("""
-<style>
-/* only affects static tables; keeps it compact */
-table { width:100%; }
-thead th, tbody td { padding:4px 8px !important; }
-</style>
-""", unsafe_allow_html=True)
-
-st.table(prev_view)
-
-# Single sell price to feed heatmaps/revenue (use Corn price)
-sell_price = float(st.session_state.get("corn_price", 5.0))
+    st.table(pv)  # no internal scroll, hugs the content
 
 # ---------------------------------------------------------
 # Map
