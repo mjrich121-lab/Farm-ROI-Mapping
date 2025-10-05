@@ -172,6 +172,19 @@ def get_var_costs():
         for df in st.session_state["seed_layers_store"].values():
             if not df.empty: seed_cost += float(df["CostPerAcre"].sum())
     return fert_cost, seed_cost
+# Mini number input used for ultra-compact rows
+def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
+    """Caption + compact number_input that persists using its key."""
+    st.caption(label)
+    # Let Streamlit keep state by key; seed the initial value from state or default
+    init = float(st.session_state.get(key, default))
+    return st.number_input(
+        key,
+        min_value=0.0,
+        value=init,
+        step=step,
+        label_visibility="collapsed"
+    )
 
 # =========================================================
 # 2–3. FILE UPLOADS — COMPACT 4-UP
@@ -297,15 +310,14 @@ st.markdown("### Costs & Assumptions")
 # ------------------------------
 # Fixed Inputs ($/ac) — 12 in ONE row (ultra-compact)
 # ------------------------------
-# If your helper is named _mini_num, this alias makes the same code work.
 num = (mini_num if "mini_num" in globals() else _mini_num)
 
-# Make the number boxes narrower so 12 fit across
+# Make the number boxes narrower so 12 truly fit across
 st.markdown(
     """
     <style>
-      /* override any earlier width for this specific row */
-      div[data-testid="fixed-row"] div[data-testid="stNumberInput"]{
+      /* Narrow all number inputs (safe override placed after your global CSS) */
+      div[data-testid="stNumberInput"]{
           width:100px !important; max-width:100px !important;
       }
     </style>
@@ -344,7 +356,6 @@ expenses = {
     "Truck Fuel": truck_fuel,
 }
 base_expenses_per_acre = float(sum(expenses.values()))
-
 
 # One-row assumptions: Sell Price + (Target Yield only if no map)
 ass_cols = st.columns([1,1,2])
