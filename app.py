@@ -1349,6 +1349,7 @@ div[data-testid="stDataFrame"] table {
 </style>
 """, unsafe_allow_html=True)
 # Force Streamlit to render CSS last in DOM order
+st.caption("✅ Layout patch loaded successfully")
 st.empty()
 st.markdown(
     "<style>html,body{overflow:hidden!important;}</style>",
