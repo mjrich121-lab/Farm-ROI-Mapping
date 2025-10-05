@@ -1,7 +1,3 @@
-import streamlit as st
-st.warning("🧩 DEPLOY TEST — this should appear if app rebuilt")
-
-
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF
 # =========================================================
@@ -22,14 +18,43 @@ from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
 import time
-st.warning(f"ACTIVE FILE CHECK — {__file__}", icon="🧭")
-time.sleep(2)
 
 st.cache_data.clear()
 st.cache_resource.clear()
 
-st.warning("Farm ROI Tool V4 — active reload check", icon="⚡")
+# === GLOBAL TABLE SCROLL FIX ===
+st.markdown("""
+<style>
+/* remove both vertical and horizontal scroll limits */
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataFrameScrollableContainer"],
+[data-testid="stDataFrame"],
+[data-testid="stHorizontalBlock"],
+[data-testid="stVerticalBlock"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
 
+/* inner div that sometimes sets min-width on tables */
+[data-testid="stDataFrame"] table {
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+/* fix for st.data_editor horizontal scroll */
+[data-testid="stDataEditorGrid"] {
+    overflow: visible !important;
+}
+
+/* ensure any child div inherits */
+[data-testid="stDataFrameContainer"] * {
+    overflow: visible !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ===========================
 # COMPACT THEME + LAYOUT
