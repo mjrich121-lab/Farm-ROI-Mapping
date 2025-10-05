@@ -70,6 +70,20 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+# Make any remaining number inputs physically narrow
+st.markdown(
+    """
+    <style>
+    /* Narrow number inputs site-wide (corn/soy assumptions, etc.) */
+    div[data-testid="stNumberInput"] { width: 132px !important; max-width: 132px !important; }
+    div[data-testid="stNumberInput"] div[role="spinbutton"] {
+        min-height: 20px !important; height: 20px !important; padding: 0 4px !important; font-size: .78rem !important;
+    }
+    div[data-testid="stNumberInput"] button { padding: 0 !important; min-width: 16px !important; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # =========================================================
 # HELPERS
@@ -333,34 +347,63 @@ with c4:
     else:
         st.caption("No seed files")
 
-
 # =========================================================
-# 4. COMPACT CONTROLS ABOVE MAP (SELL PRICE REMOVED)
+# 4A. Expense Inputs (Ultra-compact grid editor)
+#    - Drop-in replacement for the 12 number inputs
+#    - Keeps outputs: `expenses` dict and `base_expenses_per_acre` float
 # =========================================================
-row1 = st.columns(6)
-row2 = st.columns(6)
 
-with row1[0]: chemicals      = _mini_num("Chem ($/ac)", "chem")
-with row1[1]: insurance      = _mini_num("Insur ($/ac)", "ins")
-with row1[2]: insecticide    = _mini_num("Insect/Fung ($/ac)", "insect")
-with row1[3]: fertilizer     = _mini_num("Fert Flat ($/ac)", "fert")
-with row1[4]: seed           = _mini_num("Seed Flat ($/ac)", "seed")
-with row1[5]: cash_rent      = _mini_num("Cash Rent ($/ac)", "rent")
+st.markdown("#### 4A. Expense Inputs (Per Acre $)")
 
-with row2[0]: machinery      = _mini_num("Mach ($/ac)", "mach")
-with row2[1]: labor          = _mini_num("Labor ($/ac)", "labor")
-with row2[2]: coliving       = _mini_num("Living ($/ac)", "col")
-with row2[3]: extra_fuel     = _mini_num("Fuel ($/ac)", "fuel")
-with row2[4]: extra_interest = _mini_num("Interest ($/ac)", "int")
-with row2[5]: truck_fuel     = _mini_num("Truck Fuel ($/ac)", "truck")
+# Build defaults once, then preserve user edits in session
+_default_expense_rows = [
+    ("Chemicals", 0.0),
+    ("Insurance", 0.0),
+    ("Insecticide/Fungicide", 0.0),
+    ("Fertilizer (Flat)", 0.0),
+    ("Seed (Flat)", 0.0),
+    ("Cash Rent", 0.0),
+    ("Machinery", 0.0),
+    ("Labor", 0.0),
+    ("Cost of Living", 0.0),
+    ("Extra Fuel", 0.0),
+    ("Extra Interest", 0.0),
+    ("Truck Fuel", 0.0),
+]
 
-expenses = {
-    "Chemicals": chemicals, "Insurance": insurance, "Insecticide/Fungicide": insecticide,
-    "Fertilizer (Flat)": fertilizer, "Seed (Flat)": seed, "Machinery": machinery,
-    "Labor": labor, "Cost of Living": coliving, "Extra Fuel": extra_fuel,
-    "Extra Interest": extra_interest, "Truck Fuel": truck_fuel, "Cash Rent": cash_rent,
-}
-base_expenses_per_acre = float(sum(expenses.values()))
+# Initialize or refresh structure if needed
+if "exp_df" not in st.session_state:
+    st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
+else:
+    # Ensure we have the same 12 rows in correct order (robust to older state)
+    cur = st.session_state["exp_df"]
+    names = [r[0] for r in _default_expense_rows]
+    if set(cur["Expense"].tolist()) != set(names):
+        st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
+
+# Render super-compact data editor (no scroll)
+exp_df = st.data_editor(
+    st.session_state["exp_df"],
+    hide_index=True,
+    num_rows="fixed",
+    use_container_width=True,
+    key="exp_editor",
+    column_config={
+        "Expense": st.column_config.TextColumn(disabled=True),
+        "$/ac": st.column_config.NumberColumn(format="%.2f", step=1.0, help="Per-acre cost"),
+    },
+    height=df_height(12, row_h=24, header=30, pad=0),  # exact height = no internal scroll
+)
+
+# Sanitize numeric and persist
+exp_df["$/ac"] = pd.to_numeric(exp_df["$/ac"], errors="coerce").fillna(0.0)
+st.session_state["exp_df"] = exp_df.copy()
+
+# Outputs used elsewhere in your app (unchanged names/types)
+expenses = dict(zip(exp_df["Expense"], exp_df["$/ac"]))
+base_expenses_per_acre = float(exp_df["$/ac"].sum())
+
+
 
 # ---- 4B–4D split layout (left: products, right: crop assumptions + preview) ----
 left, right = st.columns([1, 1])
@@ -911,21 +954,21 @@ with col_left:
             if val < 0: return "color: crimson; font-weight: 600;"
         return "font-weight: 600;"
 
-    st.dataframe(
-        breakeven_df.style.applymap(
-            highlight_budget,
-            subset=["Breakeven Budget ($/ac)"]
-        ).format({
-            "Yield Goal (bu/ac)": "{:,.1f}",
-            "Sell Price ($/bu)": "${:,.2f}",
-            "Revenue ($/ac)": "${:,.2f}",
-            "Fixed Inputs ($/ac)": "${:,.2f}",
-            "Breakeven Budget ($/ac)": "${:,.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True,
-        height=120
-    )
+   st.dataframe(
+    breakeven_df.style.applymap(
+        highlight_budget,
+        subset=["Breakeven Budget ($/ac)"]
+    ).format({
+        "Yield Goal (bu/ac)": "{:,.1f}",
+        "Sell Price ($/bu)": "${:,.2f}",
+        "Revenue ($/ac)": "${:,.2f}",
+        "Fixed Inputs ($/ac)": "${:,.2f}",
+        "Breakeven Budget ($/ac)": "${:,.2f}"
+    }),
+    use_container_width=True,
+    hide_index=True,
+    height=df_height(len(breakeven_df))   # <-- no scroll
+)
 
     # Profit Metrics Comparison
     var_profit = 0.0
@@ -966,19 +1009,20 @@ with col_left:
             if val < 0: return "color: crimson; font-weight: 600;"
         return "font-weight: 600;"
 
-    st.dataframe(
-        comparison.style.applymap(
-            highlight_profit,
-            subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
-        ).format({
-            "Breakeven Budget":"${:,.2f}",
-            "Variable Rate":"${:,.2f}",
-            "Fixed Rate":"${:,.2f}"
-        }),
-        use_container_width=True,
-        hide_index=True,
-        height=120
-    )
+   st.dataframe(
+    comparison.style.applymap(
+        highlight_profit,
+        subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
+    ).format({
+        "Breakeven Budget":"${:,.2f}",
+        "Variable Rate":"${:,.2f}",
+        "Fixed Rate":"${:,.2f}"
+    }),
+    use_container_width=True,
+    hide_index=True,
+    height=df_height(len(comparison))     # <-- no scroll
+)
+
 
     with st.expander("Show Calculation Formulas", expanded=False):
         st.markdown("""
@@ -990,27 +1034,31 @@ with col_left:
         """, unsafe_allow_html=True)
 
 # RIGHT: Fixed Inputs
-with col_right:
-    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
-    total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
-    fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
+fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-        lambda x: ["font-weight: 700;" if v == "Total Fixed Costs" else "" for v in x],
-        subset=["Expense"]
-    ).apply(
-        lambda x: ["font-weight: 700;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
-        subset=["$/ac"]
-    )
+styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+    lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
+    subset=["Expense"]
+).apply(
+    lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
+    subset=["$/ac"]
+)
 
-    # Compact table height
-    row_height = 28
-    header_buffer = 44
-    table_height = int(len(fixed_df) * row_height + header_buffer)
+fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-    st.dataframe(
-        styled_fixed,
-        use_container_width=True,
-        hide_index=True,
-        height=table_height
-    )
+styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+    lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
+    subset=["Expense"]
+).apply(
+    lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
+    subset=["$/ac"]
+)
+
+st.dataframe(
+    styled_fixed,
+    use_container_width=True,
+    hide_index=True,
+    height=df_height(len(fixed_df))       # <-- replaces manual math
+)
+
+
