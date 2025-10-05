@@ -771,10 +771,184 @@ _bootstrap_defaults()
 render_uploaders()
 render_fixed_inputs_and_strip()
 
-# ---------- Build Map ----------
+# =========================================================
+# MAP + OVERLAYS + HEATMAPS + SECTION 9 (Left/Right) — COMPACT & BULLETPROOF
+# =========================================================
+
+# ---------- tiny helpers (defined only if missing) ----------
+if 'df_px_height' not in globals():
+    def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) -> int:
+        nrows = max(1, int(nrows))
+        return int(header + nrows * row_h + pad)
+
+if 'find_col' not in globals():
+    def find_col(df, names):
+        """Return first case-insensitive match from names or None."""
+        lower = {c.lower(): c for c in df.columns}
+        for n in names:
+            if n in lower: return lower[n]
+        return None
+
+if 'make_base_map' not in globals():
+    from branca.element import MacroElement, Template
+    import folium
+    def make_base_map():
+        m = folium.Map(location=[39.5, -98.35], zoom_start=5, tiles=None, control_scale=True, prefer_canvas=True)
+        # base tiles (guarded)
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri", name="Esri Imagery", control=False
+            ).add_to(m)
+        except Exception:
+            pass
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri", name="Esri Labels", overlay=True, control=False
+            ).add_to(m)
+        except Exception:
+            pass
+        # enable scrollwheel only on click
+        template = Template("""
+            {% macro script(this, kwargs) %}
+            var map = {{this._parent.get_name()}};
+            map.scrollWheelZoom.disable();
+            map.on('click', function(){ map.scrollWheelZoom.enable(); });
+            map.on('mouseout', function(){ map.scrollWheelZoom.disable(); });
+            {% endmacro %}
+        """)
+        macro = MacroElement(); macro._template = template
+        m.get_root().add_child(macro)
+        return m
+
+if 'compute_bounds_for_heatmaps' not in globals():
+    def compute_bounds_for_heatmaps():
+        try:
+            bnds = []
+            z = st.session_state.get("zones_gdf")
+            if z is not None and not getattr(z, "empty", True):
+                tb = z.total_bounds; bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+            s = st.session_state.get("seed_gdf")
+            if s is not None and not getattr(s, "empty", True):
+                tb = s.total_bounds; bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+            for _, fg in st.session_state.get("fert_gdfs", {}).items():
+                if fg is not None and not getattr(fg, "empty", True):
+                    tb = fg.total_bounds; bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+            y = st.session_state.get("yield_df")
+            if isinstance(y, pd.DataFrame) and not y.empty:
+                latc = find_col(y, ["latitude"]); lonc = find_col(y, ["longitude"])
+                if latc and lonc:
+                    bnds.append([[float(y[latc].min()), float(y[lonc].min())],
+                                 [float(y[latc].max()), float(y[lonc].max())]])
+            if bnds:
+                south = min(b[0][0] for b in bnds)
+                west  = min(b[0][1] for b in bnds)
+                north = max(b[1][0] for b in bnds)
+                east  = max(b[1][1] for b in bnds)
+                return (south, west, north, east)
+        except Exception:
+            pass
+        return (25.0, -125.0, 49.0, -66.0)  # fallback: CONUS
+
+if 'add_gradient_legend' not in globals():
+    from matplotlib import colors as mpl_colors
+    import matplotlib.pyplot as plt
+    def add_gradient_legend(m, name, vmin, vmax, cmap, index):
+        top_offset = 20 + (index * 80)
+        stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+        gradient_css = ", ".join(stops)
+        legend_html = f"""
+        <div style="position:absolute; top:{top_offset}px; left:10px; z-index:9999;
+                    font-family:sans-serif; font-size:12px; color:white;
+                    background:rgba(0,0,0,.65); padding:6px 10px; border-radius:6px; width:180px;">
+          <div style="font-weight:600; margin-bottom:4px;">{name}</div>
+          <div style="height:14px; background:linear-gradient(90deg,{gradient_css});
+                      border-radius:2px; margin-bottom:4px;"></div>
+          <div style="display:flex; justify-content:space-between;">
+            <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+          </div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
+
+if 'add_prescription_overlay' not in globals():
+    def add_prescription_overlay(m, gdf, name, cmap, index):
+        """Color by rate column if present, else neutral fill."""
+        if gdf is None or getattr(gdf, "empty", True): return
+        g = gdf.copy()
+        # guess a rate column
+        rate_col = next((c for c in g.columns if ("tgt" in c.lower() or "rate" in c.lower())), None)
+        vmin=vmax=None
+        if rate_col is not None:
+            vals = pd.to_numeric(g[rate_col], errors="coerce")
+            good = vals.dropna()
+            if not good.empty:
+                vmin, vmax = float(good.min()), float(good.max())
+                if vmin == vmax: vmax = vmin + 1.0
+
+        def style_fn(feat):
+            if rate_col is None or vmin is None:
+                return {"stroke": False, "opacity": 0, "weight": 0, "fillColor": "#808080", "fillOpacity": 0.45}
+            try:
+                v = float(feat["properties"].get(rate_col))
+                t = max(0.0, min(1.0, (v - vmin) / (vmax - vmin)))
+                fill = mpl_colors.rgb2hex(cmap(t)[:3])
+            except Exception:
+                fill = "#808080"
+            return {"stroke": False, "opacity": 0, "weight": 0, "fillColor": fill, "fillOpacity": 0.55}
+
+        folium.GeoJson(g, name=name, style_function=style_fn,
+                       tooltip=folium.GeoJsonTooltip(fields=[c for c in [rate_col] if c])).add_to(m)
+        if vmin is not None:
+            add_gradient_legend(m, f"{name} (rate)", vmin, vmax, cmap, index)
+
+if 'add_heatmap_overlay' not in globals():
+    import numpy as np
+    from scipy.interpolate import griddata
+    def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
+        try:
+            if df is None or df.empty: return None, None
+            south, west, north, east = bounds
+            latc = find_col(df, ["latitude"]) or "Latitude"
+            lonc = find_col(df, ["longitude"]) or "Longitude"
+            if latc not in df.columns or lonc not in df.columns: return None, None
+
+            vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+            mask = df[latc].apply(np.isfinite) & df[lonc].apply(np.isfinite) & pd.Series(values).apply(np.isfinite)
+            if mask.sum() < 3: return None, None
+
+            pts_lon = df.loc[mask, lonc].astype(float).values
+            pts_lat = df.loc[mask, latc].astype(float).values
+            vals_ok = pd.to_numeric(pd.Series(values)[mask], errors="coerce").astype(float).values
+
+            n = 220
+            lon_lin = np.linspace(west, east, n); lat_lin = np.linspace(south, north, n)
+            lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+            grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+            grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+            grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+            if grid is None or np.all(np.isnan(grid)): return None, None
+
+            vmin = float(np.nanpercentile(vals_ok, 5)) if len(vals_ok) else 0.0
+            vmax = float(np.nanpercentile(vals_ok, 95)) if len(vals_ok) else 1.0
+            if vmin == vmax: vmax = vmin + 1.0
+
+            rgba = cmap((grid - vmin) / (vmax - vmin))
+            rgba = np.flipud(rgba); rgba = (rgba * 255).astype(np.uint8)
+
+            folium.raster_layers.ImageOverlay(
+                image=rgba, bounds=[[south, west], [north, east]],
+                opacity=0.5, name=name, overlay=True, show=show_default
+            ).add_to(m)
+            return vmin, vmax
+        except Exception:
+            return None, None
+
+# ---------- build base map ----------
 m = make_base_map()
 
-# Zones overlay
+# ---------- Zones overlay ----------
 zones_gdf = st.session_state.get("zones_gdf")
 if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
     try:
@@ -788,20 +962,16 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
 
         folium.GeoJson(
-            zones_gdf,
-            name="Zones",
+            zones_gdf, name="Zones",
             style_function=lambda feature: {
                 "fillColor": color_map.get(str(feature["properties"].get("Zone", "")), "#808080"),
-                "color": "black",
-                "weight": 1,
-                "fillOpacity": 0.08,
+                "color": "black", "weight": 1, "fillOpacity": 0.08,
             },
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
             )
         ).add_to(m)
 
-        # Legend
         legend_items = "".join(
             f"<div style='display:flex;align-items:center;margin:2px 0;'>"
             f"<div style='background:{color_map[z]};width:14px;height:14px;margin-right:6px;'></div>{z}</div>"
@@ -824,7 +994,7 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
     except Exception as e:
         st.warning(f"⚠️ Skipping zones overlay: {e}")
 
-# Prescription overlays
+# ---------- Prescription overlays ----------
 legend_ix = 0
 seed_gdf = st.session_state.get("seed_gdf")
 if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
@@ -836,22 +1006,23 @@ for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
         add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", plt.cm.Blues, legend_ix)
         legend_ix += 1
 
-# Heatmaps (yield/profit)
+# ---------- Heatmaps (yield / profits) ----------
 bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-if ydf is None or ydf.empty or (
-    find_col(ydf, ["latitude"]) is None or find_col(ydf, ["longitude"]) is None
-):
+if not (isinstance(ydf, pd.DataFrame) and not ydf.empty and
+        find_col(ydf, ["latitude"]) and find_col(ydf, ["longitude"])):
     # fallback: single cell at map center using Target Yield
     lat_center = (bounds[0] + bounds[2]) / 2.0
     lon_center = (bounds[1] + bounds[3]) / 2.0
-    df_for_maps = pd.DataFrame({"Yield": [float(st.session_state.get("target_yield", 200.0))],
-                                "Latitude": [lat_center], "Longitude": [lon_center]})
+    df_for_maps = pd.DataFrame({
+        "Yield": [float(st.session_state.get("target_yield", 200.0))],
+        "Latitude": [lat_center], "Longitude": [lon_center]
+    })
 else:
     df_for_maps = ydf.copy()
-    # ensure column names
+    # ensure consistent names
     latc = find_col(df_for_maps, ["latitude"])
     lonc = find_col(df_for_maps, ["longitude"])
     if latc and latc != "Latitude": df_for_maps.rename(columns={latc: "Latitude"}, inplace=True)
@@ -861,27 +1032,32 @@ else:
 try:
     df_for_maps = df_for_maps.copy()
 
-    # normalize yield & revenue
     if "Yield" not in df_for_maps.columns:
         df_for_maps["Yield"] = 0.0
     df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0.0)
     df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
 
+    # base expenses fallback
     base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
+    if not base_expenses_per_acre:
+        # try from expenses dict if available
+        base_expenses_per_acre = float(sum(st.session_state.get("expenses_dict", {}).values())) if isinstance(
+            st.session_state.get("expenses_dict", {}), dict) else 0.0
+    st.session_state["base_expenses_per_acre"] = base_expenses_per_acre  # keep for Section 9
 
-    # variable totals from uploaded layer summaries
+    # variable RX totals
     fert_var = 0.0
     for d in st.session_state.get("fert_layers_store", {}).values():
         if isinstance(d, pd.DataFrame) and not d.empty:
-            fert_var += float(pd.to_numeric(d["CostPerAcre"], errors="coerce").fillna(0.0).sum())
+            fert_var += float(pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0.0).sum())
     seed_var = 0.0
     for d in st.session_state.get("seed_layers_store", {}).values():
         if isinstance(d, pd.DataFrame) and not d.empty:
-            seed_var += float(pd.to_numeric(d["CostPerAcre"], errors="coerce").fillna(0.0).sum())
+            seed_var += float(pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0.0).sum())
 
     df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
 
-    # fixed product costs ($/ac) if present
+    # fixed product costs ($/ac)
     fixed_costs = 0.0
     fx = st.session_state.get("fixed_products", pd.DataFrame())
     if isinstance(fx, pd.DataFrame) and not fx.empty:
@@ -926,5 +1102,173 @@ except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
 
-# ---------- Profit Summary ----------
+
+# =========================================================
+# 9. PROFIT SUMMARY — Left / Right layout (compact)
+# =========================================================
+def render_profit_summary():
+    st.header("Profit Summary")
+
+    def _h(n): 
+        return df_px_height(n, row_h=28, header=34, pad=4)
+
+    # ---- state / defaults
+    expenses: dict = st.session_state.get("expenses_dict", {})
+    base_exp = float(st.session_state.get("base_expenses_per_acre", float(sum(expenses.values())) if expenses else 0.0))
+    corn_yield = float(st.session_state.get("corn_yield", 200.0))
+    corn_price = float(st.session_state.get("corn_price", 5.0))
+    bean_yield = float(st.session_state.get("bean_yield", 60.0))
+    bean_price = float(st.session_state.get("bean_price", 12.0))
+    target_yield = float(st.session_state.get("target_yield", 200.0))
+    sell_price = float(st.session_state.get("sell_price", corn_price))
+
+    # ---- breakeven (strip)
+    breakeven_df = pd.DataFrame({
+        "Crop": ["Corn", "Soybeans"],
+        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
+        "Sell Price ($/bu)": [corn_price, bean_price],
+    })
+    breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
+    breakeven_df["Fixed Inputs ($/ac)"] = base_exp
+    breakeven_df["Breakeven Budget ($/ac)"] = (
+        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    )
+
+    # ---- variable-rate revenue from map (avg)
+    ydf = st.session_state.get("yield_df", pd.DataFrame())
+    if isinstance(ydf, pd.DataFrame) and not ydf.empty:
+        if "Revenue_per_acre" in ydf.columns:
+            revenue_var = float(pd.to_numeric(ydf["Revenue_per_acre"], errors="coerce").fillna(0.0).mean())
+        elif "Yield" in ydf.columns:
+            revenue_var = float(pd.to_numeric(ydf["Yield"], errors="coerce").fillna(0.0).mean() * sell_price)
+        else:
+            revenue_var = 0.0
+    else:
+        revenue_var = 0.0
+
+    # ---- VR expenses from RX summaries
+    fert_costs = 0.0
+    for d in st.session_state.get("fert_layers_store", {}).values():
+        if isinstance(d, pd.DataFrame) and not d.empty:
+            fert_costs += float(pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0.0).sum())
+    seed_costs = 0.0
+    for d in st.session_state.get("seed_layers_store", {}).values():
+        if isinstance(d, pd.DataFrame) and not d.empty:
+            seed_costs += float(pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0.0).sum())
+    expenses_var = base_exp + fert_costs + seed_costs
+    var_profit = revenue_var - expenses_var
+
+    # ---- fixed-rate totals
+    fixed_costs = 0.0
+    fx = st.session_state.get("fixed_products", pd.DataFrame())
+    if isinstance(fx, pd.DataFrame) and not fx.empty:
+        if "$/ac" in fx.columns:
+            fixed_costs = float(pd.to_numeric(fx["$/ac"], errors="coerce").fillna(0.0).sum())
+        else:
+            rcol = next((c for c in ["Rate", "rate"] if c in fx.columns), None)
+            pcol = next((c for c in ["CostPerUnit", "costperunit"] if c in fx.columns), None)
+            if rcol and pcol:
+                fixed_costs = float(
+                    (pd.to_numeric(fx[rcol], errors="coerce").fillna(0.0) *
+                     pd.to_numeric(fx[pcol], errors="coerce").fillna(0.0)).sum()
+                )
+    revenue_fixed = revenue_var
+    expenses_fixed = base_exp + fixed_costs
+    fixed_profit = revenue_fixed - expenses_fixed
+
+    # ---- breakeven “overall” from target yield
+    revenue_overall = target_yield * sell_price
+    expenses_overall = base_exp
+    profit_overall = revenue_overall - expenses_overall
+
+    # ===== L / R columns =====
+    col_left, col_right = st.columns([2, 2])
+
+    # ---------------- LEFT ----------------
+    with col_left:
+        st.subheader("Breakeven Budget Tool (Corn vs Beans)")
+        def _hl(val):
+            try:
+                v = float(val)
+                if v > 0: return "color:#22c55e;font-weight:700;"
+                if v < 0: return "color:#ef4444;font-weight:700;"
+            except Exception:
+                pass
+            return "font-weight:700;"
+        st.dataframe(
+            breakeven_df.style.applymap(_hl, subset=["Breakeven Budget ($/ac)"]).format({
+                "Yield Goal (bu/ac)": "{:,.1f}",
+                "Sell Price ($/bu)": "${:,.2f}",
+                "Revenue ($/ac)": "${:,.2f}",
+                "Fixed Inputs ($/ac)": "${:,.2f}",
+                "Breakeven Budget ($/ac)": "${:,.2f}",
+            }),
+            use_container_width=True, hide_index=True, height=df_px_height(len(breakeven_df), 28, 34, 4)
+        )
+
+        st.subheader("Profit Metrics Comparison")
+        comparison = pd.DataFrame({
+            "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+            "Breakeven Budget": [round(revenue_overall, 2), round(expenses_overall, 2), round(profit_overall, 2)],
+            "Variable Rate": [round(revenue_var, 2), round(expenses_var, 2), round(var_profit, 2)],
+            "Fixed Rate": [round(revenue_fixed, 2), round(expenses_fixed, 2), round(fixed_profit, 2)],
+        })
+        def _hl_profit(val):
+            try:
+                v = float(val)
+                if v > 0: return "color:#22c55e;font-weight:700;"
+                if v < 0: return "color:#ef4444;font-weight:700;"
+            except Exception:
+                pass
+            return "font-weight:700;"
+        st.dataframe(
+            comparison.style.applymap(_hl_profit, subset=["Breakeven Budget","Variable Rate","Fixed Rate"]).format({
+                "Breakeven Budget":"${:,.2f}", "Variable Rate":"${:,.2f}", "Fixed Rate":"${:,.2f}"
+            }),
+            use_container_width=True, hide_index=True, height=df_px_height(len(comparison), 28, 34, 4)
+        )
+
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown("""
+            <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+                <b>Breakeven Budget</b><br>
+                (Target Yield × Sell Price) − Fixed Inputs
+            </div>
+            <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+                <b>Variable Rate</b><br>
+                (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+            </div>
+            <div style="border:1px solid #444; border-radius:6px; padding:10px; margin-bottom:8px; background-color:#111;">
+                <b>Fixed Rate</b><br>
+                (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ---------------- RIGHT ----------------
+    with col_right:
+        st.subheader("Fixed Input Costs")
+        # expenses dict fallback (build if not provided)
+        if not expenses:
+            # try to rebuild from individual compact inputs if present
+            keys = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
+            labels = ["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
+                      "Machinery","Labor","Cost of Living","Extra Fuel","Extra Interest","Truck Fuel"]
+            expenses = {lbl: float(st.session_state.get(k, 0.0)) for k,lbl in zip(keys, labels)}
+            st.session_state["expenses_dict"] = expenses
+
+        fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
+        fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+
+        styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+            lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s], subset=["Expense"]
+        ).apply(
+            lambda s: ["font-weight:bold;" if i == len(s) - 1 else "" for i in range(len(s))], subset=["$/ac"]
+        )
+
+        st.dataframe(styled_fixed, use_container_width=True, hide_index=True,
+                     height=df_px_height(len(fixed_df), 28, 34, 4))
+
+# ---------- render summary ----------
 render_profit_summary()
+
