@@ -25,6 +25,69 @@ from matplotlib import colors as mpl_colors
 def apply_compact_theme():
     st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
     st.title("Farm Profit Mapping Tool V4")
+# =========================================================
+# GLOBAL STYLE OVERRIDES — THEME SAFE + BULLETPROOF
+# =========================================================
+st.markdown("""
+<style>
+
+/* ---------- THEME VARIABLES (auto adapts) ---------- */
+:root {
+  --card-bg: var(--secondary-background-color);
+  --text-color: var(--text-color);
+}
+
+/* ---------- Section 9: Profit Summary ---------- */
+section[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')),
+section[data-testid="stVerticalBlock"]:has(h3:contains('Profit Summary')) {
+  max-width: 50vw !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  background-color: var(--card-bg) !important;
+  border-radius: 8px !important;
+  padding: 10px 16px 14px 16px !important;
+  overflow: hidden !important;
+  box-shadow: 0 0 12px rgba(0,0,0,0.25);
+}
+
+/* center all inner DataFrames + remove scrolls */
+.stDataFrame {overflow: visible !important;}
+.stDataFrame table {margin-left:auto;margin-right:auto;}
+.stDataFrame [data-testid="stHorizontalBlock"] {
+  justify-content: center !important;
+}
+
+/* ---------- Corn vs Soy collapsible chart ---------- */
+div[data-testid="stExpander"]:has(div:contains('Corn vs Soy')) {
+  max-width: 50vw !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  background-color: var(--card-bg) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 8px rgba(0,0,0,0.3);
+}
+div[data-testid="stExpander"] summary {
+  font-weight: 600 !important;
+  color: var(--text-color) !important;
+}
+div[data-testid="stExpander"] > div[role="region"] {
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.6rem !important;
+}
+
+/* ---------- Optional visual cohesion ---------- */
+section[data-testid="stVerticalBlock"]:has(iframe[title="st_folium"]) {
+  display: flex;
+  justify-content: center;
+}
+iframe[title="st_folium"] {
+  border-radius: 8px !important;
+  max-width: 85vw !important;
+  margin: 0 auto !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
 
     st.markdown(
         """
