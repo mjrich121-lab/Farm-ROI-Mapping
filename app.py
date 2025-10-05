@@ -1086,6 +1086,8 @@ except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
 
+)
+
 # =========================================================
 # 9. PROFIT SUMMARY — centered, full-height tables, colored profits
 # =========================================================
@@ -1198,6 +1200,3 @@ st.markdown(
     </script>
     """,
     unsafe_allow_html=True
-)
-
-
