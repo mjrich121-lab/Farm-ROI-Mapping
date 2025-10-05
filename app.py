@@ -1,3 +1,7 @@
+import streamlit as st
+st.warning("🧩 DEPLOY TEST — this should appear if app rebuilt")
+
+
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF
 # =========================================================
