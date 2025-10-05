@@ -396,64 +396,63 @@ def render_fixed_inputs_and_strip():
     with r[10]: st.session_state["int"]   = _mini_num("Interest ($/ac)",    "int",   0.0, 1.0)
     with r[11]: st.session_state["truck"] = _mini_num("Truck Fuel ($/ac)",  "truck", 0.0, 1.0)
 
-    # compute totals and store for the rest of the app
-    expenses: Dict[str, float] = {
-        "Chemicals": float(st.session_state.get("chem", 0.0)),
-        "Insurance": float(st.session_state.get("ins", 0.0)),
-        "Insecticide/Fungicide": float(st.session_state.get("insect", 0.0)),
-        "Fertilizer (Flat)": float(st.session_state.get("fert", 0.0)),
-        "Seed (Flat)": float(st.session_state.get("seed", 0.0)),
-        "Cash Rent": float(st.session_state.get("rent", 0.0)),
-        "Machinery": float(st.session_state.get("mach", 0.0)),
-        "Labor": float(st.session_state.get("labor", 0.0)),
-        "Cost of Living": float(st.session_state.get("col", 0.0)),
-        "Extra Fuel": float(st.session_state.get("fuel", 0.0)),
-        "Extra Interest": float(st.session_state.get("int", 0.0)),
-        "Truck Fuel": float(st.session_state.get("truck", 0.0)),
+    # store totals
+    expenses = {
+        "Chemicals": st.session_state["chem"],
+        "Insurance": st.session_state["ins"],
+        "Insecticide/Fungicide": st.session_state["insect"],
+        "Fertilizer (Flat)": st.session_state["fert"],
+        "Seed (Flat)": st.session_state["seed"],
+        "Cash Rent": st.session_state["rent"],
+        "Machinery": st.session_state["mach"],
+        "Labor": st.session_state["labor"],
+        "Cost of Living": st.session_state["col"],
+        "Extra Fuel": st.session_state["fuel"],
+        "Extra Interest": st.session_state["int"],
+        "Truck Fuel": st.session_state["truck"],
     }
-    base_expenses_per_acre = float(sum(expenses.values()))
+    base_expenses_per_acre = sum(expenses.values())
     st.session_state["expenses_dict"] = expenses
     st.session_state["base_expenses_per_acre"] = base_expenses_per_acre
 
-    # Corn/Soy strip + tiny preview
-    st.markdown("### Compare Crop Profitability (Optional)")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.caption("Corn Yield (bu/ac)")
-        st.session_state["corn_yield"] = st.number_input("corn_y", 0.0, value=float(st.session_state["corn_yield"]),
-                                                         step=1.0, label_visibility="collapsed")
-    with c2:
-        st.caption("Corn Price ($/bu)")
-        st.session_state["corn_price"] = st.number_input("corn_p", 0.0, value=float(st.session_state["corn_price"]),
-                                                         step=0.1, label_visibility="collapsed")
-    with c3:
-        st.caption("Soy Yield (bu/ac)")
-        st.session_state["bean_yield"] = st.number_input("bean_y", 0.0, value=float(st.session_state["bean_yield"]),
-                                                         step=1.0, label_visibility="collapsed")
-    with c4:
-        st.caption("Soy Price ($/bu)")
-        st.session_state["bean_price"] = st.number_input("bean_p", 0.0, value=float(st.session_state["bean_price"]),
-                                                         step=0.1, label_visibility="collapsed")
+    # --- collapsible Corn vs Soy chart ---
+    with st.expander("Corn vs Soy Profitability (Click to Expand)", expanded=False):
+        st.markdown("""
+        <style>
+        .stDataFrame {overflow: visible !important;}
+        .stDataFrame table {margin-left:auto;margin-right:auto;}
+        div[data-testid="stExpander"]{max-width:50vw;margin-left:auto;margin-right:auto;}
+        </style>
+        """, unsafe_allow_html=True)
 
-    st.session_state["sell_price"] = float(st.session_state.get("sell_price", st.session_state["corn_price"]))
+        prev = pd.DataFrame({
+            "Crop": ["Corn", "Soybeans"],
+            "Yield (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+            "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
+        })
+        prev["Revenue ($/ac)"] = prev["Yield (bu/ac)"] * prev["Sell Price ($/bu)"]
+        prev["Fixed Inputs ($/ac)"] = base_expenses_per_acre
+        prev["Breakeven ($/ac)"] = prev["Revenue ($/ac)"] - prev["Fixed Inputs ($/ac)"]
 
-    prev = pd.DataFrame({
-        "Crop": ["Corn", "Soy"],
-        "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-        "Price": [st.session_state["corn_price"], st.session_state["bean_price"]],
-    })
-    prev["Revenue"] = prev["Yield"] * prev["Price"]
-    prev["Fixed"] = base_expenses_per_acre
-    prev["Breakeven"] = prev["Revenue"] - prev["Fixed"]
+        def _hl(v):
+            try:
+                v=float(v)
+                if v>0: return "color:#22c55e;font-weight:700;"
+                if v<0: return "color:#ef4444;font-weight:700;"
+            except: pass
+            return "font-weight:700;"
 
-    st.dataframe(
-        prev.style.format({
-            "Yield": "{:.0f}", "Price": "${:.2f}",
-            "Revenue": "${:,.0f}", "Fixed": "${:,.0f}", "Breakeven": "${:,.0f}"
-        }),
-        use_container_width=True, hide_index=True,
-        height=df_px_height(len(prev))
-    )
+        st.dataframe(
+            prev.style.applymap(_hl, subset=["Breakeven ($/ac)"]).format({
+                "Yield (bu/ac)":"{:,.0f}",
+                "Sell Price ($/bu)":"${:,.2f}",
+                "Revenue ($/ac)":"${:,.0f}",
+                "Fixed Inputs ($/ac)":"${:,.0f}",
+                "Breakeven ($/ac)":"${:,.0f}",
+            }),
+            use_container_width=True, hide_index=True,
+            height=df_px_height(len(prev))
+        )
 
 
 # ===========================
@@ -706,62 +705,74 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 def render_profit_summary():
     st.header("Profit Summary")
 
-    def _h(n):  # exact height, no scroll
-        return df_px_height(n, row_h=28, header=36, pad=4)
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"]{
+        max-width:50vw !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+    .stDataFrame {overflow:visible!important;}
+    .stDataFrame table{margin-left:auto;margin-right:auto;}
+    </style>
+    """, unsafe_allow_html=True)
 
+    def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
+
+    # session defaults
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
-
-    corn_yield = float(st.session_state.get("corn_yield", 200.0))
-    corn_price = float(st.session_state.get("corn_price", 5.0))
-    bean_yield = float(st.session_state.get("bean_yield", 60.0))
-    bean_price = float(st.session_state.get("bean_price", 12.0))
+    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values())))
+    corn_yield = float(st.session_state.get("corn_yield", 200))
+    corn_price = float(st.session_state.get("corn_price", 5))
+    bean_yield = float(st.session_state.get("bean_yield", 60))
+    bean_price = float(st.session_state.get("bean_price", 12))
+    target_yield = float(st.session_state.get("target_yield", 200))
+    sell_price = float(st.session_state.get("sell_price", corn_price))
 
     breakeven_df = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
+        "Crop":["Corn","Soybeans"],
+        "Yield Goal (bu/ac)":[corn_yield,bean_yield],
+        "Sell Price ($/bu)":[corn_price,bean_price],
     })
-    breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
-    breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = (
-        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
-    )
+    breakeven_df["Revenue ($/ac)"]=[corn_yield*corn_price,bean_yield*bean_price]
+    breakeven_df["Fixed Inputs ($/ac)"]=base_exp
+    breakeven_df["Breakeven Budget ($/ac)"]=breakeven_df["Revenue ($/ac)"]-breakeven_df["Fixed Inputs ($/ac)"]
 
-    def _hl(val):
-        try:
-            v = float(val)
-            if v > 0: return "color:#22c55e;font-weight:700;"
-            if v < 0: return "color:#ef4444;font-weight:700;"
-        except Exception:
-            pass
-        return "font-weight:700;"
+    revenue_overall=target_yield*sell_price
+    expenses_overall=base_exp
+    profit_overall=revenue_overall-expenses_overall
 
-    st.dataframe(
-        breakeven_df.style.applymap(_hl, subset=["Breakeven Budget ($/ac)"]).format({
-            "Yield Goal (bu/ac)": "{:,.1f}",
-            "Sell Price ($/bu)": "${:,.2f}",
-            "Revenue ($/ac)": "${:,.2f}",
-            "Fixed Inputs ($/ac)": "${:,.2f}",
-            "Breakeven Budget ($/ac)": "${:,.2f}",
-        }),
-        use_container_width=True, hide_index=True, height=_h(len(breakeven_df))
-    )
+    col_left,col_right=st.columns([1.2,1.8])
 
-    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
-    total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
-    fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+    with col_left:
+        st.subheader("Profit Metrics Comparison")
+        comparison=pd.DataFrame({
+            "Metric":["Revenue ($/ac)","Expenses ($/ac)","Profit ($/ac)"],
+            "Breakeven Budget":[revenue_overall,expenses_overall,profit_overall],
+        })
+        st.dataframe(
+            comparison.style.format({
+                "Breakeven Budget":"${:,.2f}"
+            }).applymap(lambda v:"font-weight:700;",subset=["Breakeven Budget"]),
+            use_container_width=True,hide_index=True,height=_h(len(comparison))
+        )
 
-    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-        lambda s: ["font-weight:bold;" if i == len(s) - 1 else "" for i in range(len(s))],
-        subset=["$/ac"]
-    ).apply(
-        lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
-        subset=["Expense"]
-    )
-
-    st.dataframe(styled_fixed, use_container_width=True, hide_index=True, height=_h(len(fixed_df)))
-
+    with col_right:
+        st.subheader("Fixed Input Costs")
+        if not expenses:
+            keys=["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
+            labels=["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
+                    "Machinery","Labor","Cost of Living","Extra Fuel","Extra Interest","Truck Fuel"]
+            expenses={lbl:float(st.session_state.get(k,0.0)) for k,lbl in zip(keys,labels)}
+        fixed_df=pd.DataFrame(list(expenses.items()),columns=["Expense","$/ac"])
+        total=pd.DataFrame([{"Expense":"Total Fixed Costs","$/ac":fixed_df["$/ac"].sum()}])
+        fixed_df=pd.concat([fixed_df,total],ignore_index=True)
+        st.dataframe(
+            fixed_df.style.format({"$/ac":"${:,.2f}"}).apply(
+                lambda s:["font-weight:bold;" if v=="Total Fixed Costs" else "" for v in s],subset=["Expense"]
+            ),
+            use_container_width=True,hide_index=True,height=_h(len(fixed_df))
+        )
 
 # ===========================
 # MAIN APP
