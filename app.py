@@ -23,6 +23,7 @@ from matplotlib import colors as mpl_colors
 # =========================================================
 st.markdown("""
 <style>
+st.caption("✅ Build 2025-10-04-B")
 
 /* ---------- GLOBAL BASE: PREVENT ALL SCROLL ---------- */
 html, body, [data-testid="stAppViewContainer"], [data-testid="block-container"] {
