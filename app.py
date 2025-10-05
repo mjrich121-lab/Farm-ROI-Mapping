@@ -1103,15 +1103,16 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — Left / Right layout (compact, no-scroll, fixed widths)
+# 9. PROFIT SUMMARY — Left / Right layout (compact, no-scroll, stable)
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
+    # --- helper for dynamic dataframe height
     def _h(n): 
         return df_px_height(n, row_h=28, header=34, pad=4)
 
-    # ---- state / defaults
+    # ---- session defaults / fallbacks
     expenses: dict = st.session_state.get("expenses_dict", {})
     base_exp = float(st.session_state.get("base_expenses_per_acre", float(sum(expenses.values())) if expenses else 0.0))
     corn_yield = float(st.session_state.get("corn_yield", 200.0))
@@ -1121,7 +1122,7 @@ def render_profit_summary():
     target_yield = float(st.session_state.get("target_yield", 200.0))
     sell_price = float(st.session_state.get("sell_price", corn_price))
 
-    # ---- breakeven (strip)
+    # ---- breakeven budget base
     breakeven_df = pd.DataFrame({
         "Crop": ["Corn", "Soybeans"],
         "Yield Goal (bu/ac)": [corn_yield, bean_yield],
@@ -1133,7 +1134,7 @@ def render_profit_summary():
         breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
     )
 
-    # ---- variable-rate revenue from map (avg)
+    # ---- variable-rate revenue (avg)
     ydf = st.session_state.get("yield_df", pd.DataFrame())
     if isinstance(ydf, pd.DataFrame) and not ydf.empty:
         if "Revenue_per_acre" in ydf.columns:
@@ -1145,7 +1146,7 @@ def render_profit_summary():
     else:
         revenue_var = 0.0
 
-    # ---- VR expenses from RX summaries
+    # ---- variable-rate expenses (RX)
     fert_costs = 0.0
     for d in st.session_state.get("fert_layers_store", {}).values():
         if isinstance(d, pd.DataFrame) and not d.empty:
@@ -1175,13 +1176,13 @@ def render_profit_summary():
     expenses_fixed = base_exp + fixed_costs
     fixed_profit = revenue_fixed - expenses_fixed
 
-    # ---- breakeven “overall” from target yield
+    # ---- overall breakeven calc
     revenue_overall = target_yield * sell_price
     expenses_overall = base_exp
     profit_overall = revenue_overall - expenses_overall
 
     # ===== L / R columns =====
-    col_left, col_right = st.columns([3.5, 1.5])   # <-- narrower right panel
+    col_left, col_right = st.columns([3.5, 1.5])   # right column ~40% narrower
 
     # ---------------- LEFT ----------------
     with col_left:
@@ -1203,8 +1204,7 @@ def render_profit_summary():
                 "Breakeven Budget ($/ac)": "${:,.2f}",
             }),
             use_container_width=True, hide_index=True,
-            height=df_px_height(len(breakeven_df), 28, 34, 4),
-            column_config=None, disabled=True
+            height=_h(len(breakeven_df))
         )
         st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
@@ -1228,8 +1228,7 @@ def render_profit_summary():
                 "Breakeven Budget":"${:,.2f}", "Variable Rate":"${:,.2f}", "Fixed Rate":"${:,.2f}"
             }),
             use_container_width=True, hide_index=True,
-            height=df_px_height(len(comparison), 28, 34, 4),
-            column_config=None, disabled=True
+            height=_h(len(comparison))
         )
         st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
@@ -1252,9 +1251,8 @@ def render_profit_summary():
     # ---------------- RIGHT ----------------
     with col_right:
         st.subheader("Fixed Input Costs")
-        # expenses dict fallback (build if not provided)
+        # build expenses dict if missing
         if not expenses:
-            # try to rebuild from individual compact inputs if present
             keys = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
             labels = ["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
                       "Machinery","Labor","Cost of Living","Extra Fuel","Extra Interest","Truck Fuel"]
@@ -1272,12 +1270,11 @@ def render_profit_summary():
         )
 
         st.dataframe(
-            styled_fixed, use_container_width=True, hide_index=True,
-            height=df_px_height(len(fixed_df), 28, 34, 4),
-            column_config=None, disabled=True
+            styled_fixed,
+            use_container_width=True, hide_index=True,
+            height=_h(len(fixed_df))
         )
         st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
 # ---------- render summary ----------
 render_profit_summary()
-
