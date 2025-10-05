@@ -1231,54 +1231,79 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — FORCE 50% WIDTH CENTERED, NO SCROLL
+# 9. PROFIT SUMMARY — 50% WIDTH, CENTERED, NO TABLE SCROLL
 # =========================================================
 def render_profit_summary():
-    # inject section-specific CSS *after render* so it overrides the theme
+    # Section-scoped CSS (no :contains / :has)
     st.markdown("""
     <style>
-      /* target only this block's container dynamically */
-      div[data-testid="stVerticalBlock"] h2:contains('Profit Summary') {
-          text-align: center !important;
+      /* Keep folium map centered at 85% width app-wide */
+      iframe[title="st_folium"]{
+        max-width:85vw !important; margin:0 auto !important; display:block !important; border-radius:8px;
       }
-      div[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')) {
-          max-width: 50vw !important;
-          margin-left: auto !important;
-          margin-right: auto !important;
-          overflow: visible !important;
+
+      /* Profit Summary wrapper: force 50% viewport width and center */
+      #profit-summary{
+        max-width:50vw !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
       }
-      /* dataframes and expanders centered, no scroll */
-      .stDataFrame {overflow: visible !important;}
-      .stDataFrame table {margin-left:auto;margin-right:auto;}
-      div[data-testid="stExpander"]{max-width:50vw;margin-left:auto;margin-right:auto;}
-      iframe[title="st_folium"]{max-width:85vw;margin:0 auto;display:block;}
+
+      /* Center the section header text */
+      #profit-summary h2, #profit-summary h3{
+        text-align:center !important;
+      }
+
+      /* No internal scrollbars on DataFrames inside the section */
+      #profit-summary .stDataFrame{ overflow:visible !important; }
+      #profit-summary .stDataFrame table{
+        margin-left:auto !important; margin-right:auto !important; /* center tables */
+      }
+
+      /* If you put columns inside this section, keep them visually compact/centered */
+      #profit-summary [data-testid="stHorizontalBlock"]{
+        justify-content:center !important;
+      }
     </style>
     """, unsafe_allow_html=True)
 
-    # everything else stays identical
+    # ---- BEGIN WRAPPER ----
+    st.markdown('<div id="profit-summary">', unsafe_allow_html=True)
+
     st.header("Profit Summary")
 
+    # session & fallbacks
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values())))
+    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
     bean_price = float(st.session_state.get("bean_price", 12))
     target_yield = float(st.session_state.get("target_yield", 200))
-    sell_price = float(st.session_state.get("sell_price", corn_price))
+    sell_price  = float(st.session_state.get("sell_price", corn_price))
 
+    # helper: exact pixel height to avoid internal scrollbars
+    def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
+
+    # Breakeven table
     breakeven_df = pd.DataFrame({
         "Crop": ["Corn", "Soybeans"],
         "Yield Goal (bu/ac)": [corn_yield, bean_yield],
         "Sell Price ($/bu)": [corn_price, bean_price],
     })
-    breakeven_df["Revenue ($/ac)"] = breakeven_df["Yield Goal (bu/ac)"] * breakeven_df["Sell Price ($/bu)"]
+    breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
     breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    breakeven_df["Breakeven Budget ($/ac)"] = (
+        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
+    )
 
-    col_left, col_right = st.columns([1, 1], gap="large")
+    revenue_overall  = target_yield * sell_price
+    expenses_overall = base_exp
+    profit_overall   = revenue_overall - expenses_overall
 
-    with col_left:
+    c1, c2 = st.columns([1, 1], gap="large")
+
+    with c1:
         st.subheader("Breakeven Budget (Corn vs Beans)")
         st.dataframe(
             breakeven_df.style.format({
@@ -1288,72 +1313,36 @@ def render_profit_summary():
                 "Fixed Inputs ($/ac)": "${:,.0f}",
                 "Breakeven Budget ($/ac)": "${:,.0f}",
             }),
-            use_container_width=True, hide_index=True
+            use_container_width=True,
+            hide_index=True,
+            height=_h(len(breakeven_df))  # <= prevents internal scrollbars
         )
 
-    with col_right:
+    with c2:
         st.subheader("Fixed Input Costs")
+        if not expenses:
+            keys   = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
+            labels = ["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
+                      "Machinery","Labor","Cost of Living","Extra Fuel","Extra Interest","Truck Fuel"]
+            expenses = {lbl: float(st.session_state.get(k, 0.0)) for k, lbl in zip(keys, labels)}
+            st.session_state["expenses_dict"] = expenses
+
         fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
         total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
         fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+
         st.dataframe(
             fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
                 lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
                 subset=["Expense"]
             ),
-            use_container_width=True, hide_index=True
+            use_container_width=True,
+            hide_index=True,
+            height=_h(len(fixed_df))  # <= prevents internal scrollbars
         )
 
-# ---------- render summary ----------
+    # ---- END WRAPPER ----
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------- render summary (call once) ----------
 render_profit_summary()
-# =========================================================
-# FINAL LAYOUT PATCH — Streamlit Cloud Safe (no scrolls, centered)
-# =========================================================
-st.markdown("""
-<style>
-/* Remove all outer scrollbars */
-html, body, [data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"], [data-testid="block-container"] {
-    overflow: hidden !important;
-}
-
-/* Center the Profit Summary section (always 50% of viewport width) */
-section[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')),
-section[data-testid="stVerticalBlock"]:has(h3:contains('Profit Summary')) {
-    width: 50vw !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-/* Center the dataframes themselves */
-div[data-testid="stDataFrame"] {
-    max-width: 100% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    overflow: visible !important;
-}
-
-/* Hide vertical scroll inside dataframes */
-div[data-testid="stDataFrame"] table {
-    overflow: visible !important;
-    display: inline-table !important;
-}
-
-/* Reduce outer padding so it fits cleanly */
-.block-container {
-    padding-top: 0.5rem !important;
-    padding-bottom: 0.5rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-# Force Streamlit to render CSS last in DOM order
-st.caption("✅ Layout patch loaded successfully")
-st.empty()
-st.markdown(
-    "<style>html,body{overflow:hidden!important;}</style>",
-    unsafe_allow_html=True
-)
-
-
