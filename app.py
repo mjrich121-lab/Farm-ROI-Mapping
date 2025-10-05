@@ -1102,9 +1102,8 @@ except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
 
-
 # =========================================================
-# 9. PROFIT SUMMARY — Left / Right layout (compact)
+# 9. PROFIT SUMMARY — Left / Right layout (compact, no-scroll, fixed widths)
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
@@ -1182,7 +1181,7 @@ def render_profit_summary():
     profit_overall = revenue_overall - expenses_overall
 
     # ===== L / R columns =====
-    col_left, col_right = st.columns([2, 2])
+    col_left, col_right = st.columns([3.5, 1.5])   # <-- narrower right panel
 
     # ---------------- LEFT ----------------
     with col_left:
@@ -1203,8 +1202,11 @@ def render_profit_summary():
                 "Fixed Inputs ($/ac)": "${:,.2f}",
                 "Breakeven Budget ($/ac)": "${:,.2f}",
             }),
-            use_container_width=True, hide_index=True, height=df_px_height(len(breakeven_df), 28, 34, 4)
+            use_container_width=True, hide_index=True,
+            height=df_px_height(len(breakeven_df), 28, 34, 4),
+            column_config=None, disabled=True
         )
+        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
         st.subheader("Profit Metrics Comparison")
         comparison = pd.DataFrame({
@@ -1225,8 +1227,11 @@ def render_profit_summary():
             comparison.style.applymap(_hl_profit, subset=["Breakeven Budget","Variable Rate","Fixed Rate"]).format({
                 "Breakeven Budget":"${:,.2f}", "Variable Rate":"${:,.2f}", "Fixed Rate":"${:,.2f}"
             }),
-            use_container_width=True, hide_index=True, height=df_px_height(len(comparison), 28, 34, 4)
+            use_container_width=True, hide_index=True,
+            height=df_px_height(len(comparison), 28, 34, 4),
+            column_config=None, disabled=True
         )
+        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
         with st.expander("Show Calculation Formulas", expanded=False):
             st.markdown("""
@@ -1266,8 +1271,12 @@ def render_profit_summary():
             lambda s: ["font-weight:bold;" if i == len(s) - 1 else "" for i in range(len(s))], subset=["$/ac"]
         )
 
-        st.dataframe(styled_fixed, use_container_width=True, hide_index=True,
-                     height=df_px_height(len(fixed_df), 28, 34, 4))
+        st.dataframe(
+            styled_fixed, use_container_width=True, hide_index=True,
+            height=df_px_height(len(fixed_df), 28, 34, 4),
+            column_config=None, disabled=True
+        )
+        st.markdown("<style>.stDataFrame {overflow: hidden !important;}</style>", unsafe_allow_html=True)
 
 # ---------- render summary ----------
 render_profit_summary()
