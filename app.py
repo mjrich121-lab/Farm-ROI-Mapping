@@ -1053,6 +1053,8 @@ st_folium(m, use_container_width=True, height=600)
 # =========================================================
 # 9. PROFIT SUMMARY — centered, 50% width, no internal scroll
 # =========================================================
+st.warning("Profit Summary build: 9.0.1", icon="🧪")
+
 def render_profit_summary():
     # ---------- OUTER LAYOUT: force 50% width, centered (no CSS) ----------
     pad_left, center, pad_right = st.columns([1, 2, 1])
