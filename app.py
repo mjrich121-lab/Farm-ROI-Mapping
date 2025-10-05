@@ -197,6 +197,9 @@ def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
     st.caption(label)
     return st.number_input(key, min_value=0.0, value=float(default), step=step, label_visibility="collapsed")
 
+def df_height(nrows: int, row_h: int = 22, header: int = 26, pad: int = 0) -> int:
+    """Return an exact pixel height for a table so it won't scroll internally."""
+    return int(header + nrows * row_h + pad)
 
 # =========================================================
 # 2–3. FILE UPLOADS — COMPACT 4-UP ROW
@@ -348,39 +351,29 @@ with c4:
             st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
     else:
         st.caption("No seed files")
-
 # =========================================================
-# 4A. Expense Inputs — ULTRA COMPACT GRID (NO HEADER LINE)
-#    (Replaces the 12 individual number inputs)
+# COMPACT CONTROLS STACK ABOVE MAP (no headers)
+#   - Expenses grid (non-scrolling, very dense)
+#   - One-line Corn/Soy assumptions (+ Target Yield only if no yield map)
+#   - Breakeven preview (green/red Breakeven)
+#   - Side-by-side Fixed/Variable expanders
 # =========================================================
 
+# ------- 4A. Expense Inputs: ultra-compact data editor (no scrolling) -------
 _default_expense_rows = [
-    ("Chemicals", 0.0),
-    ("Insurance", 0.0),
-    ("Insecticide/Fungicide", 0.0),
-    ("Fertilizer (Flat)", 0.0),
-    ("Seed (Flat)", 0.0),
-    ("Cash Rent", 0.0),
-    ("Machinery", 0.0),
-    ("Labor", 0.0),
-    ("Cost of Living", 0.0),
-    ("Extra Fuel", 0.0),
-    ("Extra Interest", 0.0),
-    ("Truck Fuel", 0.0),
+    ("Chemicals", 0.0), ("Insurance", 0.0), ("Insecticide/Fungicide", 0.0),
+    ("Fertilizer (Flat)", 0.0), ("Seed (Flat)", 0.0), ("Cash Rent", 0.0),
+    ("Machinery", 0.0), ("Labor", 0.0), ("Cost of Living", 0.0),
+    ("Extra Fuel", 0.0), ("Extra Interest", 0.0), ("Truck Fuel", 0.0),
 ]
-
 if "exp_df" not in st.session_state:
     st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
 else:
-    # keep same 12 rows / order
-    cur = st.session_state["exp_df"]
+    # keep rows and order stable if a previous session had different content
     names = [r[0] for r in _default_expense_rows]
+    cur = st.session_state["exp_df"]
     if set(cur["Expense"].tolist()) != set(names):
         st.session_state["exp_df"] = pd.DataFrame(_default_expense_rows, columns=["Expense", "$/ac"])
-    else:
-        st.session_state["exp_df"] = (
-            cur.set_index("Expense").reindex(names).reset_index()
-        )
 
 exp_df = st.data_editor(
     st.session_state["exp_df"],
@@ -390,92 +383,124 @@ exp_df = st.data_editor(
     key="exp_editor",
     column_config={
         "Expense": st.column_config.TextColumn(disabled=True),
-        "$/ac": st.column_config.NumberColumn(format="%.2f", step=1.0, help="Per-acre cost"),
+        "$/ac":    st.column_config.NumberColumn(format="%.2f", step=1.0, help="Per-acre cost"),
     },
-    height=df_height(12, row_h=24, header=30, pad=0),  # exact height => no internal scroll
+    height=df_height(12, row_h=22, header=26, pad=0),   # <- exact height so there's NO internal scroll
 )
-
-# Sanitize numeric + persist
 exp_df["$/ac"] = pd.to_numeric(exp_df["$/ac"], errors="coerce").fillna(0.0)
 st.session_state["exp_df"] = exp_df.copy()
 
-# Outputs used elsewhere
+# outputs used everywhere else (names unchanged)
 expenses = dict(zip(exp_df["Expense"], exp_df["$/ac"]))
 base_expenses_per_acre = float(exp_df["$/ac"].sum())
 
-# ---- 4B–4D split layout (left: products, right: crop assumptions + preview) ----
-left, right = st.columns([1, 1])
+# ------- One-line Corn/Soy assumptions (+Target Yield only when no yield map) -------
+ass1, ass2, ass3, ass4, ass5 = st.columns([1, 1, 1, 1, 1])
 
-with left:
+with ass1:
+    st.caption("Corn Yield (bu/ac)")
+    st.session_state["corn_yield"] = st.number_input(
+        "corn_yld", min_value=0.0, value=st.session_state.get("corn_yield", 200.0),
+        step=1.0, label_visibility="collapsed"
+    )
+with ass2:
+    st.caption("Corn Price ($/bu)")
+    st.session_state["corn_price"] = st.number_input(
+        "corn_px", min_value=0.0, value=st.session_state.get("corn_price", 5.0),
+        step=0.1, label_visibility="collapsed"
+    )
+with ass3:
+    st.caption("Soy Yield (bu/ac)")
+    st.session_state["bean_yield"] = st.number_input(
+        "bean_yld", min_value=0.0, value=st.session_state.get("bean_yield", 60.0),
+        step=1.0, label_visibility="collapsed"
+    )
+with ass4:
+    st.caption("Soy Price ($/bu)")
+    st.session_state["bean_price"] = st.number_input(
+        "bean_px", min_value=0.0, value=st.session_state.get("bean_price", 12.0),
+        step=0.1, label_visibility="collapsed"
+    )
+# show Target Yield only if there is no Yield map loaded
+yield_df_present = (
+    st.session_state.get("yield_df") is not None
+    and not st.session_state["yield_df"].empty
+    and {"Latitude", "Longitude", "Yield"}.issubset(st.session_state["yield_df"].columns)
+)
+with ass5:
+    if not yield_df_present:
+        st.caption("Target Yield (bu/ac)")
+        st.session_state["target_yield"] = st.number_input(
+            "target_yld", min_value=0.0, value=st.session_state.get("target_yield", 200.0),
+            step=1.0, label_visibility="collapsed"
+        )
+
+# ------- Breakeven preview (compact + green/red breakeven) -------
+preview_df = pd.DataFrame({
+    "Crop":      ["Corn", "Soybeans"],
+    "Yield":     [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+    "Price":     [st.session_state["corn_price"], st.session_state["bean_price"]],
+    "Revenue":   [
+        st.session_state["corn_yield"] * st.session_state["corn_price"],
+        st.session_state["bean_yield"] * st.session_state["bean_price"],
+    ],
+    "Fixed":     [base_expenses_per_acre, base_expenses_per_acre],
+})
+preview_df["Breakeven"] = preview_df["Revenue"] - preview_df["Fixed"]
+
+def _hl_budget_cell(val):
+    if isinstance(val, (int, float)):
+        if val > 0:  return "color: #22c55e; font-weight:600;"   # green
+        if val < 0:  return "color: #ef4444; font-weight:600;"   # red
+    return "font-weight:600;"
+
+st.dataframe(
+    preview_df.style.applymap(_hl_budget_cell, subset=["Breakeven"]).format({
+        "Yield": "{:.0f}", "Price": "${:.2f}", "Revenue": "${:,.0f}",
+        "Fixed": "${:,.0f}", "Breakeven": "${:,.0f}",
+    }),
+    use_container_width=True,
+    hide_index=True,
+    height=df_height(2, row_h=24, header=26, pad=0),    # <- exactly two rows, no scroll
+)
+
+# ------- Fixed & Variable expanders side-by-side (very compact) -------
+ex1, ex2 = st.columns(2)
+
+with ex1:
     with st.expander("Fixed Rate Inputs", expanded=False):
         if "fixed_products" not in st.session_state or st.session_state["fixed_products"].empty:
             st.session_state["fixed_products"] = pd.DataFrame(
-                {"Type":["Seed","Fertilizer"], "Product":["",""], "Rate":[0.0,0.0],
-                 "CostPerUnit":[0.0,0.0], "$/ac":[0.0,0.0]}
+                {"Type": ["Seed", "Fertilizer"], "Product": ["", ""],
+                 "Rate": [0.0, 0.0], "CostPerUnit": [0.0, 0.0], "$/ac": [0.0, 0.0]}
             )
         fixed_entries = st.data_editor(
             st.session_state["fixed_products"], num_rows="dynamic",
-            use_container_width=True, key="fixed_editor"
+            use_container_width=True, key="fixed_editor",
+            height=df_height(len(st.session_state["fixed_products"]) + 1, row_h=22, header=26, pad=0)
         )
         st.session_state["fixed_products"] = fixed_entries.copy().reset_index(drop=True)
 
+with ex2:
     with st.expander("Variable Rate Inputs", expanded=False):
         fert_df = st.session_state.get("fert_products", pd.DataFrame())
         seed_df = st.session_state.get("seed_products", pd.DataFrame())
         if not fert_df.empty:
             st.caption("Fertilizer (VR)")
-            st.dataframe(fert_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                fert_df.style.format({"Acres":"{:,.1f}", "CostTotal":"${:,.2f}", "CostPerAcre":"${:,.2f}"}),
+                use_container_width=True, hide_index=True,
+                height=df_height(len(fert_df), row_h=22, header=26, pad=0)
+            )
         if not seed_df.empty:
             st.caption("Seed (VR)")
-            st.dataframe(seed_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                seed_df.style.format({"Acres":"{:,.1f}", "CostTotal":"${:,.2f}", "CostPerAcre":"${:,.2f}"}),
+                use_container_width=True, hide_index=True,
+                height=df_height(len(seed_df), row_h=22, header=26, pad=0)
+            )
         if fert_df.empty and seed_df.empty:
             st.caption("— No VR inputs —")
-
-with right:
-    c1, c2 = st.columns(2)
-    with c1:
-        st.caption("Corn Yield (bu/ac)")
-        st.session_state["corn_yield"] = st.number_input(
-            "corn_yld", min_value=0.0, value=st.session_state.get("corn_yield", 200.0),
-            step=1.0, label_visibility="collapsed"
-        )
-        st.caption("Corn Price ($/bu)")
-        st.session_state["corn_price"] = st.number_input(
-            "corn_px", min_value=0.0, value=st.session_state.get("corn_price", 5.0),
-            step=0.1, label_visibility="collapsed"
-        )
-    with c2:
-        st.caption("Soy Yield (bu/ac)")
-        st.session_state["bean_yield"] = st.number_input(
-            "bean_yld", min_value=0.0, value=st.session_state.get("bean_yield", 60.0),
-            step=1.0, label_visibility="collapsed"
-        )
-        st.caption("Soy Price ($/bu)")
-        st.session_state["bean_price"] = st.number_input(
-            "bean_px", min_value=0.0, value=st.session_state.get("bean_price", 12.0),
-            step=0.1, label_visibility="collapsed"
-        )
-
-    # Compact preview table
-    preview_df = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-        "Price": [st.session_state["corn_price"], st.session_state["bean_price"]],
-        "Revenue": [
-            st.session_state["corn_yield"] * st.session_state["corn_price"],
-            st.session_state["bean_yield"] * st.session_state["bean_price"]
-        ],
-        "Fixed": [base_expenses_per_acre, base_expenses_per_acre],
-    })
-    preview_df["Breakeven"] = preview_df["Revenue"] - preview_df["Fixed"]
-
-    st.dataframe(
-        preview_df.style.format({
-            "Yield":"{:.0f}", "Price":"${:.2f}",
-            "Revenue":"${:,.0f}", "Fixed":"${:,.0f}", "Breakeven":"${:,.0f}"
-        }),
-        use_container_width=True, hide_index=True
-    )
 
 # =========================================================
 # 5. BASE MAP  (UNCHANGED FUNCTIONALITY)
