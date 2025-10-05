@@ -18,60 +18,7 @@ from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
 
-# =========================================================
-# GLOBAL THEME + LAYOUT OVERRIDES (STREAMLIT v1.39+)
-# =========================================================
-st.markdown("""
-<style>
-/* ---------- GLOBAL BASE: PREVENT ALL SCROLL ---------- */
-html, body, [data-testid="stAppViewContainer"], [data-testid="block-container"] {
-    overflow-x: hidden !important;
-    overflow-y: hidden !important;
-}
 
-/* ---------- MAP CONTAINER (85% WIDTH CENTERED) ---------- */
-iframe[title="st_folium"] {
-    max-width: 85vw !important;
-    display: block;
-    margin: 0 auto !important;
-    border-radius: 8px;
-}
-
-/* ---------- SECTION 9: PROFIT SUMMARY (50% WIDTH CENTERED) ---------- */
-div[data-testid="block-container"] h2:has(span:contains("Profit Summary")),
-div[data-testid="block-container"] h3:has(span:contains("Profit Summary")) {
-    text-align: center !important;
-}
-
-div[data-testid="block-container"] > div:has(h2:has(span:contains("Profit Summary"))) {
-    max-width: 50vw !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    overflow: hidden !important;
-    border-radius: 8px;
-}
-
-/* ---------- CORN vs SOY EXPANDER ---------- */
-div[data-testid="stExpander"]:has(div:contains("Corn vs Soy")),
-div[data-testid="stExpander"]:has(div:contains("Compare Crop Profitability")) {
-    max-width: 50vw !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    border-radius: 8px;
-    overflow: hidden !important;
-}
-
-/* ---------- TABLES CENTERED ---------- */
-.stDataFrame {
-    overflow: visible !important;
-}
-.stDataFrame table {
-    margin-left: auto !important;
-    margin-right: auto !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # ===========================
 # COMPACT THEME + LAYOUT
@@ -79,122 +26,6 @@ div[data-testid="stExpander"]:has(div:contains("Compare Crop Profitability")) {
 def apply_compact_theme():
     st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
     st.title("Farm Profit Mapping Tool V4")
-# =========================================================
-# GLOBAL STYLE OVERRIDES — THEME SAFE + BULLETPROOF
-# =========================================================
-st.markdown("""
-<style>
-
-/* ---------- THEME VARIABLES (auto adapts) ---------- */
-:root {
-  --card-bg: var(--secondary-background-color);
-  --text-color: var(--text-color);
-}
-
-/* ---------- Section 9: Profit Summary ---------- */
-section[data-testid="stVerticalBlock"]:has(h2:contains('Profit Summary')),
-section[data-testid="stVerticalBlock"]:has(h3:contains('Profit Summary')) {
-  max-width: 50vw !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-  background-color: var(--card-bg) !important;
-  border-radius: 8px !important;
-  padding: 10px 16px 14px 16px !important;
-  overflow: hidden !important;
-  box-shadow: 0 0 12px rgba(0,0,0,0.25);
-}
-
-/* center all inner DataFrames + remove scrolls */
-.stDataFrame {overflow: visible !important;}
-.stDataFrame table {margin-left:auto;margin-right:auto;}
-.stDataFrame [data-testid="stHorizontalBlock"] {
-  justify-content: center !important;
-}
-
-/* ---------- Corn vs Soy collapsible chart ---------- */
-div[data-testid="stExpander"]:has(div:contains('Corn vs Soy')) {
-  max-width: 50vw !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-  background-color: var(--card-bg) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 0 8px rgba(0,0,0,0.3);
-}
-div[data-testid="stExpander"] summary {
-  font-weight: 600 !important;
-  color: var(--text-color) !important;
-}
-div[data-testid="stExpander"] > div[role="region"] {
-  padding-top: 0.4rem !important;
-  padding-bottom: 0.6rem !important;
-}
-
-/* ---------- Optional visual cohesion ---------- */
-section[data-testid="stVerticalBlock"]:has(iframe[title="st_folium"]) {
-  display: flex;
-  justify-content: center;
-}
-iframe[title="st_folium"] {
-  border-radius: 8px !important;
-  max-width: 85vw !important;
-  margin: 0 auto !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-    st.markdown(
-        """
-        <style>
-          .block-container{ padding-top:.28rem !important; }
-
-          /* tighter column gutters */
-          div[data-testid="column"]{
-            padding-left:.22rem !important; padding-right:.22rem !important;
-          }
-
-          /* reduce vertical block spacing */
-          section[data-testid="stVerticalBlock"] > div{
-            padding-top:.18rem !important; padding-bottom:.18rem !important;
-          }
-
-          /* compact headers + captions */
-          h1{ margin:.32rem 0 .28rem 0 !important; font-size:1.22rem !important; }
-          h2,h3{ margin:.24rem 0 .16rem 0 !important; font-size:1.0rem !important; }
-          div[data-testid="stCaptionContainer"]{ margin:.12rem 0 !important; }
-
-          /* number inputs */
-          div[data-testid="stNumberInput"] label{
-            font-size:.78rem !important; margin-bottom:.10rem !important;
-          }
-          div[data-testid="stNumberInput"] div[role="spinbutton"]{
-            min-height:26px !important; height:26px !important; padding:0 6px !important; font-size:.86rem !important;
-          }
-          div[data-testid="stNumberInput"] button{ padding:0 !important; min-width:20px !important; }
-
-          /* make number boxes narrower so 12 fit on one line on most screens */
-          div[data-testid="stNumberInput"]{ width:112px !important; max-width:112px !important; }
-
-          /* uploader footprint */
-          div[data-testid="stFileUploader"]{ margin-top:.10rem !important; }
-          div[data-testid="stFileUploaderDropzone"]{ padding:.22rem !important; min-height:40px !important; }
-          div[data-testid="stFileUploaderDropzone"] p{ margin:0 !important; font-size:.78rem !important; }
-
-          /* compact DataFrame & DataEditor cells (no wasted space) */
-          div[data-testid="stDataFrame"] table, div[data-testid="stDataEditor"] table{ font-size:.86rem !important; }
-          div[data-testid="stDataFrame"] th, div[data-testid="stDataFrame"] td,
-          div[data-testid="stDataEditor"] th, div[data-testid="stDataEditor"] td{
-            padding:2px 6px !important; line-height:1.12rem !important;
-          }
-
-          /* compact static tables (st.table) */
-          table { border-collapse:collapse; }
-          thead th, tbody td { padding:4px 8px !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
 
 # ===========================
 # HELPERS
@@ -513,7 +344,6 @@ def render_fixed_inputs_and_strip():
     with r[10]: st.session_state["int"]   = _mini_num("Interest ($/ac)",    "int",   0.0, 1.0)
     with r[11]: st.session_state["truck"] = _mini_num("Truck Fuel ($/ac)",  "truck", 0.0, 1.0)
 
-    # store totals
     expenses = {
         "Chemicals": st.session_state["chem"],
         "Insurance": st.session_state["ins"],
@@ -528,48 +358,56 @@ def render_fixed_inputs_and_strip():
         "Extra Interest": st.session_state["int"],
         "Truck Fuel": st.session_state["truck"],
     }
-    base_expenses_per_acre = sum(expenses.values())
     st.session_state["expenses_dict"] = expenses
-    st.session_state["base_expenses_per_acre"] = base_expenses_per_acre
+    st.session_state["base_expenses_per_acre"] = sum(expenses.values())
 
-    # --- collapsible Corn vs Soy chart ---
-    with st.expander("Corn vs Soy Profitability (Click to Expand)", expanded=False):
-        st.markdown("""
+    # =========================================================
+    # Compact Corn vs Soy Chart — half width, inputs above
+    # =========================================================
+    st.markdown(
+        """
         <style>
-        .stDataFrame {overflow: visible !important;}
-        .stDataFrame table {margin-left:auto;margin-right:auto;}
-        div[data-testid="stExpander"]{max-width:50vw;margin-left:auto;margin-right:auto;}
+        #corn-soy-wrapper {
+            max-width: 50%;
+            margin-left: 0;
+            padding: 0.25rem 0;
+        }
         </style>
-        """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True
+    )
 
-        prev = pd.DataFrame({
-            "Crop": ["Corn", "Soybeans"],
-            "Yield (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-            "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
-        })
-        prev["Revenue ($/ac)"] = prev["Yield (bu/ac)"] * prev["Sell Price ($/bu)"]
-        prev["Fixed Inputs ($/ac)"] = base_expenses_per_acre
-        prev["Breakeven ($/ac)"] = prev["Revenue ($/ac)"] - prev["Fixed Inputs ($/ac)"]
+    with st.container():
+        st.markdown('<div id="corn-soy-wrapper">', unsafe_allow_html=True)
+        with st.expander("Corn vs Soy Profitability", expanded=True):
+            # Input controls
+            c1, c2, c3, c4 = st.columns(4, gap="small")
+            with c1:  st.session_state["corn_yield"] = st.number_input("Corn Yield", value=st.session_state["corn_yield"], min_value=0.0, step=1.0)
+            with c2:  st.session_state["corn_price"] = st.number_input("Corn $/bu",  value=st.session_state["corn_price"], min_value=0.0, step=0.1)
+            with c3:  st.session_state["bean_yield"] = st.number_input("Bean Yield", value=st.session_state["bean_yield"], min_value=0.0, step=1.0)
+            with c4:  st.session_state["bean_price"] = st.number_input("Bean $/bu",  value=st.session_state["bean_price"], min_value=0.0, step=0.1)
 
-        def _hl(v):
-            try:
-                v=float(v)
-                if v>0: return "color:#22c55e;font-weight:700;"
-                if v<0: return "color:#ef4444;font-weight:700;"
-            except: pass
-            return "font-weight:700;"
+            prev = pd.DataFrame({
+                "Crop": ["Corn", "Soybeans"],
+                "Yield (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
+                "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
+            })
+            prev["Revenue ($/ac)"] = prev["Yield (bu/ac)"] * prev["Sell Price ($/bu)"]
+            prev["Fixed Inputs ($/ac)"] = st.session_state["base_expenses_per_acre"]
+            prev["Breakeven ($/ac)"] = prev["Revenue ($/ac)"] - prev["Fixed Inputs ($/ac)"]
 
-        st.dataframe(
-            prev.style.applymap(_hl, subset=["Breakeven ($/ac)"]).format({
-                "Yield (bu/ac)":"{:,.0f}",
-                "Sell Price ($/bu)":"${:,.2f}",
-                "Revenue ($/ac)":"${:,.0f}",
-                "Fixed Inputs ($/ac)":"${:,.0f}",
-                "Breakeven ($/ac)":"${:,.0f}",
-            }),
-            use_container_width=True, hide_index=True,
-            height=df_px_height(len(prev))
-        )
+            st.dataframe(
+                prev.style.format({
+                    "Yield (bu/ac)": "{:,.0f}",
+                    "Sell Price ($/bu)": "${:,.2f}",
+                    "Revenue ($/ac)": "${:,.0f}",
+                    "Fixed Inputs ($/ac)": "${:,.0f}",
+                    "Breakeven ($/ac)": "${:,.0f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=df_px_height(len(prev))
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ===========================
@@ -816,25 +654,7 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         return None, None
 
 
-# ===========================
-# Profit Summary (compact)
-# ===========================
-def render_profit_summary():
-    st.header("Profit Summary")
 
-    st.markdown("""
-    <style>
-    div[data-testid="stHorizontalBlock"]{
-        max-width:50vw !important;
-        margin-left:auto !important;
-        margin-right:auto !important;
-    }
-    .stDataFrame {overflow:visible!important;}
-    .stDataFrame table{margin-left:auto;margin-right:auto;}
-    </style>
-    """, unsafe_allow_html=True)
-
-    def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
 
     # session defaults
     expenses = st.session_state.get("expenses_dict", {})
@@ -1231,50 +1051,35 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — 50% WIDTH, CENTERED, NO TABLE SCROLL
+# 9. PROFIT SUMMARY — centered, 50% width, no internal scroll
 # =========================================================
+
+# --- Inject simple CSS wrapper ---
+st.markdown("""
+<style>
+#profit-summary {
+    max-width: 50%;
+    margin: 0 auto;
+    padding-top: 1rem;
+}
+.dataframe tbody tr td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 def render_profit_summary():
-    # Section-scoped CSS (no :contains / :has)
-    st.markdown("""
-    <style>
-      /* Keep folium map centered at 85% width app-wide */
-      iframe[title="st_folium"]{
-        max-width:85vw !important; margin:0 auto !important; display:block !important; border-radius:8px;
-      }
-
-      /* Profit Summary wrapper: force 50% viewport width and center */
-      #profit-summary{
-        max-width:50vw !important;
-        margin-left:auto !important;
-        margin-right:auto !important;
-      }
-
-      /* Center the section header text */
-      #profit-summary h2, #profit-summary h3{
-        text-align:center !important;
-      }
-
-      /* No internal scrollbars on DataFrames inside the section */
-      #profit-summary .stDataFrame{ overflow:visible !important; }
-      #profit-summary .stDataFrame table{
-        margin-left:auto !important; margin-right:auto !important; /* center tables */
-      }
-
-      /* If you put columns inside this section, keep them visually compact/centered */
-      #profit-summary [data-testid="stHorizontalBlock"]{
-        justify-content:center !important;
-      }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # ---- BEGIN WRAPPER ----
+    """Centered Profit Summary section under map (50% width, two columns)."""
     st.markdown('<div id="profit-summary">', unsafe_allow_html=True)
-
     st.header("Profit Summary")
 
-    # session & fallbacks
+    # --- compute data ---
     expenses = st.session_state.get("expenses_dict", {})
     base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
+
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
@@ -1282,10 +1087,10 @@ def render_profit_summary():
     target_yield = float(st.session_state.get("target_yield", 200))
     sell_price  = float(st.session_state.get("sell_price", corn_price))
 
-    # helper: exact pixel height to avoid internal scrollbars
+    # helper: exact pixel height to avoid scrollbars
     def _h(n): return df_px_height(n, row_h=28, header=34, pad=4)
 
-    # Breakeven table
+    # --- Breakeven + Profit tables ---
     breakeven_df = pd.DataFrame({
         "Crop": ["Corn", "Soybeans"],
         "Yield Goal (bu/ac)": [corn_yield, bean_yield],
@@ -1293,56 +1098,66 @@ def render_profit_summary():
     })
     breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
     breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = (
-        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
-    )
+    breakeven_df["Breakeven Budget ($/ac)"] = breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
 
     revenue_overall  = target_yield * sell_price
     expenses_overall = base_exp
     profit_overall   = revenue_overall - expenses_overall
 
-    c1, c2 = st.columns([1, 1], gap="large")
+    comparison = pd.DataFrame({
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+        "Breakeven Budget": [revenue_overall, expenses_overall, profit_overall],
+    })
 
-    with c1:
-        st.subheader("Breakeven Budget (Corn vs Beans)")
-        st.dataframe(
-            breakeven_df.style.format({
-                "Yield Goal (bu/ac)": "{:,.0f}",
-                "Sell Price ($/bu)": "${:,.2f}",
-                "Revenue ($/ac)": "${:,.0f}",
-                "Fixed Inputs ($/ac)": "${:,.0f}",
-                "Breakeven Budget ($/ac)": "${:,.0f}",
-            }),
-            use_container_width=True,
-            hide_index=True,
-            height=_h(len(breakeven_df))  # <= prevents internal scrollbars
-        )
-
-    with c2:
-        st.subheader("Fixed Input Costs")
-        if not expenses:
-            keys   = ["chem","ins","insect","fert","seed","rent","mach","labor","col","fuel","int","truck"]
-            labels = ["Chemicals","Insurance","Insecticide/Fungicide","Fertilizer (Flat)","Seed (Flat)","Cash Rent",
-                      "Machinery","Labor","Cost of Living","Extra Fuel","Extra Interest","Truck Fuel"]
-            expenses = {lbl: float(st.session_state.get(k, 0.0)) for k, lbl in zip(keys, labels)}
-            st.session_state["expenses_dict"] = expenses
-
-        fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+    if not fixed_df.empty:
         total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
         fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
 
-        st.dataframe(
-            fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-                lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
-                subset=["Expense"]
-            ),
-            use_container_width=True,
-            hide_index=True,
-            height=_h(len(fixed_df))  # <= prevents internal scrollbars
-        )
+    # --- Center layout: 1-2-1 columns for centering ---
+    left_pad, center, right_pad = st.columns([1, 2, 1])
+    with center:
+        col_left, col_right = st.columns(2, gap="large")
 
-    # ---- END WRAPPER ----
-    st.markdown("</div>", unsafe_allow_html=True)
+        # Left: Corn vs Bean breakeven & profit comparison
+        with col_left:
+            st.subheader("Breakeven Budget (Corn vs Beans)")
+            st.dataframe(
+                breakeven_df.style.format({
+                    "Yield Goal (bu/ac)": "{:,.0f}",
+                    "Sell Price ($/bu)": "${:,.2f}",
+                    "Revenue ($/ac)": "${:,.0f}",
+                    "Fixed Inputs ($/ac)": "${:,.0f}",
+                    "Breakeven Budget ($/ac)": "${:,.0f}",
+                }),
+                hide_index=True,
+                height=_h(len(breakeven_df))
+            )
+
+            st.subheader("Profit Metrics Comparison")
+            st.dataframe(
+                comparison.style.format({"Breakeven Budget": "${:,.2f}"}),
+                hide_index=True,
+                height=_h(len(comparison))
+            )
+
+        # Right: Fixed Input Costs
+        with col_right:
+            st.subheader("Fixed Input Costs")
+            if fixed_df.empty:
+                st.info("Enter your fixed inputs above to see totals here.")
+            else:
+                st.dataframe(
+                    fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+                        lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
+                        subset=["Expense"]
+                    ),
+                    hide_index=True,
+                    height=_h(len(fixed_df))
+                )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
 
 # ---------- render summary (call once) ----------
 render_profit_summary()
