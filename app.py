@@ -896,44 +896,51 @@ except Exception:
 safe_fit_bounds(m, compute_bounds_for_heatmaps())
 st_folium(m, use_container_width=True, height=550)
 
+
 # =========================================================
-# 9. PROFIT SUMMARY  — COMPACT, SAME FUNCTIONALITY
+# 9. PROFIT SUMMARY
 # =========================================================
 st.header("Profit Summary")
 
-# Ensure session state keys exist
+# --- Ensure session state keys always exist ---
 if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+    st.session_state["fert_products"] = pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"])
 if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
+    st.session_state["seed_products"] = pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"])
 if "zones_gdf" not in st.session_state:
     st.session_state["zones_gdf"] = None
 if "yield_df" not in st.session_state:
     st.session_state["yield_df"] = None
 
-# Safe defaults
+# --- Safe defaults ---
 revenue_per_acre = 0.0
 net_profit_per_acre = 0.0
 expenses_per_acre = base_expenses_per_acre if "base_expenses_per_acre" in locals() else 0.0
 
 if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
-    df_y = st.session_state["yield_df"]
-    if "Revenue_per_acre" in df_y.columns:
-        revenue_per_acre = df_y["Revenue_per_acre"].mean()
-    if "NetProfit_per_acre" in df_y.columns:
-        net_profit_per_acre = df_y["NetProfit_per_acre"].mean()
+    _df_tmp = st.session_state["yield_df"]
+    if "Revenue_per_acre" in _df_tmp.columns:
+        revenue_per_acre = _df_tmp["Revenue_per_acre"].mean()
+    if "NetProfit_per_acre" in _df_tmp.columns:
+        net_profit_per_acre = _df_tmp["NetProfit_per_acre"].mean()
 
-# Layout (compact side-by-side)
-col_left, col_right = st.columns([1.6, 1])
+# --- Layout (two columns) ---
+col_left, col_right = st.columns([2, 2])
 
-# LEFT: Breakeven + Profit Comparison
+# --------------------------
+# LEFT SIDE = Breakeven + Profit Comparison
+# --------------------------
 with col_left:
-    # Pull values from session_state (set in Section 4)
+    st.subheader("Breakeven Budget Tool (Corn vs Beans)")
+    st.markdown("_These values are linked to the 'Compare Crop Profitability' section above the map._")
+
+    # Pull values from session_state (set in 4D or fallback defaults)
     corn_yield = st.session_state.get("corn_yield", 200.0)
     corn_price = st.session_state.get("corn_price", 5.0)
     bean_yield = st.session_state.get("bean_yield", 60.0)
     bean_price = st.session_state.get("bean_price", 12.0)
 
+    # Calculate breakeven budgets
     corn_revenue = corn_yield * corn_price
     bean_revenue = bean_yield * bean_price
     corn_budget = corn_revenue - expenses_per_acre
@@ -945,120 +952,140 @@ with col_left:
         "Sell Price ($/bu)": [corn_price, bean_price],
         "Revenue ($/ac)": [corn_revenue, bean_revenue],
         "Fixed Inputs ($/ac)": [expenses_per_acre, expenses_per_acre],
-        "Breakeven Budget ($/ac)": [corn_budget, bean_budget]
+        "Breakeven Budget ($/ac)": [corn_budget, bean_budget],
     })
 
-    def highlight_budget(val):
+    def _hl_budget(val):
         if isinstance(val, (int, float)):
-            if val > 0: return "color: limegreen; font-weight: 600;"
-            if val < 0: return "color: crimson; font-weight: 600;"
-        return "font-weight: 600;"
+            if val > 0:
+                return "color: green; font-weight: bold;"
+            if val < 0:
+                return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
 
-   st.dataframe(
-    breakeven_df.style.applymap(
-        highlight_budget,
-        subset=["Breakeven Budget ($/ac)"]
-    ).format({
-        "Yield Goal (bu/ac)": "{:,.1f}",
-        "Sell Price ($/bu)": "${:,.2f}",
-        "Revenue ($/ac)": "${:,.2f}",
-        "Fixed Inputs ($/ac)": "${:,.2f}",
-        "Breakeven Budget ($/ac)": "${:,.2f}"
-    }),
-    use_container_width=True,
-    hide_index=True,
-    height=df_height(len(breakeven_df))   # <-- no scroll
-)
+    st.dataframe(
+        breakeven_df.style.applymap(
+            _hl_budget,
+            subset=["Breakeven Budget ($/ac)"]
+        ).format({
+            "Yield Goal (bu/ac)": "{:,.1f}",
+            "Sell Price ($/bu)": "${:,.2f}",
+            "Revenue ($/ac)": "${:,.2f}",
+            "Fixed Inputs ($/ac)": "${:,.2f}",
+            "Breakeven Budget ($/ac)": "${:,.2f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=df_height(len(breakeven_df)),
+    )
+
+    st.caption("To adjust Corn and Soybean assumptions, edit values in the **Compare Crop Profitability (Optional)** section above the map.")
 
     # Profit Metrics Comparison
+    st.subheader("Profit Metrics Comparison")
+
+    # Variable Rate Profit
     var_profit = 0.0
     if st.session_state["yield_df"] is not None and not st.session_state["yield_df"].empty:
-        df_y = st.session_state["yield_df"]
-        fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0
-        seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0
-        revenue_var = df_y["Revenue_per_acre"].mean() if "Revenue_per_acre" in df_y.columns else 0.0
-        expenses_var = base_expenses_per_acre + fert_costs + seed_costs
+        _dfy = st.session_state["yield_df"]
+        fert_costs = st.session_state["fert_products"]["CostPerAcre"].sum() if not st.session_state["fert_products"].empty else 0.0
+        seed_costs = st.session_state["seed_products"]["CostPerAcre"].sum() if not st.session_state["seed_products"].empty else 0.0
+        revenue_var = _dfy["Revenue_per_acre"].mean() if "Revenue_per_acre" in _dfy.columns else 0.0
+        expenses_var = expenses_per_acre + fert_costs + seed_costs
         var_profit = revenue_var - expenses_var
     else:
         revenue_var, expenses_var = 0.0, 0.0
 
+    # Fixed Rate Profit
     fixed_profit = 0.0
     if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
-        fert_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
-        seed_fixed_costs = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
+        _fx = st.session_state["fixed_products"].copy()
+        # Ensure $/ac exists
+        if "$/ac" not in _fx.columns:
+            _fx["$/ac"] = _fx.apply(lambda r: (r.get("Rate", 0) or 0) * (r.get("CostPerUnit", 0) or 0), axis=1)
+        fert_fixed_costs = _fx[_fx["Type"] == "Fertilizer"]["$/ac"].sum() if "Type" in _fx.columns else 0.0
+        seed_fixed_costs = _fx[_fx["Type"] == "Seed"]["$/ac"].sum() if "Type" in _fx.columns else 0.0
         revenue_fixed = revenue_var
-        expenses_fixed = base_expenses_per_acre + fert_fixed_costs + seed_fixed_costs
+        expenses_fixed = expenses_per_acre + fert_fixed_costs + seed_fixed_costs
         fixed_profit = revenue_fixed - expenses_fixed
     else:
         revenue_fixed, expenses_fixed = 0.0, 0.0
 
+    # Overall (breakeven/summary)
     revenue_overall = revenue_per_acre
     expenses_overall = expenses_per_acre
     profit_overall = net_profit_per_acre
 
     comparison = pd.DataFrame({
         "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Breakeven Budget": [round(revenue_overall,2), round(expenses_overall,2), round(profit_overall,2)],
-        "Variable Rate": [round(revenue_var,2), round(expenses_var,2), round(var_profit,2)],
-        "Fixed Rate": [round(revenue_fixed,2), round(expenses_fixed,2), round(fixed_profit,2)]
+        "Breakeven Budget": [round(revenue_overall, 2), round(expenses_overall, 2), round(profit_overall, 2)],
+        "Variable Rate": [round(revenue_var, 2), round(expenses_var, 2), round(var_profit, 2)],
+        "Fixed Rate": [round(revenue_fixed, 2), round(expenses_fixed, 2), round(fixed_profit, 2)],
     })
 
-    def highlight_profit(val):
+    def _hl_profit(val):
         if isinstance(val, (int, float)):
-            if val > 0: return "color: limegreen; font-weight: 600;"
-            if val < 0: return "color: crimson; font-weight: 600;"
-        return "font-weight: 600;"
+            if val > 0:
+                return "color: green; font-weight: bold;"
+            if val < 0:
+                return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
 
-   st.dataframe(
-    comparison.style.applymap(
-        highlight_profit,
-        subset=["Breakeven Budget","Variable Rate","Fixed Rate"]
-    ).format({
-        "Breakeven Budget":"${:,.2f}",
-        "Variable Rate":"${:,.2f}",
-        "Fixed Rate":"${:,.2f}"
-    }),
-    use_container_width=True,
-    hide_index=True,
-    height=df_height(len(comparison))     # <-- no scroll
-)
-
+    st.dataframe(
+        comparison.style.applymap(
+            _hl_profit,
+            subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
+        ).format({
+            "Breakeven Budget": "${:,.2f}",
+            "Variable Rate": "${:,.2f}",
+            "Fixed Rate": "${:,.2f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=df_height(len(comparison)),
+    )
 
     with st.expander("Show Calculation Formulas", expanded=False):
-        st.markdown("""
-        <div style="font-size:.85rem;">
-        • <b>Breakeven Budget</b> = (Target Yield × Sell Price) − Fixed Inputs<br/>
-        • <b>Variable Rate</b> = (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)<br/>
-        • <b>Fixed Rate</b> = (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="border:1px solid #444; border-radius:6px; padding:8px; margin-bottom:6px; background-color:#111;">
+              <b>Breakeven Budget</b><br>
+              (Target Yield × Sell Price) − Fixed Inputs
+            </div>
+            <div style="border:1px solid #444; border-radius:6px; padding:8px; margin-bottom:6px; background-color:#111;">
+              <b>Variable Rate</b><br>
+              (Avg Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+            </div>
+            <div style="border:1px solid #444; border-radius:6px; padding:8px; background-color:#111;">
+              <b>Fixed Rate</b><br>
+              (Avg Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-# RIGHT: Fixed Inputs
-fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
+# --------------------------
+# RIGHT SIDE = Fixed Inputs
+# --------------------------
+with col_right:
+    st.subheader("Fixed Input Costs")
 
-styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-    lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
-    subset=["Expense"]
-).apply(
-    lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
-    subset=["$/ac"]
-)
+    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+    total_fixed = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
+    fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
 
-fixed_df = pd.concat([fixed_df, total_fixed], ignore_index=True)
+    styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
+        lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
+        subset=["Expense"]
+    ).apply(
+        lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
+        subset=["$/ac"]
+    )
 
-styled_fixed = fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-    lambda x: ["font-weight: bold;" if v == "Total Fixed Costs" else "" for v in x],
-    subset=["Expense"]
-).apply(
-    lambda x: ["font-weight: bold;" if i == len(fixed_df) - 1 else "" for i in range(len(x))],
-    subset=["$/ac"]
-)
-
-st.dataframe(
-    styled_fixed,
-    use_container_width=True,
-    hide_index=True,
-    height=df_height(len(fixed_df))       # <-- replaces manual math
-)
-
+    st.dataframe(
+        styled_fixed,
+        use_container_width=True,
+        hide_index=True,
+        height=df_height(len(fixed_df)),
+    )
 
