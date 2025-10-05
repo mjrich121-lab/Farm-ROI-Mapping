@@ -15,9 +15,7 @@ import folium
 from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
-apply_compact_theme()
-render_uploaders()
-render_fixed_inputs_and_strip()
+
 # ===========================
 # COMPACT THEME + LAYOUT
 # ===========================
@@ -77,7 +75,6 @@ def apply_compact_theme():
       thead th, tbody td { padding:4px 8px !important; }
     </style>
     """, unsafe_allow_html=True)
-
 
 # ===========================
 # HELPERS
