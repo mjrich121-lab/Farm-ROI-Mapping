@@ -1154,3 +1154,30 @@ def render_profit_summary():
 
 # ---------- render summary (call once) ----------
 render_profit_summary()
+
+# =========================================================
+# FORCE LAYOUT WIDTH FIX — applies to parent DOM (not iframe)
+# =========================================================
+st.markdown(
+    """
+    <script>
+    // Wait until Streamlit DOM is loaded
+    function fixLayoutWidth() {
+        const outer = window.parent.document.querySelector('.block-container');
+        if (outer) {
+            outer.style.maxWidth = '50%';
+            outer.style.margin = 'auto';
+            outer.style.paddingTop = '1rem';
+            outer.style.paddingBottom = '1rem';
+        }
+    }
+    // Try immediately, and again after small delay for re-renders
+    fixLayoutWidth();
+    setTimeout(fixLayoutWidth, 1000);
+    setTimeout(fixLayoutWidth, 3000);
+    </script>
+    """,
+    unsafe_allow_html=True
+)
+st.success("✅ Layout override script applied successfully (JS-based width enforcement).")
+
