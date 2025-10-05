@@ -18,6 +18,10 @@ from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
 
+st.cache_data.clear()
+st.cache_resource.clear()
+
+st.warning("Farm ROI Tool V4 — active reload check", icon="⚡")
 
 
 # ===========================
