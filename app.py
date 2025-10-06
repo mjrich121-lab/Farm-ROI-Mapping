@@ -354,14 +354,14 @@ def render_uploaders():
         else:
             st.caption("No seed files uploaded.")
 
-
 # ===========================
-# UI: Fixed inputs + Corn/Soy strip
+# UI: Fixed inputs + Variable/Flat/CornSoy strip
 # ===========================
 def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
     st.caption(label)
     return st.number_input(key, min_value=0.0, value=float(st.session_state.get(key, default)),
                            step=step, label_visibility="collapsed")
+
 
 def render_fixed_inputs_and_strip():
     st.markdown("### Fixed Inputs ($/ac)")
@@ -398,52 +398,86 @@ def render_fixed_inputs_and_strip():
     st.session_state["base_expenses_per_acre"] = sum(expenses.values())
 
     # =========================================================
-    # Compact Corn vs Soy Chart — half width, inputs above
+    # Profit Input Controls — Variable, Flat, Corn/Soy (Three Columns)
     # =========================================================
-    st.markdown(
-        """
-        <style>
-        #corn-soy-wrapper {
-            max-width: 50%;
-            margin-left: 0;
-            padding: 0.25rem 0;
-        }
-        </style>
-        """, unsafe_allow_html=True
-    )
+    st.markdown("### Profit Input Controls")
 
-    with st.container():
-        st.markdown('<div id="corn-soy-wrapper">', unsafe_allow_html=True)
+    col_var, col_flat, col_cornsoy = st.columns(3, gap="large")
+
+    # -----------------------------
+    # VARIABLE RATE INPUTS
+    # -----------------------------
+    with col_var:
+        with st.expander("Variable Rate Inputs", expanded=False):
+            st.caption("Enter cost per unit and units applied per acre for each variable-rate product.")
+            var_data = []
+            for label in ["Seed", "Fertilizer"]:
+                price = st.number_input(f"{label} Cost per Unit ($)", min_value=0.0, value=0.0, step=0.01, key=f"var_cost_{label}")
+                rate = st.number_input(f"{label} Avg Rate (units/ac)", min_value=0.0, value=0.0, step=0.01, key=f"var_rate_{label}")
+                total = price * rate
+                var_data.append({"Product": label, "CostPerUnit": price, "Rate": rate, "CostPerAcre": total})
+            df_var = pd.DataFrame(var_data)
+            st.session_state["variable_products"] = df_var
+            st.dataframe(df_var.style.format({"CostPerUnit": "${:,.2f}", "Rate": "{:,.2f}", "CostPerAcre": "${:,.2f}"}),
+                         hide_index=True, use_container_width=True, height=df_px_height(len(df_var)))
+
+    # -----------------------------
+    # FLAT RATE (FIXED) INPUTS
+    # -----------------------------
+    with col_flat:
+        with st.expander("Flat Rate Inputs", expanded=False):
+            st.caption("Enter cost per unit and uniform flat rate across the entire field (used for flat-rate profit layer).")
+            flat_data = []
+            for label in ["Seed", "Fertilizer"]:
+                price = st.number_input(f"{label} Cost per Unit ($)", min_value=0.0, value=0.0, step=0.01, key=f"flat_cost_{label}")
+                rate = st.number_input(f"{label} Flat Rate (units/ac)", min_value=0.0, value=0.0, step=0.01, key=f"flat_rate_{label}")
+                total = price * rate
+                flat_data.append({"Product": label, "CostPerUnit": price, "Rate": rate, "CostPerAcre": total})
+            df_flat = pd.DataFrame(flat_data)
+            st.session_state["fixed_products"] = df_flat
+            st.dataframe(df_flat.style.format({"CostPerUnit": "${:,.2f}", "Rate": "{:,.2f}", "CostPerAcre": "${:,.2f}"}),
+                         hide_index=True, use_container_width=True, height=df_px_height(len(df_flat)))
+
+    # -----------------------------
+    # CORN VS SOY PROFITABILITY
+    # -----------------------------
+    with col_cornsoy:
         with st.expander("Corn vs Soy Profitability", expanded=True):
-            # Input controls
-            c1, c2, c3, c4 = st.columns(4, gap="small")
-            with c1:  st.session_state["corn_yield"] = st.number_input("Corn Yield", value=st.session_state["corn_yield"], min_value=0.0, step=1.0)
-            with c2:  st.session_state["corn_price"] = st.number_input("Corn $/bu",  value=st.session_state["corn_price"], min_value=0.0, step=0.1)
-            with c3:  st.session_state["bean_yield"] = st.number_input("Bean Yield", value=st.session_state["bean_yield"], min_value=0.0, step=1.0)
-            with c4:  st.session_state["bean_price"] = st.number_input("Bean $/bu",  value=st.session_state["bean_price"], min_value=0.0, step=0.1)
+            st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
 
-            prev = pd.DataFrame({
+            base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
+            corn_yield = st.number_input("Corn Yield (bu/ac)", value=float(st.session_state.get("corn_yield", 200)), min_value=0.0, step=1.0)
+            corn_price = st.number_input("Corn $/bu", value=float(st.session_state.get("corn_price", 5)), min_value=0.0, step=0.1)
+            bean_yield = st.number_input("Soy Yield (bu/ac)", value=float(st.session_state.get("bean_yield", 60)), min_value=0.0, step=1.0)
+            bean_price = st.number_input("Soy $/bu", value=float(st.session_state.get("bean_price", 12)), min_value=0.0, step=0.1)
+
+            df_profit = pd.DataFrame({
                 "Crop": ["Corn", "Soybeans"],
-                "Yield (bu/ac)": [st.session_state["corn_yield"], st.session_state["bean_yield"]],
-                "Sell Price ($/bu)": [st.session_state["corn_price"], st.session_state["bean_price"]],
+                "Yield (bu/ac)": [corn_yield, bean_yield],
+                "Sell Price ($/bu)": [corn_price, bean_price],
             })
-            prev["Revenue ($/ac)"] = prev["Yield (bu/ac)"] * prev["Sell Price ($/bu)"]
-            prev["Fixed Inputs ($/ac)"] = st.session_state["base_expenses_per_acre"]
-            prev["Breakeven ($/ac)"] = prev["Revenue ($/ac)"] - prev["Fixed Inputs ($/ac)"]
+            df_profit["Revenue ($/ac)"] = df_profit["Yield (bu/ac)"] * df_profit["Sell Price ($/bu)"]
+            df_profit["Fixed Inputs ($/ac)"] = base_exp
+            df_profit["Profit ($/ac)"] = df_profit["Revenue ($/ac)"] - df_profit["Fixed Inputs ($/ac)"]
+
+            def color_profit(v):
+                if isinstance(v, (int, float)):
+                    if v > 0: return "color:limegreen;font-weight:bold;"
+                    if v < 0: return "color:#ff4d4d;font-weight:bold;"
+                return ""
 
             st.dataframe(
-                prev.style.format({
+                df_profit.style.format({
                     "Yield (bu/ac)": "{:,.0f}",
                     "Sell Price ($/bu)": "${:,.2f}",
                     "Revenue ($/ac)": "${:,.0f}",
                     "Fixed Inputs ($/ac)": "${:,.0f}",
-                    "Breakeven ($/ac)": "${:,.0f}",
-                }),
+                    "Profit ($/ac)": "${:,.0f}",
+                }).applymap(color_profit, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=df_px_height(len(prev))
+                height=df_px_height(len(df_profit))
             )
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ===========================
