@@ -396,160 +396,144 @@ def render_fixed_inputs_and_strip():
     }
     st.session_state["expenses_dict"] = expenses
     st.session_state["base_expenses_per_acre"] = sum(expenses.values())
+
 # =========================================================
-# INPUTS SECTION — Variable Rate | Flat Rate | Corn vs Soy (3 columns)
+# SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
 # =========================================================
 def render_input_sections():
     def _h(n): return int(34 + max(1, n) * 28 + 4)
 
-    # helper: clean color formatter for profit table
     def _profit_color(v):
         if isinstance(v, (int, float)):
             if v > 0: return "color:limegreen;font-weight:bold;"
             if v < 0: return "color:#ff4d4d;font-weight:bold;"
         return ""
 
-    # =========================================================
-    # 3 equal columns across the screen
-    # =========================================================
-    col_var, col_flat, col_cs = st.columns(3, gap="medium")
+    # Three visible dropdowns side-by-side
+    cols = st.columns(3, gap="large")
 
     # ---------------------------------------------------------
     # 1️⃣ VARIABLE RATE INPUTS
     # ---------------------------------------------------------
-    with col_var:
-        with st.expander("Variable-Rate Inputs", expanded=False):
-            st.caption("Enter price per unit; units & acres are derived from RX maps if uploaded.")
+    with cols[0]:
+        st.markdown("### Variable Rate Inputs")
+        with st.container():
+            with st.expander("Open Variable Rate Inputs", expanded=False):
+                st.caption("Enter price per unit and total units applied from RX maps or manually.")
 
-            fert_layers = st.session_state.get("fert_layers_store", {})
-            seed_layers = st.session_state.get("seed_layers_store", {})
+                rx_df = pd.DataFrame([{
+                    "Type": "Fertilizer",
+                    "Product": "",
+                    "Units Applied": 0.0,
+                    "Price per Unit ($)": 0.0
+                }])
 
-            rows = []
-            for typ, store in [("Fertilizer", fert_layers), ("Seed", seed_layers)]:
-                for key, df in store.items():
-                    for _, r in df.iterrows():
-                        rows.append({
-                            "Type": typ,
-                            "Product": r.get("product", key),
-                            "Acres Applied": r.get("Acres", 0.0),
-                            "Units Applied": r.get("Acres", 0.0),  # placeholder if no rate col
-                            "Price per Unit ($)": 0.0
-                        })
+                edited = st.data_editor(
+                    rx_df,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    use_container_width=True,
+                    key="var_inputs_editor",
+                    column_config={
+                        "Type": st.column_config.TextColumn(disabled=True),
+                        "Product": st.column_config.TextColumn(),
+                        "Units Applied": st.column_config.NumberColumn(format="%.4f"),
+                        "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    height=_h(len(rx_df))
+                )
 
-            rx_df = pd.DataFrame(rows) if rows else pd.DataFrame([
-                {"Type": "Fertilizer", "Product": "", "Acres Applied": 0.0, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
-            ])
-
-            edited = st.data_editor(
-                rx_df,
-                num_rows="dynamic",
-                hide_index=True,
-                use_container_width=True,
-                key="var_inputs_editor",
-                column_config={
-                    "Type": st.column_config.TextColumn(disabled=True),
-                    "Product": st.column_config.TextColumn(),
-                    "Acres Applied": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                    "Units Applied": st.column_config.NumberColumn(format="%.4f"),
-                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
-                },
-                height=_h(len(rx_df))
-            )
-
-            edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
-            edited["Cost per Acre ($/ac)"] = edited["Total Cost ($)"] / edited["Acres Applied"].replace(0, np.nan)
-            st.dataframe(
-                edited.style.format({
-                    "Units Applied": "{:,.4f}",
-                    "Price per Unit ($)": "${:,.2f}",
-                    "Total Cost ($)": "${:,.2f}",
-                    "Cost per Acre ($/ac)": "${:,.2f}",
-                }),
-                hide_index=True, use_container_width=True, height=_h(len(edited))
-            )
-            st.session_state["variable_rate_cost_per_acre"] = float(edited["Cost per Acre ($/ac)"].mean())
+                edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
+                st.dataframe(
+                    edited.style.format({
+                        "Units Applied": "{:,.4f}",
+                        "Price per Unit ($)": "${:,.2f}",
+                        "Total Cost ($)": "${:,.2f}",
+                    }),
+                    use_container_width=True, hide_index=True, height=_h(len(edited))
+                )
 
     # ---------------------------------------------------------
     # 2️⃣ FLAT RATE INPUTS
     # ---------------------------------------------------------
-    with col_flat:
-        with st.expander("Flat-Rate Inputs", expanded=False):
-            st.caption("Uniform product rate and cost per unit across the field.")
+    with cols[1]:
+        st.markdown("### Flat Rate Inputs")
+        with st.container():
+            with st.expander("Open Flat Rate Inputs", expanded=False):
+                st.caption("Uniform cost per acre for the entire field.")
 
-            flat_df = st.session_state.get("flat_products", pd.DataFrame([
-                {"Product": "", "Unit": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
-            ]))
+                flat_df = pd.DataFrame([{
+                    "Product": "",
+                    "Rate (units/ac)": 0.0,
+                    "Price per Unit ($)": 0.0
+                }])
 
-            edited_flat = st.data_editor(
-                flat_df,
-                num_rows="dynamic",
-                hide_index=True,
-                use_container_width=True,
-                key="flat_inputs_editor",
-                column_config={
-                    "Product": st.column_config.TextColumn(),
-                    "Unit": st.column_config.TextColumn(),
-                    "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
-                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
-                },
-                height=_h(len(flat_df))
-            )
+                edited_flat = st.data_editor(
+                    flat_df,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    use_container_width=True,
+                    key="flat_inputs_editor",
+                    column_config={
+                        "Product": st.column_config.TextColumn(),
+                        "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
+                        "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    height=_h(len(flat_df))
+                )
 
-            edited_flat["Cost per Acre ($/ac)"] = edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
-            edited_flat["Total Cost ($)"] = edited_flat["Cost per Acre ($/ac)"]  # placeholder summary
-            st.dataframe(
-                edited_flat.style.format({
-                    "Rate (units/ac)": "{:,.4f}",
-                    "Price per Unit ($)": "${:,.2f}",
-                    "Cost per Acre ($/ac)": "${:,.2f}",
-                    "Total Cost ($)": "${:,.2f}",
-                }),
-                hide_index=True, use_container_width=True, height=_h(len(edited_flat))
-            )
-
-            st.session_state["flat_rate_cost_per_acre"] = float(edited_flat["Cost per Acre ($/ac)"].mean())
-            st.session_state["flat_products"] = edited_flat
+                edited_flat["Cost per Acre ($/ac)"] = edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
+                st.dataframe(
+                    edited_flat.style.format({
+                        "Rate (units/ac)": "{:,.4f}",
+                        "Price per Unit ($)": "${:,.2f}",
+                        "Cost per Acre ($/ac)": "${:,.2f}",
+                    }),
+                    use_container_width=True, hide_index=True, height=_h(len(edited_flat))
+                )
 
     # ---------------------------------------------------------
     # 3️⃣ CORN vs SOY PROFITABILITY
     # ---------------------------------------------------------
-    with col_cs:
-        with st.expander("Corn vs Soy Profitability", expanded=False):
-            st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
-            r = st.columns(4, gap="small")
-            with r[0]:
-                corn_yield = st.number_input("Corn Yield", min_value=0.0,
-                                             value=float(st.session_state.get("corn_yield", 200.0)))
-            with r[1]:
-                corn_price = st.number_input("Corn $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("corn_price", 5.0)))
-            with r[2]:
-                bean_yield = st.number_input("Soy Yield", min_value=0.0,
-                                             value=float(st.session_state.get("bean_yield", 60.0)))
-            with r[3]:
-                bean_price = st.number_input("Soy $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("bean_price", 12.0)))
+    with cols[2]:
+        st.markdown("### Corn vs Soy Profitability")
+        with st.container():
+            with st.expander("Open Corn vs Soy Profitability", expanded=False):
+                st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
+                c1, c2, c3, c4 = st.columns(4, gap="small")
+                with c1:
+                    corn_yield = st.number_input("Corn Yield", min_value=0.0,
+                                                 value=float(st.session_state.get("corn_yield", 200.0)))
+                with c2:
+                    corn_price = st.number_input("Corn $/bu", min_value=0.0,
+                                                 value=float(st.session_state.get("corn_price", 5.0)))
+                with c3:
+                    bean_yield = st.number_input("Soy Yield", min_value=0.0,
+                                                 value=float(st.session_state.get("bean_yield", 60.0)))
+                with c4:
+                    bean_price = st.number_input("Soy $/bu", min_value=0.0,
+                                                 value=float(st.session_state.get("bean_price", 12.0)))
 
-            base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
-            df_cs = pd.DataFrame({
-                "Crop": ["Corn", "Soybeans"],
-                "Yield (bu/ac)": [corn_yield, bean_yield],
-                "Sell Price ($/bu)": [corn_price, bean_price],
-            })
-            df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
-            df_cs["Fixed Inputs ($/ac)"] = base_exp
-            df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
+                base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
+                df_cs = pd.DataFrame({
+                    "Crop": ["Corn", "Soybeans"],
+                    "Yield (bu/ac)": [corn_yield, bean_yield],
+                    "Sell Price ($/bu)": [corn_price, bean_price],
+                })
+                df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+                df_cs["Fixed Inputs ($/ac)"] = base_exp
+                df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
 
-            st.dataframe(
-                df_cs.style.format({
-                    "Yield (bu/ac)": "{:,.0f}",
-                    "Sell Price ($/bu)": "${:,.2f}",
-                    "Revenue ($/ac)": "${:,.0f}",
-                    "Fixed Inputs ($/ac)": "${:,.0f}",
-                    "Profit ($/ac)": "${:,.0f}",
-                }).applymap(_profit_color, subset=["Profit ($/ac)"]),
-                use_container_width=True, hide_index=True, height=_h(len(df_cs))
-            )
+                st.dataframe(
+                    df_cs.style.format({
+                        "Yield (bu/ac)": "{:,.0f}",
+                        "Sell Price ($/bu)": "${:,.2f}",
+                        "Revenue ($/ac)": "${:,.0f}",
+                        "Fixed Inputs ($/ac)": "${:,.0f}",
+                        "Profit ($/ac)": "${:,.0f}",
+                    }).applymap(_profit_color, subset=["Profit ($/ac)"]),
+                    use_container_width=True, hide_index=True, height=_h(len(df_cs))
+                )
 
 # ===========================
 # Map helpers / overlays
