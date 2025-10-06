@@ -397,279 +397,160 @@ def render_fixed_inputs_and_strip():
     st.session_state["expenses_dict"] = expenses
     st.session_state["base_expenses_per_acre"] = sum(expenses.values())
 # =========================================================
-# INPUTS SECTION — Variable Rate, Flat Rate, Corn vs Soy
+# INPUTS SECTION — Variable Rate | Flat Rate | Corn vs Soy (3 columns)
 # =========================================================
 def render_input_sections():
-    # exact pixel height (no internal scrollbars)
     def _h(n): return int(34 + max(1, n) * 28 + 4)
 
-    # ---------- helper to summarize RX GDFs into product totals ----------
-    def summarize_rx_products() -> tuple[pd.DataFrame, float]:
-        """
-        Returns (summary_df, field_acres_est)
-        summary_df columns:
-        ['Type','Product','Unit','Acres Applied','Units Applied','Price per Unit ($)']
-        - 'Units Applied' is computed from rate * acres if rate column exists; otherwise left 0 and editable.
-        - 'Price per Unit ($)' is editable by the user.
-        field_acres_est is a best estimate from RX polygons (max across layers to avoid double counting).
-        """
-        fert_gdfs: dict = st.session_state.get("fert_gdfs", {}) or {}
-        seed_gdf: Optional[gpd.GeoDataFrame] = st.session_state.get("seed_gdf")
+    # helper: clean color formatter for profit table
+    def _profit_color(v):
+        if isinstance(v, (int, float)):
+            if v > 0: return "color:limegreen;font-weight:bold;"
+            if v < 0: return "color:#ff4d4d;font-weight:bold;"
+        return ""
 
-        rows = []
-        acres_candidates = []
+    # =========================================================
+    # 3 equal columns across the screen
+    # =========================================================
+    col_var, col_flat, col_cs = st.columns(3, gap="medium")
 
-        def acres_from_gdf(g: gpd.GeoDataFrame) -> float:
-            if g is None or g.empty: return 0.0
-            g2 = g.copy()
-            if g2.crs is None:
-                g2.set_crs(epsg=4326, inplace=True)
-            if g2.crs.is_geographic:
-                g2 = g2.to_crs(epsg=5070)
-            # sum of polygon areas in acres
-            return float((g2.geometry.area * 0.000247105).sum())
+    # ---------------------------------------------------------
+    # 1️⃣ VARIABLE RATE INPUTS
+    # ---------------------------------------------------------
+    with col_var:
+        with st.expander("Variable-Rate Inputs", expanded=False):
+            st.caption("Enter price per unit; units & acres are derived from RX maps if uploaded.")
 
-        def summarize_one_gdf(g: gpd.GeoDataFrame, typ: str):
-            if g is None or g.empty: return
-            g = g.copy()
-            # find product & rate columns
-            prod_col, rate_col = None, None
-            for c in g.columns:
-                cl = str(c).lower()
-                if prod_col is None and "product" in cl:
-                    prod_col = c
-                if rate_col is None and ("tgt" in cl or "rate" in cl):
-                    rate_col = c
+            fert_layers = st.session_state.get("fert_layers_store", {})
+            seed_layers = st.session_state.get("seed_layers_store", {})
 
-            # project for area
-            g2 = g.copy()
-            if g2.crs is None:
-                g2.set_crs(epsg=4326, inplace=True)
-            if g2.crs.is_geographic:
-                g2 = g2.to_crs(epsg=5070)
-            g2["__acres__"] = (g2.geometry.area * 0.000247105).astype(float)
+            rows = []
+            for typ, store in [("Fertilizer", fert_layers), ("Seed", seed_layers)]:
+                for key, df in store.items():
+                    for _, r in df.iterrows():
+                        rows.append({
+                            "Type": typ,
+                            "Product": r.get("product", key),
+                            "Acres Applied": r.get("Acres", 0.0),
+                            "Units Applied": r.get("Acres", 0.0),  # placeholder if no rate col
+                            "Price per Unit ($)": 0.0
+                        })
 
-            # infer unit (if any)
-            unit = infer_unit(g, rate_col, prod_col)
+            rx_df = pd.DataFrame(rows) if rows else pd.DataFrame([
+                {"Type": "Fertilizer", "Product": "", "Acres Applied": 0.0, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
+            ])
 
-            # fallback product name if missing
-            if prod_col is None:
-                prod_col = "__prod__"
-                g[prod_col] = typ  # name by type/file if absent
+            edited = st.data_editor(
+                rx_df,
+                num_rows="dynamic",
+                hide_index=True,
+                use_container_width=True,
+                key="var_inputs_editor",
+                column_config={
+                    "Type": st.column_config.TextColumn(disabled=True),
+                    "Product": st.column_config.TextColumn(),
+                    "Acres Applied": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                    "Units Applied": st.column_config.NumberColumn(format="%.4f"),
+                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                },
+                height=_h(len(rx_df))
+            )
 
-            # units applied = rate * acres (if rate exists)
-            if rate_col is not None:
-                g["__rate__"] = pd.to_numeric(g[rate_col], errors="coerce").fillna(0.0).astype(float)
-                g2["__units__"] = g["__rate__"].values * g2["__acres__"].values
-            else:
-                g2["__units__"] = 0.0  # editable later by user if needed
+            edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
+            edited["Cost per Acre ($/ac)"] = edited["Total Cost ($)"] / edited["Acres Applied"].replace(0, np.nan)
+            st.dataframe(
+                edited.style.format({
+                    "Units Applied": "{:,.4f}",
+                    "Price per Unit ($)": "${:,.2f}",
+                    "Total Cost ($)": "${:,.2f}",
+                    "Cost per Acre ($/ac)": "${:,.2f}",
+                }),
+                hide_index=True, use_container_width=True, height=_h(len(edited))
+            )
+            st.session_state["variable_rate_cost_per_acre"] = float(edited["Cost per Acre ($/ac)"].mean())
 
-            grp = g2.groupby(g[prod_col]).agg(
-                acres_applied=("__acres__", "sum"),
-                units_applied=("__units__", "sum")
-            ).reset_index().rename(columns={prod_col: "Product"})
+    # ---------------------------------------------------------
+    # 2️⃣ FLAT RATE INPUTS
+    # ---------------------------------------------------------
+    with col_flat:
+        with st.expander("Flat-Rate Inputs", expanded=False):
+            st.caption("Uniform product rate and cost per unit across the field.")
 
-            for _, r in grp.iterrows():
-                rows.append({
-                    "Type": typ,
-                    "Product": r["Product"],
-                    "Unit": unit if unit else "",
-                    "Acres Applied": float(r["acres_applied"]),
-                    "Units Applied": float(r["units_applied"]),
-                    "Price per Unit ($)": 0.0,  # user input
-                })
+            flat_df = st.session_state.get("flat_products", pd.DataFrame([
+                {"Product": "", "Unit": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
+            ]))
 
-            acres_candidates.append(acres_from_gdf(g))
+            edited_flat = st.data_editor(
+                flat_df,
+                num_rows="dynamic",
+                hide_index=True,
+                use_container_width=True,
+                key="flat_inputs_editor",
+                column_config={
+                    "Product": st.column_config.TextColumn(),
+                    "Unit": st.column_config.TextColumn(),
+                    "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
+                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                },
+                height=_h(len(flat_df))
+            )
 
-        # Fertilizer layers (dict of GDFs)
-        for _name, gdf_f in fert_gdfs.items():
-            summarize_one_gdf(gdf_f, "Fertilizer")
+            edited_flat["Cost per Acre ($/ac)"] = edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
+            edited_flat["Total Cost ($)"] = edited_flat["Cost per Acre ($/ac)"]  # placeholder summary
+            st.dataframe(
+                edited_flat.style.format({
+                    "Rate (units/ac)": "{:,.4f}",
+                    "Price per Unit ($)": "${:,.2f}",
+                    "Cost per Acre ($/ac)": "${:,.2f}",
+                    "Total Cost ($)": "${:,.2f}",
+                }),
+                hide_index=True, use_container_width=True, height=_h(len(edited_flat))
+            )
 
-        # Seed layer (single GDF if present)
-        if isinstance(seed_gdf, gpd.GeoDataFrame) and not seed_gdf.empty:
-            summarize_one_gdf(seed_gdf, "Seed")
+            st.session_state["flat_rate_cost_per_acre"] = float(edited_flat["Cost per Acre ($/ac)"].mean())
+            st.session_state["flat_products"] = edited_flat
 
-        field_acres_est = float(max(acres_candidates) if acres_candidates else 0.0)
-        df = pd.DataFrame(rows, columns=["Type","Product","Unit","Acres Applied","Units Applied","Price per Unit ($)"])
-        return df, field_acres_est
+    # ---------------------------------------------------------
+    # 3️⃣ CORN vs SOY PROFITABILITY
+    # ---------------------------------------------------------
+    with col_cs:
+        with st.expander("Corn vs Soy Profitability", expanded=False):
+            st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
+            r = st.columns(4, gap="small")
+            with r[0]:
+                corn_yield = st.number_input("Corn Yield", min_value=0.0,
+                                             value=float(st.session_state.get("corn_yield", 200.0)))
+            with r[1]:
+                corn_price = st.number_input("Corn $/bu", min_value=0.0,
+                                             value=float(st.session_state.get("corn_price", 5.0)))
+            with r[2]:
+                bean_yield = st.number_input("Soy Yield", min_value=0.0,
+                                             value=float(st.session_state.get("bean_yield", 60.0)))
+            with r[3]:
+                bean_price = st.number_input("Soy $/bu", min_value=0.0,
+                                             value=float(st.session_state.get("bean_price", 12.0)))
 
-    # =====================================================
-    # 1) VARIABLE-RATE INPUTS — uses RX maps; user inputs price/unit
-    # =====================================================
-    with st.expander("Variable-Rate Inputs", expanded=False):
-        st.caption("Prices per unit are entered below. Units & acres are derived from your uploaded RX maps when possible.")
+            base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
+            df_cs = pd.DataFrame({
+                "Crop": ["Corn", "Soybeans"],
+                "Yield (bu/ac)": [corn_yield, bean_yield],
+                "Sell Price ($/bu)": [corn_price, bean_price],
+            })
+            df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+            df_cs["Fixed Inputs ($/ac)"] = base_exp
+            df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
 
-        rx_df, rx_field_acres = summarize_rx_products()
+            st.dataframe(
+                df_cs.style.format({
+                    "Yield (bu/ac)": "{:,.0f}",
+                    "Sell Price ($/bu)": "${:,.2f}",
+                    "Revenue ($/ac)": "${:,.0f}",
+                    "Fixed Inputs ($/ac)": "${:,.0f}",
+                    "Profit ($/ac)": "${:,.0f}",
+                }).applymap(_profit_color, subset=["Profit ($/ac)"]),
+                use_container_width=True, hide_index=True, height=_h(len(df_cs))
+            )
 
-        # If no RX geometry totals found, allow manual acres entry for $/ac math
-        if rx_field_acres <= 0:
-            rx_field_acres = st.number_input("Planned Field Acres", min_value=1.0, value=80.0, step=1.0, key="rx_plan_acres")
-
-        if rx_df.empty:
-            # allow planning without RX maps
-            rx_df = pd.DataFrame([{
-                "Type": "Fertilizer",
-                "Product": "",
-                "Unit": "",
-                "Acres Applied": rx_field_acres,
-                "Units Applied": 0.0,           # editable if no RX rates present
-                "Price per Unit ($)": 0.0
-            }])
-
-        # When Units Applied was computable (from rate*acres) keep disabled;
-        # if it's 0s (no rate col), let user edit it.
-        can_edit_units = bool((rx_df["Units Applied"] == 0).all())
-
-        edited = st.data_editor(
-            rx_df,
-            num_rows="dynamic",
-            hide_index=True,
-            use_container_width=True,
-            key="var_inputs_editor",
-            column_config={
-                "Type": st.column_config.TextColumn(disabled=True),
-                "Product": st.column_config.TextColumn(),
-                "Unit": st.column_config.TextColumn(),
-                "Acres Applied": st.column_config.NumberColumn(format="%.2f", disabled=True),
-                "Units Applied": st.column_config.NumberColumn(format="%.4f", disabled=not can_edit_units),
-                "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
-            },
-            height=_h(len(rx_df))
-        )
-
-        # Totals
-        edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
-        edited["Cost per Acre ($/ac)"] = edited["Total Cost ($)"] / max(rx_field_acres, 1)
-
-        st.dataframe(
-            edited.style.format({
-                "Acres Applied": "{:,.2f}",
-                "Units Applied": "{:,.4f}",
-                "Price per Unit ($)": "${:,.2f}",
-                "Total Cost ($)": "${:,.2f}",
-                "Cost per Acre ($/ac)": "${:,.2f}",
-            }),
-            hide_index=True, use_container_width=True, height=_h(len(edited))
-        )
-
-        total_var_cost = float(edited["Total Cost ($)"].sum())
-        var_cost_per_acre = total_var_cost / max(rx_field_acres, 1)
-        st.session_state["variable_rate_cost_per_acre"] = var_cost_per_acre
-
-    # =====================================================
-    # 2) FLAT-RATE INPUTS — dynamic products, rate/ac & price/unit
-    # =====================================================
-    with st.expander("Flat-Rate Inputs", expanded=False):
-        st.caption("Each row is a product with a uniform flat rate across the whole field.")
-
-        # field acres input (planning)
-        flat_acres = st.number_input("Planned Field Acres", min_value=1.0, value=80.0, step=1.0, key="flat_plan_acres")
-
-        flat_df = st.session_state.get("flat_products", pd.DataFrame([{
-            "Product": "",
-            "Unit": "",
-            "Rate (units/ac)": 0.0,
-            "Price per Unit ($)": 0.0,
-        }]))
-
-        edited_flat = st.data_editor(
-            flat_df,
-            num_rows="dynamic",
-            hide_index=True,
-            use_container_width=True,
-            key="flat_inputs_editor",
-            column_config={
-                "Product": st.column_config.TextColumn(),
-                "Unit": st.column_config.TextColumn(),
-                "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
-                "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
-            },
-            height=_h(len(flat_df))
-        )
-
-        # Totals
-        edited_flat["Total Units Applied"] = edited_flat["Rate (units/ac)"] * flat_acres
-        edited_flat["Total Cost ($)"] = edited_flat["Total Units Applied"] * edited_flat["Price per Unit ($)"]
-        edited_flat["Cost per Acre ($/ac)"] = edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
-
-        st.dataframe(
-            edited_flat.style.format({
-                "Rate (units/ac)": "{:,.4f}",
-                "Price per Unit ($)": "${:,.2f}",
-                "Total Units Applied": "{:,.2f}",
-                "Total Cost ($)": "${:,.2f}",
-                "Cost per Acre ($/ac)": "${:,.2f}",
-            }),
-            hide_index=True, use_container_width=True, height=_h(len(edited_flat))
-        )
-
-        # store for map profit math compatibility
-        out_flat = edited_flat.copy()
-        out_flat["$/ac"] = out_flat["Cost per Acre ($/ac)"]
-        st.session_state["flat_products"] = edited_flat
-        st.session_state["fixed_products"] = out_flat  # your heatmap code can already consume "$/ac"
-
-        flat_cost_total = float(edited_flat["Total Cost ($)"].sum())
-        flat_cost_per_acre = float(edited_flat["Cost per Acre ($/ac)"].sum())
-        st.session_state["flat_rate_cost_per_acre"] = flat_cost_per_acre
-
-    # =====================================================
-    # 3) CORN vs SOY PROFITABILITY — 4 inputs in one row
-    # =====================================================
-    with st.expander("Corn vs Soy Profitability", expanded=False):
-        r = st.columns(4, gap="small")
-        with r[0]:
-            corn_yield = st.number_input("Corn Yield (bu/ac)", min_value=0.0,
-                                         value=float(st.session_state.get("corn_yield", 200.0)),
-                                         step=1.0)
-        with r[1]:
-            corn_price = st.number_input("Corn $/bu", min_value=0.0,
-                                         value=float(st.session_state.get("corn_price", 5.0)),
-                                         step=0.1)
-        with r[2]:
-            bean_yield = st.number_input("Soy Yield (bu/ac)", min_value=0.0,
-                                         value=float(st.session_state.get("bean_yield", 60.0)),
-                                         step=1.0)
-        with r[3]:
-            bean_price = st.number_input("Soy $/bu", min_value=0.0,
-                                         value=float(st.session_state.get("bean_price", 12.0)),
-                                         step=0.1)
-
-        st.session_state.update({
-            "corn_yield": corn_yield,
-            "corn_price": corn_price,
-            "bean_yield": bean_yield,
-            "bean_price": bean_price
-        })
-
-        base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
-        df_cs = pd.DataFrame({
-            "Crop": ["Corn", "Soybeans"],
-            "Yield (bu/ac)": [corn_yield, bean_yield],
-            "Sell Price ($/bu)": [corn_price, bean_price],
-        })
-        df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
-        df_cs["Fixed Inputs ($/ac)"] = base_exp
-        df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
-
-        def _profit_color(v):
-            if isinstance(v, (int, float)):
-                if v > 0: return "color:limegreen;font-weight:bold;"
-                if v < 0: return "color:#ff4d4d;font-weight:bold;"
-            return ""
-
-        st.dataframe(
-            df_cs.style.format({
-                "Yield (bu/ac)": "{:,.0f}",
-                "Sell Price ($/bu)": "${:,.2f}",
-                "Revenue ($/ac)": "${:,.0f}",
-                "Fixed Inputs ($/ac)": "${:,.0f}",
-                "Profit ($/ac)": "${:,.0f}",
-            }).applymap(_profit_color, subset=["Profit ($/ac)"]),
-            use_container_width=True, hide_index=True, height=_h(len(df_cs))
-        )
-
-   
 # ===========================
 # Map helpers / overlays
 # ===========================
