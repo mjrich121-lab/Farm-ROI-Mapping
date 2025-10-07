@@ -983,21 +983,23 @@ try:
 except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
+# =========================================================
+# 9. PROFIT SUMMARY — Breakeven + Corn/Soy + Fixed Inputs
+# =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-def _df_height(df, row_h=32, header_h=36, pad=2):
-    """Tight, scroll-free height; auto-adjusts for short tables."""
-    try:
-        n = len(df) if isinstance(df, pd.DataFrame) else 1
-        base = int(header_h + n * row_h + pad)
-        # Small tables (<15 rows) tend to clip 1 line, add a 4-px buffer
-        if n < 15:
-            base += 4
-        return base
-    except Exception:
-        return 160
+    def _df_height(df, row_h=32, header_h=36, pad=2):
+        """Tight, scroll-free height; auto-adjusts for short tables."""
+        try:
+            n = len(df) if isinstance(df, pd.DataFrame) else 1
+            base = int(header_h + n * row_h + pad)
+            if n < 15:
+                base += 4  # buffer for small tables
+            return base
+        except Exception:
+            return 160
 
     def _money(x):
         try:
@@ -1083,9 +1085,7 @@ def _df_height(df, row_h=32, header_h=36, pad=2):
     )
     cornsoy["Revenue ($/ac)"] = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
     cornsoy["Fixed Inputs ($/ac)"] = base_exp
-    cornsoy["Profit ($/ac)"] = (
-        cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
-    )
+    cornsoy["Profit ($/ac)"] = cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
 
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
     if not fixed_df.empty:
@@ -1156,7 +1156,6 @@ def _df_height(df, row_h=32, header_h=36, pad=2):
             )
         else:
             st.info("Enter your fixed inputs above to see totals here.")
-
 # ---------- render ----------
 render_profit_summary()
 # --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
