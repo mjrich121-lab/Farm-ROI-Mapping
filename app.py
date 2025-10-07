@@ -1021,51 +1021,104 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — Corn vs Soy + Fixed Inputs
+# 9. PROFIT SUMMARY — Combined Corn/Soy + General Profit
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
-    def _profit_color(v):
+    def _highlight_profit(v):
         if isinstance(v, (int, float)):
             if v > 0:
                 return "color:limegreen;font-weight:bold;"
             if v < 0:
                 return "color:#ff4d4d;font-weight:bold;"
-        return ""
+        return "font-weight:bold;"
 
-    # --- Pull session data ---
+    # --- Safe state + defaults ---
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get(
-        "base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0
-    ))
+    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
     bean_price = float(st.session_state.get("bean_price", 12))
+    target_yield = float(st.session_state.get("target_yield", 200))
+    sell_price = float(st.session_state.get("sell_price", corn_price))
 
-    # --- Corn vs Soy profitability (moved from Section 8) ---
-    df_cs = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
+    # =====================================================
+    # A. GENERAL PROFIT TABLE
+    # =====================================================
+    revenue_per_acre = target_yield * sell_price
+    fixed_inputs = base_exp
+
+    # Variable-rate + fixed-rate pulled from state
+    revenue_var = revenue_per_acre
+    fert_costs_var = 0.0
+    seed_costs_var = 0.0
+    if "fert_products" in st.session_state and not st.session_state["fert_products"].empty:
+        fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum()
+    if "seed_products" in st.session_state and not st.session_state["seed_products"].empty:
+        seed_costs_var = st.session_state["seed_products"]["CostPerAcre"].sum()
+    expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
+    profit_var = revenue_var - expenses_var
+
+    fert_costs_fix = 0.0
+    seed_costs_fix = 0.0
+    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
+        fert_costs_fix = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
+        seed_costs_fix = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
+    expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
+    profit_fix = revenue_var - expenses_fix
+
+    comparison = pd.DataFrame({
+        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+        "Base (Target)": [revenue_per_acre, fixed_inputs, revenue_per_acre - fixed_inputs],
+        "Variable Rate": [revenue_var, expenses_var, profit_var],
+        "Fixed Rate": [revenue_var, expenses_fix, profit_fix],
     })
-    df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
-    df_cs["Fixed Inputs ($/ac)"] = base_exp
-    df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
 
-    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
-    if not fixed_df.empty:
-        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs",
-                                   "$/ac": fixed_df["$/ac"].sum()}])
-        fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+    with st.expander("General Profit Comparison", expanded=True):
+        st.dataframe(
+            comparison.style.applymap(_highlight_profit,
+                                      subset=["Base (Target)", "Variable Rate", "Fixed Rate"])
+            .format("${:,.2f}"),
+            use_container_width=True,
+            hide_index=True,
+            height=int(34 + 28 * len(comparison) + 10)
+        )
 
-    left_pad, mid, right_pad = st.columns([1, 2, 1])
-    with mid:
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown("""
+            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+                <b>Base (Target)</b><br>
+                (Target Yield × Sell Price) − Fixed Inputs
+            </div>
+            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+                <b>Variable Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+            </div>
+            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+                <b>Fixed Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+            </div>
+            """, unsafe_allow_html=True)
+
+    # =====================================================
+    # B. CORN vs SOY PROFITABILITY + FIXED INPUT COSTS
+    # =====================================================
+    with st.expander("Corn vs Soybean Profitability and Fixed Inputs", expanded=False):
         c1, c2 = st.columns(2, gap="small")
 
         with c1:
             st.subheader("Corn vs Soy Profitability")
+            df_cs = pd.DataFrame({
+                "Crop": ["Corn", "Soybeans"],
+                "Yield (bu/ac)": [corn_yield, bean_yield],
+                "Sell Price ($/bu)": [corn_price, bean_price],
+            })
+            df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+            df_cs["Fixed Inputs ($/ac)"] = base_exp
+            df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
+
             st.dataframe(
                 df_cs.style.format({
                     "Yield (bu/ac)": "{:,.0f}",
@@ -1073,27 +1126,30 @@ def render_profit_summary():
                     "Revenue ($/ac)": "${:,.0f}",
                     "Fixed Inputs ($/ac)": "${:,.0f}",
                     "Profit ($/ac)": "${:,.0f}",
-                }).applymap(_profit_color, subset=["Profit ($/ac)"]),
+                }).applymap(_highlight_profit, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=int(34 + 28 * max(1, len(df_cs)) + 10)
+                height=int(34 + 28 * len(df_cs) + 10)
             )
 
         with c2:
             st.subheader("Fixed Input Costs")
-            if fixed_df.empty:
-                st.info("Enter your fixed inputs above to see totals here.")
-            else:
+            fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+            if not fixed_df.empty:
+                total_row = pd.DataFrame([{"Expense": "Total Fixed Costs",
+                                           "$/ac": fixed_df["$/ac"].sum()}])
+                fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
                 st.dataframe(
                     fixed_df.style.format({"$/ac": "${:,.2f}"})
                     .apply(lambda s:
-                           ["font-weight:bold;" if v == "Total Fixed Costs" else ""
-                            for v in s],
+                           ["font-weight:bold;" if v == "Total Fixed Costs" else "" for v in s],
                            subset=["Expense"]),
                     use_container_width=True,
                     hide_index=True,
-                    height=int(34 + 28 * max(1, len(fixed_df)) + 10)
+                    height=int(34 + 28 * len(fixed_df) + 10)
                 )
+            else:
+                st.info("Enter your fixed inputs above to see totals here.")
 
 render_profit_summary()
 
