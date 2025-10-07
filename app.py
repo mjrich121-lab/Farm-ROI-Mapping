@@ -1089,29 +1089,51 @@ def render_profit_summary():
 
     with st.expander("General Profit Comparison", expanded=True):
         st.dataframe(
-            comparison.style.applymap(_highlight_profit,
-                                      subset=["Base (Target)", "Variable Rate", "Fixed Rate"])
+           comparison.style.applymap(
+    _highlight_profit,
+    subset=["Base (Target)", "Variable Rate", "Fixed Rate"]
+).format({
+    "Base (Target)": "${:,.2f}",
+    "Variable Rate": "${:,.2f}",
+    "Fixed Rate": "${:,.2f}",
+})
+
             .format("${:,.2f}"),
             use_container_width=True,
             hide_index=True,
             height=int(34 + 28 * len(comparison) + 10)
         )
 
-        with st.expander("Show Calculation Formulas", expanded=False):
-            st.markdown("""
-            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
-                <b>Base (Target)</b><br>
-                (Target Yield × Sell Price) − Fixed Inputs
-            </div>
-            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
-                <b>Variable Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-            </div>
-            <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
-                <b>Fixed Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-            </div>
-            """, unsafe_allow_html=True)
+        with st.expander("General Profit Comparison", expanded=True):
+    st.dataframe(
+        comparison.style.applymap(
+            _highlight_profit,
+            subset=["Base (Target)", "Variable Rate", "Fixed Rate"]
+        ).format({
+            "Base (Target)": "${:,.2f}",
+            "Variable Rate": "${:,.2f}",
+            "Fixed Rate": "${:,.2f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=int(34 + 28 * len(comparison) + 10)
+    )
+
+    with st.expander("Show Calculation Formulas", expanded=False):
+        st.markdown("""
+        <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+            <b>Base (Target)</b><br>
+            (Target Yield × Sell Price) − Fixed Inputs
+        </div>
+        <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+            <b>Variable Rate</b><br>
+            (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+        </div>
+        <div style="border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:8px;background-color:#111;">
+            <b>Fixed Rate</b><br>
+            (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+        </div>
+        """, unsafe_allow_html=True)
 
     # =====================================================
     # B. CORN vs SOY PROFITABILITY + FIXED INPUT COSTS
