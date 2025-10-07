@@ -22,136 +22,91 @@ from matplotlib import colors as mpl_colors
 st.cache_data.clear()
 st.cache_resource.clear()
 
-# === GLOBAL TABLE SCROLL FIX ===
+# ============================================================
+# 🚫 ABSOLUTE NO-SCROLL / AUTO-HEIGHT OVERRIDE — ONE PATCH TO RULE THEM ALL
+# ============================================================
+st.cache_data.clear()
+st.cache_resource.clear()
+
 st.markdown("""
 <style>
-/* remove both vertical and horizontal scroll limits */
-[data-testid="stDataFrameContainer"],
-[data-testid="stDataFrameScrollableContainer"],
-[data-testid="stDataFrame"],
-[data-testid="stHorizontalBlock"],
-[data-testid="stVerticalBlock"] {
-    overflow: visible !important;
-    height: auto !important;
-    max-height: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-}
 
-/* inner div that sometimes sets min-width on tables */
-[data-testid="stDataFrame"] table {
-    min-width: 0 !important;
-    width: 100% !important;
-}
-
-/* fix for st.data_editor horizontal scroll */
-[data-testid="stDataEditorGrid"] {
-    overflow: visible !important;
-}
-
-/* ensure any child div inherits */
-[data-testid="stDataFrameContainer"] * {
-    overflow: visible !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# === ENFORCE NO SCROLL INSIDE EDITORS OR DATAFRAMES ===
-st.markdown("""
-<style>
-/* Full bleed for all data editors and dataframes */
-[data-testid="stDataEditorGrid"],
-[data-testid="stDataFrame"],
-[data-testid="stDataFrameContainer"],
-[data-testid="stDataEditorContainer"] {
-    overflow: visible !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
-}
-
-/* Table element inside editor — remove forced min width */
-[data-testid="stDataEditorGrid"] table,
-[data-testid="stDataFrame"] table {
-    min-width: 0 !important;
-    width: 100% !important;
-}
-
-/* Inner divs often apply sticky overflow constraints */
+/* --- 1. Disable all internal scroll wrappers completely --- */
+[data-testid^="stDataFrame"],
+[data-testid^="stDataEditor"],
 [data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"] {
+[data-testid="stHorizontalBlock"],
+[data-testid="stDataFrameScrollableContainer"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    position: static !important;
+}
+
+/* --- 2. Force the inner table to expand naturally --- */
+[data-testid="stDataFrame"] table,
+[data-testid="stDataEditorGrid"] table {
+    width: 100% !important;
+    min-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+}
+
+/* --- 3. Remove sticky header offsets that trigger scrollbars --- */
+[data-testid="stStickyTableHeader"] {
+    position: static !important;
+}
+
+/* --- 4. Kill scroll shadows and resize grips --- */
+[class*="StyledScrollbars"],
+[data-testid*="Resizer"] {
+    display: none !important;
+}
+
+/* --- 5. Force all editors and dataframes to inherit page height --- */
+section.main, div.block-container {
     overflow: visible !important;
 }
 
-/* Remove extra padding/margins Streamlit adds on editors */
+/* --- 6. Slightly shrink table container padding to reclaim space --- */
+[data-testid="stDataFrameContainer"],
 [data-testid="stDataEditorContainer"] > div {
     padding: 0 !important;
     margin: 0 !important;
 }
+
 </style>
-""", unsafe_allow_html=True)
-# === FINAL PATCH: force Streamlit editors to auto-expand ===
-st.markdown("""
+
 <script>
-const fixEditors = () => {
-  // look for any Streamlit editor grids
-  const grids = parent.document.querySelectorAll('[data-testid="stDataEditorGrid"]');
-  grids.forEach(g => {
-    g.style.overflow = 'visible';
-    g.style.height = 'auto';
-    g.style.maxHeight = 'none';
-    g.style.minHeight = '0';
-    g.style.width = '100%';
+// === HARD OVERRIDE: continuously remove scroll attributes ===
+function nukeScrollbars() {
+  const sel = '[data-testid="stDataFrameContainer"],[data-testid="stDataEditorContainer"],[data-testid="stDataEditorGrid"]';
+  const els = parent.document.querySelectorAll(sel);
+  els.forEach(el => {
+    el.style.overflow = 'visible';
+    el.style.height = 'auto';
+    el.style.maxHeight = 'none';
+    el.style.minHeight = '0';
+    el.style.width = '100%';
   });
-
-  const containers = parent.document.querySelectorAll('[data-testid="stDataEditorContainer"]');
-  containers.forEach(c => {
-    c.style.overflow = 'visible';
-    c.style.height = 'auto';
-    c.style.maxHeight = 'none';
-    c.style.minHeight = '0';
-    c.style.width = '100%';
-  });
-};
-
-// run initially and again after DOM changes
-new MutationObserver(fixEditors).observe(parent.document.body, { childList: true, subtree: true });
-fixEditors();
+  const outer = parent.document.querySelector('.block-container');
+  if (outer) {
+    outer.style.maxWidth = '90%';
+    outer.style.margin = 'auto';
+    outer.style.paddingTop = '0.5rem';
+    outer.style.paddingBottom = '1rem';
+  }
+}
+new MutationObserver(nukeScrollbars).observe(parent.document.body, {subtree:true,childList:true});
+setTimeout(nukeScrollbars, 300);
+setTimeout(nukeScrollbars, 1500);
+setTimeout(nukeScrollbars, 4000);
 </script>
 """, unsafe_allow_html=True)
 
-# === FINAL PATCH: force Streamlit editors to auto-expand ===
-st.markdown("""
-<script>
-const fixEditors = () => {
-  // look for any Streamlit editor grids
-  const grids = parent.document.querySelectorAll('[data-testid="stDataEditorGrid"]');
-  grids.forEach(g => {
-    g.style.overflow = 'visible';
-    g.style.height = 'auto';
-    g.style.maxHeight = 'none';
-    g.style.minHeight = '0';
-    g.style.width = '100%';
-  });
-
-  const containers = parent.document.querySelectorAll('[data-testid="stDataEditorContainer"]');
-  containers.forEach(c => {
-    c.style.overflow = 'visible';
-    c.style.height = 'auto';
-    c.style.maxHeight = 'none';
-    c.style.minHeight = '0';
-    c.style.width = '100%';
-  });
-};
-
-// run initially and again after DOM changes
-new MutationObserver(fixEditors).observe(parent.document.body, { childList: true, subtree: true });
-fixEditors();
-</script>
-""", unsafe_allow_html=True)
 
 
 # ===========================
