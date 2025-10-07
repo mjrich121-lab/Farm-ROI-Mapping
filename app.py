@@ -987,13 +987,13 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
- def _df_height(df, row_h=32, header_h=36, pad=2):
-    """Pixel-perfect height—tightened to remove visual padding, no scrollbars."""
-    try:
-        n = len(df) if isinstance(df, pd.DataFrame) else 1
-        return int(header_h + n * row_h + pad + 2)  # small +2 buffer = no scrollbars
-    except Exception:
-        return 160
+    def _df_height(df, row_h=32, header_h=36, pad=2):
+       """Pixel-perfect height—tightened to remove visual padding, no scrollbars."""
+       try:
+           n = len(df) if isinstance(df, pd.DataFrame) else 1
+           return int(header_h + n * row_h + pad + 2)  # small +2 buffer = no scrollbars
+       except Exception:
+           return 160
 
     def _money(x):
         try:
