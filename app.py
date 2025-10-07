@@ -1035,9 +1035,10 @@ def render_profit_summary():
                 return "color:#ff4d4d;font-weight:bold;"
         return "font-weight:bold;"
 
-    def _df_height(df):
-        """Return exact height so no scrollbars appear."""
-        return int(34 + max(1, len(df)) * 28 + 8)
+    def _df_height(df, row_h=30, header_h=38, pad=8):
+        """Calculate precise table height so it never scrolls."""
+        nrows = max(1, len(df))
+        return int(header_h + (nrows * row_h) + pad)
 
     # ---------- Safe session defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
@@ -1094,12 +1095,12 @@ def render_profit_summary():
     with col_left:
         # --- Breakeven + Profit Comparison ---
         st.subheader("Breakeven Budget Comparison")
-        numeric_cols = [c for c in comparison.columns if c != "Metric"]
-        styled = comparison.style.applymap(_highlight_profit, subset=numeric_cols).format(
-            {col: "${:,.2f}" for col in numeric_cols}, na_rep="–"
+        df_show = comparison.copy()
+        df_show[numeric_cols := [c for c in df_show.columns if c != "Metric"]] = df_show[numeric_cols].applymap(
+            lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
         )
-        st.dataframe(styled, use_container_width=True, hide_index=True,
-                     height=_df_height(comparison))
+        st.data_editor(df_show, use_container_width=True, disabled=True, hide_index=True,
+                       height=_df_height(df_show))
 
         # --- Compact Formulas Row (Horizontal) ---
         with st.expander("Show Calculation Formulas", expanded=False):
@@ -1108,20 +1109,21 @@ def render_profit_summary():
                 display:flex;
                 flex-wrap:wrap;
                 gap:6px;
-                font-size:0.8rem;
+                font-size:0.75rem;
+                line-height:1.1rem;
                 ">
                 <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:6px;background-color:#111;">
+                            border-radius:6px;padding:5px;background-color:#111;">
                     <b>Breakeven Budget</b><br>
                     (Target Yield × Sell Price) − Fixed Inputs
                 </div>
                 <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:6px;background-color:#111;">
+                            border-radius:6px;padding:5px;background-color:#111;">
                     <b>Variable Rate</b><br>
                     (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
                 </div>
                 <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:6px;background-color:#111;">
+                            border-radius:6px;padding:5px;background-color:#111;">
                     <b>Fixed Rate</b><br>
                     (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
                 </div>
@@ -1138,18 +1140,11 @@ def render_profit_summary():
         df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
         df_cs["Fixed Inputs ($/ac)"] = base_exp
         df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
-
-        st.dataframe(
-            df_cs.style.format({
-                "Yield (bu/ac)": "{:,.0f}",
-                "Sell Price ($/bu)": "${:,.2f}",
-                "Revenue ($/ac)": "${:,.0f}",
-                "Fixed Inputs ($/ac)": "${:,.0f}",
-                "Profit ($/ac)": "${:,.0f}",
-            }).applymap(_highlight_profit, subset=["Profit ($/ac)"]),
-            use_container_width=True, hide_index=True,
-            height=_df_height(df_cs)
-        )
+        df_cs_display = df_cs.copy()
+        for col in df_cs_display.columns[1:]:
+            df_cs_display[col] = df_cs_display[col].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
+        st.data_editor(df_cs_display, use_container_width=True, disabled=True, hide_index=True,
+                       height=_df_height(df_cs_display))
 
     # ===============================
     # RIGHT COLUMN
@@ -1161,30 +1156,39 @@ def render_profit_summary():
             total_row = pd.DataFrame([{"Expense": "Total Fixed Costs",
                                        "$/ac": fixed_df["$/ac"].sum()}])
             fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
-            st.dataframe(
-                fixed_df.style.format({"$/ac": "${:,.2f}"}).apply(
-                    lambda s: ["font-weight:bold;" if v == "Total Fixed Costs" else ""
-                               for v in s],
-                    subset=["Expense"]
-                ),
-                use_container_width=True, hide_index=True,
-                height=_df_height(fixed_df)
-            )
+            fixed_df["$/ac"] = fixed_df["$/ac"].apply(lambda x: f"${x:,.2f}")
+            st.data_editor(fixed_df, use_container_width=True, disabled=True, hide_index=True,
+                           height=_df_height(fixed_df))
         else:
             st.info("Enter your fixed inputs above to see totals here.")
+
+
 # ---------- ✅ RENDER SECTION 9 ----------
 render_profit_summary()
+
+
 # =========================================================
-# FORCE LAYOUT WIDTH FIX — applies to parent DOM
+# FORCE LAYOUT WIDTH FIX + GLOBAL NO-SCROLL ENFORCER
 # =========================================================
 st.markdown("""
+<style>
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataEditorGrid"],
+[data-testid="stDataFrame"],
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+}
+</style>
 <script>
 function fixLayoutWidth() {
     const outer = window.parent.document.querySelector('.block-container');
     if (outer) {
-        outer.style.maxWidth = '50%';
+        outer.style.maxWidth = '85%';
         outer.style.margin = 'auto';
-        outer.style.paddingTop = '1rem';
+        outer.style.paddingTop = '0.5rem';
         outer.style.paddingBottom = '1rem';
     }
 }
