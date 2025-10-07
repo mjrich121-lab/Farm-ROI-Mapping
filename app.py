@@ -1104,7 +1104,7 @@ def render_profit_summary():
             height=int(34 + 28 * len(comparison) + 10)
         )
 
-        with st.expander("General Profit Comparison", expanded=True):
+    with st.expander("General Profit Comparison", expanded=True):
         st.dataframe(
         comparison.style.applymap(
             _highlight_profit,
