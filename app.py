@@ -22,92 +22,63 @@ from matplotlib import colors as mpl_colors
 st.cache_data.clear()
 st.cache_resource.clear()
 
-# ============================================================
-# 🚫 ABSOLUTE NO-SCROLL / AUTO-HEIGHT OVERRIDE — ONE PATCH TO RULE THEM ALL
-# ============================================================
+# Clear caches (avoid stale state during hot-reloads)
 st.cache_data.clear()
 st.cache_resource.clear()
 
+# === GLOBAL SCROLL FIX (SAFE VERSION) ===
 st.markdown("""
 <style>
-
-/* --- 1. Disable all internal scroll wrappers completely --- */
-[data-testid^="stDataFrame"],
-[data-testid^="stDataEditor"],
-[data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"],
-[data-testid="stDataFrameScrollableContainer"] {
+/* ------------------------------
+   SCROLL FIX: only affect dataframes, not editors
+   ------------------------------ */
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataFrameScrollableContainer"],
+[data-testid="stDataFrame"] {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
-    min-height: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    position: static !important;
 }
 
-/* --- 2. Force the inner table to expand naturally --- */
+/* keep data editors virtualized (DO NOT override their overflow) */
+[data-testid="stDataEditorContainer"],
+[data-testid="stDataEditorGrid"] {
+    overflow: auto !important;        /* restore Streamlit's default */
+    height: auto !important;
+    max-height: 700px !important;     /* cap height to avoid huge scroll */
+}
+
+/* fix width issues globally */
 [data-testid="stDataFrame"] table,
 [data-testid="stDataEditorGrid"] table {
+    min-width: 0 !important;
     width: 100% !important;
-    min-width: 100% !important;
-    table-layout: fixed !important;
-    border-collapse: collapse !important;
 }
 
-/* --- 3. Remove sticky header offsets that trigger scrollbars --- */
-[data-testid="stStickyTableHeader"] {
-    position: static !important;
-}
-
-/* --- 4. Kill scroll shadows and resize grips --- */
-[class*="StyledScrollbars"],
-[data-testid*="Resizer"] {
+/* remove any visual shadows and resizers */
+[data-testid="stDataEditorResizer"],
+[data-testid="stDataFrameResizer"] {
     display: none !important;
 }
-
-/* --- 5. Force all editors and dataframes to inherit page height --- */
-section.main, div.block-container {
-    overflow: visible !important;
-}
-
-/* --- 6. Slightly shrink table container padding to reclaim space --- */
-[data-testid="stDataFrameContainer"],
-[data-testid="stDataEditorContainer"] > div {
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
 </style>
-
-<script>
-// === HARD OVERRIDE: continuously remove scroll attributes ===
-function nukeScrollbars() {
-  const sel = '[data-testid="stDataFrameContainer"],[data-testid="stDataEditorContainer"],[data-testid="stDataEditorGrid"]';
-  const els = parent.document.querySelectorAll(sel);
-  els.forEach(el => {
-    el.style.overflow = 'visible';
-    el.style.height = 'auto';
-    el.style.maxHeight = 'none';
-    el.style.minHeight = '0';
-    el.style.width = '100%';
-  });
-  const outer = parent.document.querySelector('.block-container');
-  if (outer) {
-    outer.style.maxWidth = '90%';
-    outer.style.margin = 'auto';
-    outer.style.paddingTop = '0.5rem';
-    outer.style.paddingBottom = '1rem';
-  }
-}
-new MutationObserver(nukeScrollbars).observe(parent.document.body, {subtree:true,childList:true});
-setTimeout(nukeScrollbars, 300);
-setTimeout(nukeScrollbars, 1500);
-setTimeout(nukeScrollbars, 4000);
-</script>
 """, unsafe_allow_html=True)
 
-
+# === SAFE AUTO-EXPAND SCRIPT ===
+st.markdown("""
+<script>
+function safeFixTables(){
+  const dfs = parent.document.querySelectorAll('[data-testid="stDataFrameContainer"]');
+  dfs.forEach(df=>{
+    df.style.overflow='visible';
+    df.style.height='auto';
+    df.style.maxHeight='none';
+  });
+}
+safeFixTables();
+setTimeout(safeFixTables, 1000);
+setTimeout(safeFixTables, 3000);
+</script>
+""", unsafe_allow_html=True)
 
 # ===========================
 # COMPACT THEME + LAYOUT
