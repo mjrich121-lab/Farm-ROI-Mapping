@@ -1106,12 +1106,12 @@ for col in numeric_cols:
         lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
     )
 
-        st.data_editor(
-            df_show,
-            use_container_width=True,
-            disabled=True,
-            hide_index=True,
-            height=_df_height(df_show)
+    st.data_editor(
+         df_show,
+        use_container_width=True,
+        disabled=True,
+        hide_index=True,
+        height=_df_height(df_show)
     )
 
 
