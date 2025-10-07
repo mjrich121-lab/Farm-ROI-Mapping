@@ -983,7 +983,6 @@ try:
 except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
-
 # =========================================================
 # 9. PROFIT SUMMARY — Breakeven + Corn/Soy + Fixed Inputs
 # =========================================================
@@ -991,21 +990,19 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-    def _highlight_profit(v):
-        if isinstance(v, (int, float)):
-            if v > 0:
-                return "color:limegreen;font-weight:bold;"
-            elif v < 0:
-                return "color:#ff4d4d;font-weight:bold;"
-        return "font-weight:bold;"
-
     def _df_height(df, row_h=34, header_h=40, pad=8):
-       """Pixel-perfect height with tiny buffer to prevent scrollbars."""
-    try:
-        n = len(df) if isinstance(df, pd.DataFrame) else 1
-        return int(header_h + n * row_h + pad + 6)  # +6 buffer stops scrollbars on rerun
-    except Exception:
-        return 180
+        """Pixel-perfect height with tiny buffer to prevent scrollbars."""
+        try:
+            n = len(df) if isinstance(df, pd.DataFrame) else 1
+            return int(header_h + n * row_h + pad + 6)
+        except Exception:
+            return 180
+
+    def _money(x):
+        try:
+            return f"${x:,.2f}"
+        except Exception:
+            return x
 
     # ---------- Safe defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
@@ -1026,30 +1023,34 @@ def render_profit_summary():
     revenue_per_acre = target_yield * sell_price
     fixed_inputs = base_exp
 
-    # variable-rate
     fert_costs_var = seed_costs_var = 0.0
     df_fert = st.session_state.get("fert_products")
     if isinstance(df_fert, pd.DataFrame) and "CostPerAcre" in df_fert.columns:
-        fert_costs_var = df_fert["CostPerAcre"].sum()
+        fert_costs_var = pd.to_numeric(df_fert["CostPerAcre"], errors="coerce").sum()
     df_seed = st.session_state.get("seed_products")
     if isinstance(df_seed, pd.DataFrame) and "CostPerAcre" in df_seed.columns:
-        seed_costs_var = df_seed["CostPerAcre"].sum()
+        seed_costs_var = pd.to_numeric(df_seed["CostPerAcre"], errors="coerce").sum()
     expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
     profit_var = revenue_per_acre - expenses_var
 
-    # fixed-rate
     fert_costs_fix = seed_costs_fix = 0.0
     df_fix = st.session_state.get("fixed_products")
     if isinstance(df_fix, pd.DataFrame):
         if "Type" in df_fix.columns and "$/ac" in df_fix.columns:
-            fert_costs_fix = df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"].sum()
-            seed_costs_fix = df_fix.loc[df_fix["Type"] == "Seed", "$/ac"].sum()
+            fert_costs_fix = pd.to_numeric(
+                df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"], errors="coerce"
+            ).sum()
+            seed_costs_fix = pd.to_numeric(
+                df_fix.loc[df_fix["Type"] == "Seed", "$/ac"], errors="coerce"
+            ).sum()
         elif "$/ac" in df_fix.columns:
-            fert_costs_fix = seed_costs_fix = df_fix["$/ac"].sum()
+            fert_costs_fix = seed_costs_fix = pd.to_numeric(
+                df_fix["$/ac"], errors="coerce"
+            ).sum()
     expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
     profit_fix = revenue_per_acre - expenses_fix
 
-    # ---------- Comparison table ----------
+    # ---------- Tables ----------
     comparison = pd.DataFrame(
         {
             "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
@@ -1063,31 +1064,38 @@ def render_profit_summary():
         }
     )
 
+    cornsoy = pd.DataFrame(
+        {
+            "Crop": ["Corn", "Soybeans"],
+            "Yield (bu/ac)": [corn_yield, bean_yield],
+            "Sell Price ($/bu)": [corn_price, bean_price],
+        }
+    )
+    cornsoy["Revenue ($/ac)"] = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
+    cornsoy["Fixed Inputs ($/ac)"] = base_exp
+    cornsoy["Profit ($/ac)"] = (
+        cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
+    )
+
+    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+    if not fixed_df.empty:
+        total_row = pd.DataFrame(
+            [{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}]
+        )
+        fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+
     # ---------- Layout ----------
-    col_left, col_right = st.columns([2, 1], gap="large")
+    left, right = st.columns([2, 1], gap="large")
 
-    # ===========================
-    # LEFT COLUMN
-    # ===========================
-    with col_left:
+    with left:
         st.subheader("Breakeven Budget Comparison")
-
-        df_show = comparison.copy()
-        numeric_cols = [c for c in df_show.columns if c != "Metric"]
-        for col in numeric_cols:
-            df_show[col] = df_show[col].apply(
-                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
-            )
-
-        st.data_editor(
-            df_show,
+        st.dataframe(
+            comparison.style.format(_money, subset=comparison.columns[1:]),
             use_container_width=True,
-            disabled=True,
             hide_index=True,
-            height=_df_height(df_show),
+            height=_df_height(comparison),
         )
 
-        # compact horizontal formulas
         with st.expander("Show Calculation Formulas", expanded=False):
             st.markdown(
                 """
@@ -1113,55 +1121,20 @@ def render_profit_summary():
                 unsafe_allow_html=True,
             )
 
-        # Corn vs Soybean table
         st.subheader("Corn vs Soybean Profitability")
-        df_cs = pd.DataFrame(
-            {
-                "Crop": ["Corn", "Soybeans"],
-                "Yield (bu/ac)": [corn_yield, bean_yield],
-                "Sell Price ($/bu)": [corn_price, bean_price],
-            }
-        )
-        df_cs["Revenue ($/ac)"] = (
-            df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
-        )
-        df_cs["Fixed Inputs ($/ac)"] = base_exp
-        df_cs["Profit ($/ac)"] = (
-            df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
-        )
-
-        df_cs_disp = df_cs.copy()
-        for c in df_cs_disp.columns[1:]:
-            df_cs_disp[c] = df_cs_disp[c].apply(
-                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
-            )
-
-        st.data_editor(
-            df_cs_disp,
+        st.dataframe(
+            cornsoy.style.format(_money, subset=cornsoy.columns[1:]),
             use_container_width=True,
-            disabled=True,
             hide_index=True,
-            height=_df_height(df_cs_disp),
+            height=_df_height(cornsoy),
         )
 
-    # ===========================
-    # RIGHT COLUMN
-    # ===========================
-    with col_right:
+    with right:
         st.subheader("Fixed Input Costs")
-        fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
         if not fixed_df.empty:
-            total_row = pd.DataFrame(
-                [{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}]
-            )
-            fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
-            fixed_df["$/ac"] = fixed_df["$/ac"].apply(
-                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
-            )
-            st.data_editor(
-                fixed_df,
+            st.dataframe(
+                fixed_df.style.format(_money, subset=["$/ac"]),
                 use_container_width=True,
-                disabled=True,
                 hide_index=True,
                 height=_df_height(fixed_df),
             )
