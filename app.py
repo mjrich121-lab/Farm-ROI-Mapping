@@ -93,6 +93,35 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+# === FINAL PATCH: force Streamlit editors to auto-expand ===
+st.markdown("""
+<script>
+const fixEditors = () => {
+  // look for any Streamlit editor grids
+  const grids = parent.document.querySelectorAll('[data-testid="stDataEditorGrid"]');
+  grids.forEach(g => {
+    g.style.overflow = 'visible';
+    g.style.height = 'auto';
+    g.style.maxHeight = 'none';
+    g.style.minHeight = '0';
+    g.style.width = '100%';
+  });
+
+  const containers = parent.document.querySelectorAll('[data-testid="stDataEditorContainer"]');
+  containers.forEach(c => {
+    c.style.overflow = 'visible';
+    c.style.height = 'auto';
+    c.style.maxHeight = 'none';
+    c.style.minHeight = '0';
+    c.style.width = '100%';
+  });
+};
+
+// run initially and again after DOM changes
+new MutationObserver(fixEditors).observe(parent.document.body, { childList: true, subtree: true });
+fixEditors();
+</script>
+""", unsafe_allow_html=True)
 
 
 # ===========================
