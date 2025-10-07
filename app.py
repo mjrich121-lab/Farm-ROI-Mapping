@@ -1116,7 +1116,7 @@ for col in numeric_cols:
 
 
         # --- Compact Formulas Row (Horizontal) ---
-        with st.expander("Show Calculation Formulas", expanded=False):
+    with st.expander("Show Calculation Formulas", expanded=False):
             st.markdown("""
             <div style="
                 display:flex;
