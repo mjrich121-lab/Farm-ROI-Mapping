@@ -56,6 +56,45 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# === ENFORCE NO SCROLL INSIDE EDITORS OR DATAFRAMES ===
+st.markdown("""
+<style>
+/* Full bleed for all data editors and dataframes */
+[data-testid="stDataEditorGrid"],
+[data-testid="stDataFrame"],
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataEditorContainer"] {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+}
+
+/* Table element inside editor — remove forced min width */
+[data-testid="stDataEditorGrid"] table,
+[data-testid="stDataFrame"] table {
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+/* Inner divs often apply sticky overflow constraints */
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"] {
+    overflow: visible !important;
+}
+
+/* Remove extra padding/margins Streamlit adds on editors */
+[data-testid="stDataEditorContainer"] > div {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ===========================
 # COMPACT THEME + LAYOUT
 # ===========================
