@@ -1172,7 +1172,8 @@ def render_profit_summary():
             )
         else:
             st.info("Enter your fixed inputs above to see totals here.")
-
+# ---------- ✅ RENDER SECTION 9 ----------
+render_profit_summary()
 # =========================================================
 # FORCE LAYOUT WIDTH FIX — applies to parent DOM
 # =========================================================
