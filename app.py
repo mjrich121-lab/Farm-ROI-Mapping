@@ -461,7 +461,41 @@ def render_fixed_inputs_and_strip():
 # =========================================================
 # SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
 # =========================================================
+def editor_no_scroll_height(df: pd.DataFrame, extra: int = 40) -> int:
+    """Compute pixel height to display full table/editor without internal scroll."""
+    base = 34 + 28 * max(1, len(df))  # header + rows
+    return int(base + extra)
+
+
 def render_input_sections():
+    # --- Scoped CSS patch to fully disable scroll for all editors/dataframes in this section ---
+    st.markdown("""
+    <style>
+    [data-testid="stDataEditorGrid"],
+    [data-testid="stDataEditorContainer"],
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrameContainer"],
+    [data-testid="stDataFrameScrollableContainer"] {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stDataEditorGrid"] table,
+    [data-testid="stDataFrame"] table {
+        width: 100% !important;
+        min-width: 100% !important;
+        table-layout: fixed !important;
+    }
+    [data-testid="stVerticalBlock"],
+    [data-testid="stHorizontalBlock"] {
+        overflow: visible !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     def _profit_color(v):
         if isinstance(v, (int, float)):
             if v > 0: return "color:limegreen;font-weight:bold;"
@@ -498,17 +532,18 @@ def render_input_sections():
         all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
 
     # =====================================
-    # UI COLUMNS
+    # 3 COLUMN LAYOUT
     # =====================================
     cols = st.columns(3, gap="large")
 
-    # -------------------------------------------------
-    # 1) VARIABLE RATE INPUTS — auto from RX detections
-    # -------------------------------------------------
+    # =========================================================
+    # 1) VARIABLE RATE INPUTS
+    # =========================================================
     with cols[0]:
         st.markdown("### Variable Rate Inputs")
         with st.expander("Open Variable Rate Inputs", expanded=False):
             st.caption("Enter price per unit and total units applied from RX maps or manually.")
+
             rx_df = pd.DataFrame(all_variable_inputs)
             edited = st.data_editor(
                 rx_df,
@@ -522,7 +557,7 @@ def render_input_sections():
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=df_px_height(len(rx_df))
+                height=editor_no_scroll_height(rx_df)
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
@@ -535,25 +570,23 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=df_px_height(len(edited))
+                height=editor_no_scroll_height(edited)
             )
 
-            # Safe store for downstream profit calc
             st.session_state["variable_rate_inputs"] = edited
             base_acres = float(st.session_state.get("base_acres", 1.0))
             st.session_state["variable_rate_cost_per_acre"] = (
                 float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
 
-    # -------------------------------------------------
-    # 2) FLAT RATE INPUTS — handles infinite product list
-    # -------------------------------------------------
+    # =========================================================
+    # 2) FLAT RATE INPUTS
+    # =========================================================
     with cols[1]:
         st.markdown("### Flat Rate Inputs")
         with st.expander("Open Flat Rate Inputs", expanded=False):
             st.caption("Uniform cost per acre for the entire field.")
 
-            # detect from variable list for convenience
             flat_products = fert_products + seed_products
             flat_df = pd.DataFrame([
                 {"Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
@@ -573,7 +606,7 @@ def render_input_sections():
                     "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=df_px_height(len(flat_df))
+                height=editor_no_scroll_height(flat_df)
             ).fillna(0.0)
 
             edited_flat["Cost per Acre ($/ac)"] = (
@@ -588,10 +621,9 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=df_px_height(len(edited_flat))
+                height=editor_no_scroll_height(edited_flat)
             )
 
-            # Store for profit summary + mapping
             out_flat = edited_flat.copy()
             out_flat["$/ac"] = out_flat["Cost per Acre ($/ac)"]
             st.session_state["flat_products"] = edited_flat
@@ -600,9 +632,9 @@ def render_input_sections():
                 edited_flat["Cost per Acre ($/ac)"].sum()
             )
 
-    # -------------------------------------------------
-    # 3) CORN vs SOY PROFITABILITY (unchanged)
-    # -------------------------------------------------
+    # =========================================================
+    # 3) CORN vs SOY PROFITABILITY
+    # =========================================================
     with cols[2]:
         st.markdown("### Corn vs Soy Profitability")
         with st.expander("Open Corn vs Soy Profitability", expanded=False):
@@ -642,7 +674,7 @@ def render_input_sections():
                 }).applymap(_profit_color, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=df_px_height(len(df_cs))
+                height=editor_no_scroll_height(df_cs)
             )
 
 
