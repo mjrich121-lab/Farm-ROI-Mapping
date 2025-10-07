@@ -429,32 +429,27 @@ def render_fixed_inputs_and_strip():
     st.session_state["base_expenses_per_acre"] = sum(expenses.values())
 
 # =========================================================
-# SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
+# SECTION: Variable Rate, Flat Rate (2 Columns, no scroll)
 # =========================================================
-def editor_no_scroll_height(df: pd.DataFrame, row_h: int = 28, header: int = 34, pad: int = 12) -> int:
-    """Exact height so editor/dataframe never scrolls."""
-    return int(header + max(1, len(df)) * row_h + pad)
-
-
 def render_input_sections():
-    # --- Scoped CSS: disable all internal overflow ---
+    # --- Scoped CSS: keep things tidy & full-width without inner scroll ---
     st.markdown("""
     <style>
-    [data-testid="stDataEditorGrid"],
-    [data-testid="stDataFrameContainer"],
-    [data-testid="stDataFrameScrollableContainer"],
-    [data-testid="stDataFrame"] {
-        overflow: visible !important;
-        height: auto !important;
-        max-height: none !important;
-        width: 100% !important;
-    }
-    [data-testid="stDataEditorGrid"] table,
-    [data-testid="stDataFrame"] table {
-        width: 100% !important;
-        min-width: 100% !important;
-        table-layout: fixed !important;
-    }
+      [data-testid="stDataEditorGrid"],
+      [data-testid="stDataFrameContainer"],
+      [data-testid="stDataFrameScrollableContainer"],
+      [data-testid="stDataFrame"] {
+          overflow: visible !important;
+          height: auto !important;
+          max-height: none !important;
+          width: 100% !important;
+      }
+      [data-testid="stDataEditorGrid"] table,
+      [data-testid="stDataFrame"] table {
+          width: 100% !important;
+          min-width: 100% !important;
+          table-layout: fixed !important;
+      }
     </style>
     """, unsafe_allow_html=True)
 
@@ -483,13 +478,15 @@ def render_input_sections():
     fert_products = sorted(set(fert_products))
     seed_products = sorted(set(seed_products))
 
-    # build defaults
+    # Build editor rows from detected products
     all_variable_inputs = (
         [{"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in fert_products] +
-        [{"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in seed_products]
+        [{"Type": "Seed",       "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in seed_products]
     )
     if not all_variable_inputs:
-        all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
+        all_variable_inputs = [{
+            "Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0
+        }]
 
     cols = st.columns(2, gap="small")
 
@@ -502,7 +499,7 @@ def render_input_sections():
             st.caption("Enter price per unit and total units applied from RX maps or manually.")
             rx_df = pd.DataFrame(all_variable_inputs)
 
-            # no dynamic rows → no checkbox column
+            # Fixed rows = no checkbox column
             edited = st.data_editor(
                 rx_df,
                 hide_index=True,
@@ -515,7 +512,7 @@ def render_input_sections():
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(flat_df)
+                height=auto_height(rx_df)
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
@@ -528,7 +525,7 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited_flat)
+                height=auto_height(edited)
             )
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
@@ -544,15 +541,12 @@ def render_input_sections():
         st.markdown("### Flat Rate Inputs")
         with st.expander("Open Flat Rate Inputs", expanded=False):
             st.caption("Uniform cost per acre for the entire field.")
-            flat_products = fert_products + seed_products
-            flat_df = pd.DataFrame([
-                {"Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
-                for p in sorted(set(flat_products))
-            ])
-            if flat_df.empty:
-                flat_df = pd.DataFrame(
-                    [{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}]
-                )
+            flat_products = sorted(set(fert_products + seed_products))
+            flat_df = pd.DataFrame([{
+                "Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0
+            } for p in flat_products]) if flat_products else pd.DataFrame(
+                [{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}]
+            )
 
             edited_flat = st.data_editor(
                 flat_df,
@@ -565,7 +559,7 @@ def render_input_sections():
                     "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(flat_df)
+                height=auto_height(flat_df)
             ).fillna(0.0)
 
             edited_flat["Cost per Acre ($/ac)"] = (
@@ -580,9 +574,10 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited_flat)
+                height=auto_height(edited_flat)
             )
 
+            # Persist in state for Section 9 math
             out_flat = edited_flat.copy()
             out_flat["$/ac"] = out_flat["Cost per Acre ($/ac)"]
             st.session_state["flat_products"] = edited_flat
