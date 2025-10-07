@@ -1171,6 +1171,25 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
+# --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
+st.markdown("""
+<script>
+function killScrollbars(){
+  const els = window.parent.document.querySelectorAll(
+    '[data-testid="stDataFrameContainer"],[data-testid="stDataEditorContainer"]'
+  );
+  els.forEach(el=>{
+    el.style.overflow='visible';
+    el.style.height='auto';
+    el.style.maxHeight='none';
+  });
+}
+// Run now and whenever Streamlit reflows
+killScrollbars();
+new MutationObserver(killScrollbars)
+  .observe(window.parent.document.body,{childList:true,subtree:true});
+</script>
+""", unsafe_allow_html=True)
 
 # =========================================================
 # GLOBAL NO-SCROLL + WIDTH FIX — FINAL OVERRIDE
