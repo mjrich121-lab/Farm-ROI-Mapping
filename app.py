@@ -999,9 +999,13 @@ def render_profit_summary():
                 return "color:#ff4d4d;font-weight:bold;"
         return "font-weight:bold;"
 
-    def _df_height(df, row_h=30, header_h=38, pad=8):
-        """Exact table height so no scrollbars appear."""
-        return int(header_h + max(1, len(df)) * row_h + pad)
+    def _df_height(df, row_h=34, header_h=40, pad=8):
+    """Pixel-perfect height with tiny buffer to prevent scrollbars."""
+    try:
+        n = len(df) if isinstance(df, pd.DataFrame) else 1
+        return int(header_h + n * row_h + pad + 6)  # +6 buffer stops scrollbars on rerun
+    except Exception:
+        return 180
 
     # ---------- Safe defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
