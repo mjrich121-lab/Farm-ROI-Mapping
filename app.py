@@ -1204,34 +1204,55 @@ def render_profit_summary():
 # ---------- render ----------
 render_profit_summary()
 
-# ---------- layout width + global no-scroll ----------
-st.markdown(
-    """
-    <style>
-    [data-testid="stDataEditorGrid"],
-    [data-testid="stDataFrame"],
-    [data-testid="stVerticalBlock"],
-    [data-testid="stHorizontalBlock"],
-    [data-testid="stDataFrameContainer"] {
-        overflow: visible !important;
-        height: auto !important;
-        max-height: none !important;
+# =========================================================
+# GLOBAL NO-SCROLL + WIDTH FIX — FINAL OVERRIDE
+# =========================================================
+st.markdown("""
+<style>
+/* kill all editor and dataframe scrolls */
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataEditorGrid"],
+[data-testid="stDataFrame"],
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"],
+[data-testid="stDataEditorContainer"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+/* force table body & header to render full height */
+[data-testid="stDataEditorGrid"] table,
+[data-testid="stDataFrame"] table {
+    min-width: 100% !important;
+}
+/* remove Streamlit’s auto-scroll shadows */
+[data-testid="stDataEditorResizer"],
+[data-testid="stDataFrameResizer"] {
+    display: none !important;
+}
+</style>
+
+<script>
+function fixLayoutAndScroll() {
+    const outer = window.parent?.document?.querySelector('.block-container');
+    if (outer) {
+        outer.style.maxWidth = '85%';
+        outer.style.margin = 'auto';
+        outer.style.paddingTop = '0.5rem';
+        outer.style.paddingBottom = '1rem';
     }
-    </style>
-    <script>
-    function fixLayoutWidth() {
-        const outer = window.parent.document.querySelector('.block-container');
-        if (outer) {
-            outer.style.maxWidth = '85%';
-            outer.style.margin = 'auto';
-            outer.style.paddingTop = '0.5rem';
-            outer.style.paddingBottom = '1rem';
-        }
-    }
-    fixLayoutWidth();
-    setTimeout(fixLayoutWidth, 1000);
-    setTimeout(fixLayoutWidth, 3000);
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
+    // force every grid to expand fully
+    document.querySelectorAll('[data-testid="stDataFrameContainer"],[data-testid="stDataEditorContainer"]').forEach(el=>{
+        el.style.overflow='visible';
+        el.style.height='auto';
+        el.style.maxHeight='none';
+    });
+}
+fixLayoutAndScroll();
+setTimeout(fixLayoutAndScroll, 500);
+setTimeout(fixLayoutAndScroll, 1500);
+setTimeout(fixLayoutAndScroll, 4000);
+</script>
+""", unsafe_allow_html=True)
