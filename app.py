@@ -983,26 +983,32 @@ try:
 except Exception:
     pass
 st_folium(m, use_container_width=True, height=600)
-# =========================================================
-# 9. PROFIT SUMMARY — Breakeven + Corn/Soy + Fixed Inputs
-# =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-    def _df_height(df, row_h=34, header_h=40, pad=8):
-        """Pixel-perfect height with tiny buffer to prevent scrollbars."""
-        try:
-            n = len(df) if isinstance(df, pd.DataFrame) else 1
-            return int(header_h + n * row_h + pad + 6)
-        except Exception:
-            return 180
+ def _df_height(df, row_h=32, header_h=36, pad=2):
+    """Pixel-perfect height—tightened to remove visual padding, no scrollbars."""
+    try:
+        n = len(df) if isinstance(df, pd.DataFrame) else 1
+        return int(header_h + n * row_h + pad + 2)  # small +2 buffer = no scrollbars
+    except Exception:
+        return 160
 
     def _money(x):
         try:
             return f"${x:,.2f}"
         except Exception:
             return x
+
+    def _profit_color(v):
+        if not isinstance(v, (int, float)):
+            return ""
+        if v > 0:
+            return "color:limegreen;font-weight:bold;"
+        if v < 0:
+            return "color:#ff4d4d;font-weight:bold;"
+        return "font-weight:bold;"
 
     # ---------- Safe defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
@@ -1089,8 +1095,11 @@ def render_profit_summary():
 
     with left:
         st.subheader("Breakeven Budget Comparison")
+        styled_comp = comparison.style.format(_money).applymap(
+            _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
+        )
         st.dataframe(
-            comparison.style.format(_money, subset=comparison.columns[1:]),
+            styled_comp,
             use_container_width=True,
             hide_index=True,
             height=_df_height(comparison),
@@ -1122,8 +1131,11 @@ def render_profit_summary():
             )
 
         st.subheader("Corn vs Soybean Profitability")
+        styled_cs = cornsoy.style.format(_money).applymap(
+            _profit_color, subset=["Profit ($/ac)"]
+        )
         st.dataframe(
-            cornsoy.style.format(_money, subset=cornsoy.columns[1:]),
+            styled_cs,
             use_container_width=True,
             hide_index=True,
             height=_df_height(cornsoy),
@@ -1133,7 +1145,7 @@ def render_profit_summary():
         st.subheader("Fixed Input Costs")
         if not fixed_df.empty:
             st.dataframe(
-                fixed_df.style.format(_money, subset=["$/ac"]),
+                fixed_df.style.format(_money),
                 use_container_width=True,
                 hide_index=True,
                 height=_df_height(fixed_df),
