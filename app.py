@@ -1096,11 +1096,24 @@ def render_profit_summary():
         # --- Breakeven + Profit Comparison ---
         st.subheader("Breakeven Budget Comparison")
         df_show = comparison.copy()
-        df_show[numeric_cols := [c for c in df_show.columns if c != "Metric"]] = df_show[numeric_cols].applymap(
-            lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
-        )
-        st.data_editor(df_show, use_container_width=True, disabled=True, hide_index=True,
-                       height=_df_height(df_show))
+
+        # identify numeric columns (everything except 'Metric')
+        numeric_cols = [c for c in df_show.columns if c != "Metric"]
+
+        # safely format only numeric columns
+for col in numeric_cols:
+    df_show[col] = df_show[col].apply(
+        lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+    )
+
+        st.data_editor(
+            df_show,
+            use_container_width=True,
+            disabled=True,
+            hide_index=True,
+            height=_df_height(df_show)
+    )
+
 
         # --- Compact Formulas Row (Horizontal) ---
         with st.expander("Show Calculation Formulas", expanded=False):
