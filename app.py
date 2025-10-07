@@ -990,16 +990,21 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-    def _df_height(df, row_h=32, header_h=36, pad=2):
-        """Tight, scroll-free height; auto-adjusts for short tables."""
-        try:
-            n = len(df) if isinstance(df, pd.DataFrame) else 1
-            base = int(header_h + n * row_h + pad)
-            if n < 15:
-                base += 4  # buffer for small tables
-            return base
-        except Exception:
-            return 160
+   def _df_height(df, row_h=32, header_h=36, pad=0):
+    """Pixel-perfect table height; removes single-line scroll issues."""
+    try:
+        n = len(df) if isinstance(df, pd.DataFrame) else 1
+        # Base height formula
+        base = int(header_h + n * row_h + pad)
+        # Small tables (<20 rows) need a touch more height to avoid scrollbar hint
+        if n <= 20:
+            base += 6
+        # Extra safeguard for 1-row or 2-row tables
+        if n <= 2:
+            base += 10
+        return base
+    except Exception:
+        return 180
 
     def _money(x):
         try:
