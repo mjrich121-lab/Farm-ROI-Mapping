@@ -461,10 +461,9 @@ def render_fixed_inputs_and_strip():
 # =========================================================
 # SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
 # =========================================================
-def editor_no_scroll_height(df: pd.DataFrame, extra: int = 40) -> int:
-    """Compute pixel height to display full table/editor without internal scroll."""
-    base = 34 + 28 * max(1, len(df))  # header + rows
-    return int(base + extra)
+def editor_no_scroll_height(df: pd.DataFrame, extra: int = 30) -> int:
+    """Pixel height to fit rows exactly—no scroll."""
+    return int(30 + 26 * max(1, len(df)) + extra)
 
 
 def render_input_sections():
@@ -498,8 +497,10 @@ def render_input_sections():
 
     def _profit_color(v):
         if isinstance(v, (int, float)):
-            if v > 0: return "color:limegreen;font-weight:bold;"
-            if v < 0: return "color:#ff4d4d;font-weight:bold;"
+            if v > 0:
+                return "color:limegreen;font-weight:bold;"
+            if v < 0:
+                return "color:#ff4d4d;font-weight:bold;"
         return ""
 
     # ===============================
@@ -523,22 +524,28 @@ def render_input_sections():
     # Combine unique inputs for editors
     all_variable_inputs = []
     for p in fert_products:
-        all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0})
+        all_variable_inputs.append(
+            {"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
+        )
     for p in seed_products:
-        all_variable_inputs.append({"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0})
+        all_variable_inputs.append(
+            {"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
+        )
 
     if not all_variable_inputs:
         # fallback row if nothing detected
-        all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
+        all_variable_inputs = [
+            {"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}
+        ]
 
     # =====================================
-    # 3 COLUMN LAYOUT
+    # 3 COLUMN LAYOUT (compact, no scroll)
     # =====================================
-    cols = st.columns(3, gap="large")
+    cols = st.columns(3, gap="small")
 
-    # =========================================================
+    # -------------------------------------------------
     # 1) VARIABLE RATE INPUTS
-    # =========================================================
+    # -------------------------------------------------
     with cols[0]:
         st.markdown("### Variable Rate Inputs")
         with st.expander("Open Variable Rate Inputs", expanded=False):
@@ -551,13 +558,14 @@ def render_input_sections():
                 hide_index=True,
                 use_container_width=True,
                 key="var_inputs_editor",
+                disabled=False,
                 column_config={
                     "Type": st.column_config.TextColumn(disabled=True),
                     "Product": st.column_config.TextColumn(),
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(rx_df)
+                height=editor_no_scroll_height(rx_df),
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
@@ -570,18 +578,18 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited)
+                height=editor_no_scroll_height(edited),
             )
 
-            st.session_state["variable_rate_inputs"] = edited
             base_acres = float(st.session_state.get("base_acres", 1.0))
+            st.session_state["variable_rate_inputs"] = edited
             st.session_state["variable_rate_cost_per_acre"] = (
                 float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
 
-    # =========================================================
+    # -------------------------------------------------
     # 2) FLAT RATE INPUTS
-    # =========================================================
+    # -------------------------------------------------
     with cols[1]:
         st.markdown("### Flat Rate Inputs")
         with st.expander("Open Flat Rate Inputs", expanded=False):
@@ -593,7 +601,9 @@ def render_input_sections():
                 for p in sorted(set(flat_products))
             ])
             if flat_df.empty:
-                flat_df = pd.DataFrame([{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}])
+                flat_df = pd.DataFrame(
+                    [{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}]
+                )
 
             edited_flat = st.data_editor(
                 flat_df,
@@ -601,12 +611,13 @@ def render_input_sections():
                 hide_index=True,
                 use_container_width=True,
                 key="flat_inputs_editor",
+                disabled=False,
                 column_config={
                     "Product": st.column_config.TextColumn(),
                     "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(flat_df)
+                height=editor_no_scroll_height(flat_df),
             ).fillna(0.0)
 
             edited_flat["Cost per Acre ($/ac)"] = (
@@ -621,7 +632,7 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited_flat)
+                height=editor_no_scroll_height(edited_flat),
             )
 
             out_flat = edited_flat.copy()
@@ -632,9 +643,9 @@ def render_input_sections():
                 edited_flat["Cost per Acre ($/ac)"].sum()
             )
 
-    # =========================================================
+    # -------------------------------------------------
     # 3) CORN vs SOY PROFITABILITY
-    # =========================================================
+    # -------------------------------------------------
     with cols[2]:
         st.markdown("### Corn vs Soy Profitability")
         with st.expander("Open Corn vs Soy Profitability", expanded=False):
@@ -642,17 +653,25 @@ def render_input_sections():
 
             c1, c2, c3, c4 = st.columns(4, gap="small")
             with c1:
-                corn_yield = st.number_input("Corn Yield", min_value=0.0,
-                                             value=float(st.session_state.get("corn_yield", 200.0)))
+                corn_yield = st.number_input(
+                    "Corn Yield", min_value=0.0,
+                    value=float(st.session_state.get("corn_yield", 200.0))
+                )
             with c2:
-                corn_price = st.number_input("Corn $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("corn_price", 5.0)))
+                corn_price = st.number_input(
+                    "Corn $/bu", min_value=0.0,
+                    value=float(st.session_state.get("corn_price", 5.0))
+                )
             with c3:
-                bean_yield = st.number_input("Soy Yield", min_value=0.0,
-                                             value=float(st.session_state.get("bean_yield", 60.0)))
+                bean_yield = st.number_input(
+                    "Soy Yield", min_value=0.0,
+                    value=float(st.session_state.get("bean_yield", 60.0))
+                )
             with c4:
-                bean_price = st.number_input("Soy $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("bean_price", 12.0)))
+                bean_price = st.number_input(
+                    "Soy $/bu", min_value=0.0,
+                    value=float(st.session_state.get("bean_price", 12.0))
+                )
 
             base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
             df_cs = pd.DataFrame({
@@ -674,9 +693,8 @@ def render_input_sections():
                 }).applymap(_profit_color, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(df_cs)
+                height=editor_no_scroll_height(df_cs),
             )
-
 
 # ===========================
 # Map helpers / overlays
