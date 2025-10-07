@@ -1094,7 +1094,7 @@ def render_profit_summary():
     left, right = st.columns([2, 1], gap="large")
 
     with left:
-        st.subheader("Breakeven Budget Comparison")
+        st.subheader("Profit Comparison")
         styled_comp = comparison.style.format(_money).applymap(
             _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
         )
