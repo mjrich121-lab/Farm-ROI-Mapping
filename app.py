@@ -1050,25 +1050,36 @@ def render_profit_summary():
     revenue_per_acre = target_yield * sell_price
     fixed_inputs = base_exp
 
-    # Variable-rate + fixed-rate pulled from state
+    # ---- Variable-rate ----
     revenue_var = revenue_per_acre
     fert_costs_var = 0.0
     seed_costs_var = 0.0
-    if "fert_products" in st.session_state and not st.session_state["fert_products"].empty:
-        fert_costs_var = st.session_state["fert_products"]["CostPerAcre"].sum()
-    if "seed_products" in st.session_state and not st.session_state["seed_products"].empty:
-        seed_costs_var = st.session_state["seed_products"]["CostPerAcre"].sum()
+    if "fert_products" in st.session_state:
+        df_fert = st.session_state["fert_products"]
+        if isinstance(df_fert, pd.DataFrame) and "CostPerAcre" in df_fert.columns:
+            fert_costs_var = df_fert["CostPerAcre"].sum()
+    if "seed_products" in st.session_state:
+        df_seed = st.session_state["seed_products"]
+        if isinstance(df_seed, pd.DataFrame) and "CostPerAcre" in df_seed.columns:
+            seed_costs_var = df_seed["CostPerAcre"].sum()
     expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
     profit_var = revenue_var - expenses_var
 
+    # ---- Fixed-rate ----
     fert_costs_fix = 0.0
     seed_costs_fix = 0.0
-    if "fixed_products" in st.session_state and not st.session_state["fixed_products"].empty:
-        fert_costs_fix = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Fertilizer"]["$/ac"].sum()
-        seed_costs_fix = st.session_state["fixed_products"][st.session_state["fixed_products"]["Type"]=="Seed"]["$/ac"].sum()
+    if "fixed_products" in st.session_state:
+        df_fix = st.session_state["fixed_products"]
+        if isinstance(df_fix, pd.DataFrame):
+            if "Type" in df_fix.columns and "$/ac" in df_fix.columns:
+                fert_costs_fix = df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"].sum()
+                seed_costs_fix = df_fix.loc[df_fix["Type"] == "Seed", "$/ac"].sum()
+            elif "$/ac" in df_fix.columns:
+                fert_costs_fix = seed_costs_fix = df_fix["$/ac"].sum()
     expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
     profit_fix = revenue_var - expenses_fix
 
+    # ---- Build table ----
     comparison = pd.DataFrame({
         "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
         "Base (Target)": [revenue_per_acre, fixed_inputs, revenue_per_acre - fixed_inputs],
@@ -1129,7 +1140,7 @@ def render_profit_summary():
                 }).applymap(_highlight_profit, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=int(34 + 28 * len(df_cs) + 10)
+                height=int(34 + 28 * len(df_cs) + 30)
             )
 
         with c2:
@@ -1146,7 +1157,7 @@ def render_profit_summary():
                            subset=["Expense"]),
                     use_container_width=True,
                     hide_index=True,
-                    height=int(34 + 28 * len(fixed_df) + 10)
+                    height=int(34 + 28 * len(fixed_df) + 30)
                 )
             else:
                 st.info("Enter your fixed inputs above to see totals here.")
