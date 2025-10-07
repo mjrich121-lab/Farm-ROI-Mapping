@@ -987,7 +987,7 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-   def _df_height(df, row_h=32, header_h=36, pad=2):
+def _df_height(df, row_h=32, header_h=36, pad=2):
     """Tight, scroll-free height; auto-adjusts for short tables."""
     try:
         n = len(df) if isinstance(df, pd.DataFrame) else 1
