@@ -1026,7 +1026,7 @@ st_folium(m, use_container_width=True, height=600)
 def render_profit_summary():
     st.header("Profit Summary")
 
-    # ---------- Local Style Helpers ----------
+    # ---------- Helpers ----------
     def _highlight_profit(v):
         if isinstance(v, (int, float)):
             if v > 0:
@@ -1036,14 +1036,17 @@ def render_profit_summary():
         return "font-weight:bold;"
 
     def _df_height(df, row_h=30, header_h=38, pad=8):
-        """Calculate precise table height so it never scrolls."""
-        nrows = max(1, len(df))
-        return int(header_h + (nrows * row_h) + pad)
+        """Exact table height so no scrollbars appear."""
+        return int(header_h + max(1, len(df)) * row_h + pad)
 
-    # ---------- Safe session defaults ----------
+    # ---------- Safe defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre",
-                                          sum(expenses.values()) if expenses else 0.0))
+    base_exp = float(
+        st.session_state.get(
+            "base_expenses_per_acre",
+            sum(expenses.values()) if expenses else 0.0,
+        )
+    )
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
@@ -1051,11 +1054,11 @@ def render_profit_summary():
     target_yield = float(st.session_state.get("target_yield", 200))
     sell_price = float(st.session_state.get("sell_price", corn_price))
 
-    # ---------- Base / Variable / Fixed Profit ----------
+    # ---------- Profit math ----------
     revenue_per_acre = target_yield * sell_price
     fixed_inputs = base_exp
 
-    # --- Variable-rate costs ---
+    # variable-rate
     fert_costs_var = seed_costs_var = 0.0
     df_fert = st.session_state.get("fert_products")
     if isinstance(df_fert, pd.DataFrame) and "CostPerAcre" in df_fert.columns:
@@ -1066,7 +1069,7 @@ def render_profit_summary():
     expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
     profit_var = revenue_per_acre - expenses_var
 
-    # --- Fixed-rate costs ---
+    # fixed-rate
     fert_costs_fix = seed_costs_fix = 0.0
     df_fix = st.session_state.get("fixed_products")
     if isinstance(df_fix, pd.DataFrame):
@@ -1078,135 +1081,157 @@ def render_profit_summary():
     expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
     profit_fix = revenue_per_acre - expenses_fix
 
-    # ---------- Build main comparison ----------
-    comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Breakeven Budget": [revenue_per_acre, fixed_inputs, revenue_per_acre - fixed_inputs],
-        "Variable Rate": [revenue_per_acre, expenses_var, profit_var],
-        "Fixed Rate": [revenue_per_acre, expenses_fix, profit_fix],
-    })
+    # ---------- Comparison table ----------
+    comparison = pd.DataFrame(
+        {
+            "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+            "Breakeven Budget": [
+                revenue_per_acre,
+                fixed_inputs,
+                revenue_per_acre - fixed_inputs,
+            ],
+            "Variable Rate": [revenue_per_acre, expenses_var, profit_var],
+            "Fixed Rate": [revenue_per_acre, expenses_fix, profit_fix],
+        }
+    )
 
-    # ---------- Layout: Left = Profit & Corn/Soy, Right = Fixed Inputs ----------
+    # ---------- Layout ----------
     col_left, col_right = st.columns([2, 1], gap="large")
 
-    # ===============================
+    # ===========================
     # LEFT COLUMN
-    # ===============================
+    # ===========================
     with col_left:
-        # --- Breakeven + Profit Comparison ---
         st.subheader("Breakeven Budget Comparison")
+
         df_show = comparison.copy()
-
-        # identify numeric columns (everything except 'Metric')
         numeric_cols = [c for c in df_show.columns if c != "Metric"]
+        for col in numeric_cols:
+            df_show[col] = df_show[col].apply(
+                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+            )
 
-        # safely format only numeric columns
-for col in numeric_cols:
-    df_show[col] = df_show[col].apply(
-        lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
-    )
+        st.data_editor(
+            df_show,
+            use_container_width=True,
+            disabled=True,
+            hide_index=True,
+            height=_df_height(df_show),
+        )
 
-    st.data_editor(
-         df_show,
-        use_container_width=True,
-        disabled=True,
-        hide_index=True,
-        height=_df_height(df_show)
-    )
-
-
-        # --- Compact Formulas Row (Horizontal) ---
-    with st.expander("Show Calculation Formulas", expanded=False):
-            st.markdown("""
-            <div style="
-                display:flex;
-                flex-wrap:wrap;
-                gap:6px;
-                font-size:0.75rem;
-                line-height:1.1rem;
-                ">
-                <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:5px;background-color:#111;">
+        # compact horizontal formulas
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown(
+                """
+                <div style="display:flex;flex-wrap:wrap;gap:6px;
+                            font-size:0.75rem;line-height:1.1rem;">
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
                     <b>Breakeven Budget</b><br>
                     (Target Yield × Sell Price) − Fixed Inputs
-                </div>
-                <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:5px;background-color:#111;">
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
                     <b>Variable Rate</b><br>
                     (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-                </div>
-                <div style="flex:1;min-width:180px;border:1px solid #444;
-                            border-radius:6px;padding:5px;background-color:#111;">
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
                     <b>Fixed Rate</b><br>
                     (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+                  </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """,
+                unsafe_allow_html=True,
+            )
 
-        # --- Corn vs Soybean Profitability ---
+        # Corn vs Soybean table
         st.subheader("Corn vs Soybean Profitability")
-        df_cs = pd.DataFrame({
-            "Crop": ["Corn", "Soybeans"],
-            "Yield (bu/ac)": [corn_yield, bean_yield],
-            "Sell Price ($/bu)": [corn_price, bean_price],
-        })
-        df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+        df_cs = pd.DataFrame(
+            {
+                "Crop": ["Corn", "Soybeans"],
+                "Yield (bu/ac)": [corn_yield, bean_yield],
+                "Sell Price ($/bu)": [corn_price, bean_price],
+            }
+        )
+        df_cs["Revenue ($/ac)"] = (
+            df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+        )
         df_cs["Fixed Inputs ($/ac)"] = base_exp
-        df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
-        df_cs_display = df_cs.copy()
-        for col in df_cs_display.columns[1:]:
-            df_cs_display[col] = df_cs_display[col].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
-        st.data_editor(df_cs_display, use_container_width=True, disabled=True, hide_index=True,
-                       height=_df_height(df_cs_display))
+        df_cs["Profit ($/ac)"] = (
+            df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
+        )
 
-    # ===============================
+        df_cs_disp = df_cs.copy()
+        for c in df_cs_disp.columns[1:]:
+            df_cs_disp[c] = df_cs_disp[c].apply(
+                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+            )
+
+        st.data_editor(
+            df_cs_disp,
+            use_container_width=True,
+            disabled=True,
+            hide_index=True,
+            height=_df_height(df_cs_disp),
+        )
+
+    # ===========================
     # RIGHT COLUMN
-    # ===============================
+    # ===========================
     with col_right:
         st.subheader("Fixed Input Costs")
         fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
         if not fixed_df.empty:
-            total_row = pd.DataFrame([{"Expense": "Total Fixed Costs",
-                                       "$/ac": fixed_df["$/ac"].sum()}])
+            total_row = pd.DataFrame(
+                [{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}]
+            )
             fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
-            fixed_df["$/ac"] = fixed_df["$/ac"].apply(lambda x: f"${x:,.2f}")
-            st.data_editor(fixed_df, use_container_width=True, disabled=True, hide_index=True,
-                           height=_df_height(fixed_df))
+            fixed_df["$/ac"] = fixed_df["$/ac"].apply(
+                lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+            )
+            st.data_editor(
+                fixed_df,
+                use_container_width=True,
+                disabled=True,
+                hide_index=True,
+                height=_df_height(fixed_df),
+            )
         else:
             st.info("Enter your fixed inputs above to see totals here.")
 
 
-# ---------- ✅ RENDER SECTION 9 ----------
+# ---------- render ----------
 render_profit_summary()
 
-
-# =========================================================
-# FORCE LAYOUT WIDTH FIX + GLOBAL NO-SCROLL ENFORCER
-# =========================================================
-st.markdown("""
-<style>
-[data-testid="stDataFrameContainer"],
-[data-testid="stDataEditorGrid"],
-[data-testid="stDataFrame"],
-[data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"] {
-    overflow: visible !important;
-    height: auto !important;
-    max-height: none !important;
-}
-</style>
-<script>
-function fixLayoutWidth() {
-    const outer = window.parent.document.querySelector('.block-container');
-    if (outer) {
-        outer.style.maxWidth = '85%';
-        outer.style.margin = 'auto';
-        outer.style.paddingTop = '0.5rem';
-        outer.style.paddingBottom = '1rem';
+# ---------- layout width + global no-scroll ----------
+st.markdown(
+    """
+    <style>
+    [data-testid="stDataEditorGrid"],
+    [data-testid="stDataFrame"],
+    [data-testid="stVerticalBlock"],
+    [data-testid="stHorizontalBlock"],
+    [data-testid="stDataFrameContainer"] {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
     }
-}
-fixLayoutWidth();
-setTimeout(fixLayoutWidth, 1000);
-setTimeout(fixLayoutWidth, 3000);
-</script>
-""", unsafe_allow_html=True)
+    </style>
+    <script>
+    function fixLayoutWidth() {
+        const outer = window.parent.document.querySelector('.block-container');
+        if (outer) {
+            outer.style.maxWidth = '85%';
+            outer.style.margin = 'auto';
+            outer.style.paddingTop = '0.5rem';
+            outer.style.paddingBottom = '1rem';
+        }
+    }
+    fixLayoutWidth();
+    setTimeout(fixLayoutWidth, 1000);
+    setTimeout(fixLayoutWidth, 3000);
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
