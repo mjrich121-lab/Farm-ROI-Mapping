@@ -394,28 +394,54 @@ def render_fixed_inputs_and_strip():
 # SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
 # =========================================================
 def render_input_sections():
-    def _h(n): return int(34 + max(1, n) * 28 + 4)
-
     def _profit_color(v):
         if isinstance(v, (int, float)):
             if v > 0: return "color:limegreen;font-weight:bold;"
             if v < 0: return "color:#ff4d4d;font-weight:bold;"
         return ""
 
+    # ===============================
+    # PREP: Gather all detected inputs
+    # ===============================
+    fert_store = st.session_state.get("fert_layers_store", {})
+    seed_store = st.session_state.get("seed_layers_store", {})
+
+    fert_products = []
+    for k, df in fert_store.items():
+        if isinstance(df, pd.DataFrame) and "product" in df.columns:
+            fert_products.extend(list(df["product"].dropna().unique()))
+    seed_products = []
+    for k, df in seed_store.items():
+        if isinstance(df, pd.DataFrame) and "product" in df.columns:
+            seed_products.extend(list(df["product"].dropna().unique()))
+
+    fert_products = sorted(list(set(fert_products)))
+    seed_products = sorted(list(set(seed_products)))
+
+    # Combine unique inputs for editors
+    all_variable_inputs = []
+    for p in fert_products:
+        all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0})
+    for p in seed_products:
+        all_variable_inputs.append({"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0})
+
+    if not all_variable_inputs:
+        # fallback row if nothing detected
+        all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
+
+    # =====================================
+    # UI COLUMNS
+    # =====================================
     cols = st.columns(3, gap="large")
 
-    # 1) VARIABLE RATE INPUTS
+    # -------------------------------------------------
+    # 1) VARIABLE RATE INPUTS — auto from RX detections
+    # -------------------------------------------------
     with cols[0]:
         st.markdown("### Variable Rate Inputs")
         with st.expander("Open Variable Rate Inputs", expanded=False):
             st.caption("Enter price per unit and total units applied from RX maps or manually.")
-            rx_df = pd.DataFrame([{
-                "Type": "Fertilizer",
-                "Product": "",
-                "Units Applied": 0.0,
-                "Price per Unit ($)": 0.0
-            }])
-
+            rx_df = pd.DataFrame(all_variable_inputs)
             edited = st.data_editor(
                 rx_df,
                 num_rows="dynamic",
@@ -428,34 +454,45 @@ def render_input_sections():
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=_h(len(rx_df))
-            )
+                height=df_px_height(len(rx_df))
+            ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
+
             st.dataframe(
                 edited.style.format({
                     "Units Applied": "{:,.4f}",
                     "Price per Unit ($)": "${:,.2f}",
                     "Total Cost ($)": "${:,.2f}",
                 }),
-                use_container_width=True, hide_index=True, height=_h(len(edited))
+                use_container_width=True,
+                hide_index=True,
+                height=df_px_height(len(edited))
             )
 
-            # Save per-acre cost for profit math if needed elsewhere
-            st.session_state["variable_rate_cost_per_acre"] = float(edited["Total Cost ($)"].sum()) / max(
-                float(st.session_state.get("base_acres", 1.0)), 1.0
+            # Safe store for downstream profit calc
+            st.session_state["variable_rate_inputs"] = edited
+            base_acres = float(st.session_state.get("base_acres", 1.0))
+            st.session_state["variable_rate_cost_per_acre"] = (
+                float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
 
-    # 2) FLAT RATE INPUTS
+    # -------------------------------------------------
+    # 2) FLAT RATE INPUTS — handles infinite product list
+    # -------------------------------------------------
     with cols[1]:
         st.markdown("### Flat Rate Inputs")
         with st.expander("Open Flat Rate Inputs", expanded=False):
             st.caption("Uniform cost per acre for the entire field.")
-            flat_df = pd.DataFrame([{
-                "Product": "",
-                "Rate (units/ac)": 0.0,
-                "Price per Unit ($)": 0.0
-            }])
+
+            # detect from variable list for convenience
+            flat_products = fert_products + seed_products
+            flat_df = pd.DataFrame([
+                {"Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
+                for p in sorted(set(flat_products))
+            ])
+            if flat_df.empty:
+                flat_df = pd.DataFrame([{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}])
 
             edited_flat = st.data_editor(
                 flat_df,
@@ -468,32 +505,41 @@ def render_input_sections():
                     "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=_h(len(flat_df))
+                height=df_px_height(len(flat_df))
+            ).fillna(0.0)
+
+            edited_flat["Cost per Acre ($/ac)"] = (
+                edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
             )
 
-            edited_flat["Cost per Acre ($/ac)"] = edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
             st.dataframe(
                 edited_flat.style.format({
                     "Rate (units/ac)": "{:,.4f}",
                     "Price per Unit ($)": "${:,.2f}",
                     "Cost per Acre ($/ac)": "${:,.2f}",
                 }),
-                use_container_width=True, hide_index=True, height=_h(len(edited_flat))
+                use_container_width=True,
+                hide_index=True,
+                height=df_px_height(len(edited_flat))
             )
 
-            # Store for map profit math compatibility
+            # Store for profit summary + mapping
             out_flat = edited_flat.copy()
             out_flat["$/ac"] = out_flat["Cost per Acre ($/ac)"]
             st.session_state["flat_products"] = edited_flat
             st.session_state["fixed_products"] = out_flat
+            st.session_state["flat_rate_cost_per_acre"] = float(
+                edited_flat["Cost per Acre ($/ac)"].sum()
+            )
 
-            st.session_state["flat_rate_cost_per_acre"] = float(edited_flat["Cost per Acre ($/ac)"].sum())
-
-    # 3) CORN vs SOY PROFITABILITY
+    # -------------------------------------------------
+    # 3) CORN vs SOY PROFITABILITY (unchanged)
+    # -------------------------------------------------
     with cols[2]:
         st.markdown("### Corn vs Soy Profitability")
         with st.expander("Open Corn vs Soy Profitability", expanded=False):
             st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
+
             c1, c2, c3, c4 = st.columns(4, gap="small")
             with c1:
                 corn_yield = st.number_input("Corn Yield", min_value=0.0,
@@ -526,8 +572,11 @@ def render_input_sections():
                     "Fixed Inputs ($/ac)": "${:,.0f}",
                     "Profit ($/ac)": "${:,.0f}",
                 }).applymap(_profit_color, subset=["Profit ($/ac)"]),
-                use_container_width=True, hide_index=True, height=_h(len(df_cs))
+                use_container_width=True,
+                hide_index=True,
+                height=df_px_height(len(df_cs))
             )
+
 
 # ===========================
 # Map helpers / overlays
