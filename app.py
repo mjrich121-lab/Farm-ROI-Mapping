@@ -990,7 +990,7 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-         def _df_height(df, row_h=32, header_h=36, pad=0):
+      def _df_height(df, row_h=32, header_h=36, pad=0):
            """Pixel-perfect table height; removes single-line scroll issues."""
            try:
                n = len(df) if isinstance(df, pd.DataFrame) else 1
