@@ -1168,7 +1168,6 @@ def render_profit_summary():
         else:
             st.info("Enter your fixed inputs above to see totals here.")
 
-
 # ---------- render ----------
 render_profit_summary()
 # --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
