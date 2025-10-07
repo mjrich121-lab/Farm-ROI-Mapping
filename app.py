@@ -22,46 +22,52 @@ from matplotlib import colors as mpl_colors
 st.cache_data.clear()
 st.cache_resource.clear()
 
-# Clear caches (avoid stale state during hot-reloads)
-st.cache_data.clear()
-st.cache_resource.clear()
-
-# === GLOBAL SCROLL FIX (SAFE VERSION) ===
+# === SCROLL CONTROL (Scoped SAFE v2) ===
 st.markdown("""
 <style>
 /* ------------------------------
-   SCROLL FIX: only affect dataframes, not editors
+   A. DataFrames (READ-ONLY tables)
    ------------------------------ */
+/* Let dataframes expand with no internal scroll and no sticky header gap. */
 [data-testid="stDataFrameContainer"],
 [data-testid="stDataFrameScrollableContainer"],
 [data-testid="stDataFrame"] {
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
 }
+[data-testid="stStickyTableHeader"] { position: static !important; }
 
-/* keep data editors virtualized (DO NOT override their overflow) */
+/* ------------------------------
+   B. DataEditors (EDITABLE grids)
+   ------------------------------ */
+/* Keep editor virtualization alive so cells actually render.
+   We'll prevent scroll via explicit height, not CSS. */
 [data-testid="stDataEditorContainer"],
 [data-testid="stDataEditorGrid"] {
-    overflow: auto !important;        /* restore Streamlit's default */
+    overflow: visible !important;  /* allow full expansion */
     height: auto !important;
-    max-height: 700px !important;     /* cap height to avoid huge scroll */
+    max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
 }
 
-/* fix width issues globally */
+/* Make tables use the full width without forcing horizontal scroll */
 [data-testid="stDataFrame"] table,
 [data-testid="stDataEditorGrid"] table {
-    min-width: 0 !important;
+    min-width: 100% !important;
     width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
 }
 
-/* remove any visual shadows and resizers */
-[data-testid="stDataEditorResizer"],
-[data-testid="stDataFrameResizer"] {
-    display: none !important;
-}
+/* Hide resize grips / scroll shadows */
+[data-testid*="Resizer"], [class*="StyledScroll"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
+
 
 # === SAFE AUTO-EXPAND SCRIPT ===
 st.markdown("""
@@ -90,6 +96,14 @@ def apply_compact_theme():
 # ===========================
 # HELPERS
 # ===========================
+def auto_height(df: pd.DataFrame, row_h: int = 36, header: int = 44, pad: int = 16) -> int:
+    """
+    Robust height so tables/editors never show a vertical scrollbar.
+    Slightly conservative to account for header wrapping on narrow screens.
+    """
+    n = max(1, len(df))
+    return int(header + n * row_h + pad)
+
 def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) -> int:
     """Exact pixel height so tables/editors show with NO internal scroll."""
     return int(header + max(1, nrows) * row_h + pad)
@@ -501,7 +515,7 @@ def render_input_sections():
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(rx_df)
+                height=editor_no_scroll_height(flat_df)
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
@@ -514,7 +528,7 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited)
+                height=editor_no_scroll_height(edited_flat)
             )
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
