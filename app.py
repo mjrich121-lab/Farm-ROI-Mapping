@@ -521,7 +521,7 @@ def render_input_sections():
     if not all_variable_inputs:
         all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
 
-    cols = st.columns(3, gap="small")
+    cols = st.columns(2, gap="small")
 
     # -------------------------------------------------
     # 1) VARIABLE RATE INPUTS
@@ -621,52 +621,7 @@ def render_input_sections():
                 edited_flat["Cost per Acre ($/ac)"].sum()
             )
 
-    # -------------------------------------------------
-    # 3) CORN vs SOY PROFITABILITY
-    # -------------------------------------------------
-    with cols[2]:
-        st.markdown("### Corn vs Soy Profitability")
-        with st.expander("Open Corn vs Soy Profitability", expanded=False):
-            st.caption("Compare profitability between corn and soybeans using current fixed inputs.")
-
-            c1, c2, c3, c4 = st.columns(4, gap="small")
-            with c1:
-                corn_yield = st.number_input("Corn Yield", min_value=0.0,
-                                             value=float(st.session_state.get("corn_yield", 200.0)))
-            with c2:
-                corn_price = st.number_input("Corn $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("corn_price", 5.0)))
-            with c3:
-                bean_yield = st.number_input("Soy Yield", min_value=0.0,
-                                             value=float(st.session_state.get("bean_yield", 60.0)))
-            with c4:
-                bean_price = st.number_input("Soy $/bu", min_value=0.0,
-                                             value=float(st.session_state.get("bean_price", 12.0)))
-
-            base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
-            df_cs = pd.DataFrame({
-                "Crop": ["Corn", "Soybeans"],
-                "Yield (bu/ac)": [corn_yield, bean_yield],
-                "Sell Price ($/bu)": [corn_price, bean_price],
-            })
-            df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
-            df_cs["Fixed Inputs ($/ac)"] = base_exp
-            df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
-
-            st.dataframe(
-                df_cs.style.format({
-                    "Yield (bu/ac)": "{:,.0f}",
-                    "Sell Price ($/bu)": "${:,.2f}",
-                    "Revenue ($/ac)": "${:,.0f}",
-                    "Fixed Inputs ($/ac)": "${:,.0f}",
-                    "Profit ($/ac)": "${:,.0f}",
-                }).applymap(_profit_color, subset=["Profit ($/ac)"]),
-                use_container_width=True,
-                hide_index=True,
-                height=editor_no_scroll_height(df_cs)
-            )
-
-
+   
 # ===========================
 # Map helpers / overlays
 # ===========================
@@ -1066,46 +1021,38 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# PROFIT SUMMARY — centered tables, colored profits
+# 9. PROFIT SUMMARY — Corn vs Soy + Fixed Inputs
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
+    def _profit_color(v):
+        if isinstance(v, (int, float)):
+            if v > 0:
+                return "color:limegreen;font-weight:bold;"
+            if v < 0:
+                return "color:#ff4d4d;font-weight:bold;"
+        return ""
+
+    # --- Pull session data ---
     expenses = st.session_state.get("expenses_dict", {})
-    base_exp = float(st.session_state.get("base_expenses_per_acre",
-                    sum(expenses.values()) if expenses else 0.0))
+    base_exp = float(st.session_state.get(
+        "base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0
+    ))
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
     bean_price = float(st.session_state.get("bean_price", 12))
-    target_yield = float(st.session_state.get("target_yield", 200))
-    sell_price  = float(st.session_state.get("sell_price", corn_price))
 
-    breakeven_df = pd.DataFrame({
+    # --- Corn vs Soy profitability (moved from Section 8) ---
+    df_cs = pd.DataFrame({
         "Crop": ["Corn", "Soybeans"],
-        "Yield Goal (bu/ac)": [corn_yield, bean_yield],
+        "Yield (bu/ac)": [corn_yield, bean_yield],
         "Sell Price ($/bu)": [corn_price, bean_price],
     })
-    breakeven_df["Revenue ($/ac)"] = [corn_yield * corn_price, bean_yield * bean_price]
-    breakeven_df["Fixed Inputs ($/ac)"] = base_exp
-    breakeven_df["Breakeven Budget ($/ac)"] = (
-        breakeven_df["Revenue ($/ac)"] - breakeven_df["Fixed Inputs ($/ac)"]
-    )
-
-    revenue_overall  = target_yield * sell_price
-    expenses_overall = base_exp
-    profit_overall   = revenue_overall - expenses_overall
-
-    comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Value": [revenue_overall, expenses_overall, profit_overall],
-    })
-
-    def highlight_profit(v):
-        if isinstance(v, (int, float)):
-            if v > 0:  return "color:limegreen;font-weight:bold;"
-            if v < 0:  return "color:#ff4d4d;font-weight:bold;"
-        return ""
+    df_cs["Revenue ($/ac)"] = df_cs["Yield (bu/ac)"] * df_cs["Sell Price ($/bu)"]
+    df_cs["Fixed Inputs ($/ac)"] = base_exp
+    df_cs["Profit ($/ac)"] = df_cs["Revenue ($/ac)"] - df_cs["Fixed Inputs ($/ac)"]
 
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
     if not fixed_df.empty:
@@ -1115,24 +1062,21 @@ def render_profit_summary():
 
     left_pad, mid, right_pad = st.columns([1, 2, 1])
     with mid:
-        c1, c2 = st.columns(2, gap="large")
+        c1, c2 = st.columns(2, gap="small")
 
         with c1:
-            st.subheader("Breakeven Budget (Corn vs Beans)")
-            st.table(
-                breakeven_df.style.format({
-                    "Yield Goal (bu/ac)": "{:,.0f}",
+            st.subheader("Corn vs Soy Profitability")
+            st.dataframe(
+                df_cs.style.format({
+                    "Yield (bu/ac)": "{:,.0f}",
                     "Sell Price ($/bu)": "${:,.2f}",
                     "Revenue ($/ac)": "${:,.0f}",
                     "Fixed Inputs ($/ac)": "${:,.0f}",
-                    "Breakeven Budget ($/ac)": "${:,.0f}",
-                })
-            )
-
-            st.subheader("Profit Metrics Comparison")
-            st.table(
-                comparison.style.format({"Value": "${:,.2f}"})
-                .applymap(highlight_profit, subset=["Value"])
+                    "Profit ($/ac)": "${:,.0f}",
+                }).applymap(_profit_color, subset=["Profit ($/ac)"]),
+                use_container_width=True,
+                hide_index=True,
+                height=int(34 + 28 * max(1, len(df_cs)) + 10)
             )
 
         with c2:
@@ -1140,18 +1084,21 @@ def render_profit_summary():
             if fixed_df.empty:
                 st.info("Enter your fixed inputs above to see totals here.")
             else:
-                st.table(
+                st.dataframe(
                     fixed_df.style.format({"$/ac": "${:,.2f}"})
                     .apply(lambda s:
                            ["font-weight:bold;" if v == "Total Fixed Costs" else ""
                             for v in s],
-                           subset=["Expense"])
+                           subset=["Expense"]),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=int(34 + 28 * max(1, len(fixed_df)) + 10)
                 )
 
 render_profit_summary()
 
 # =========================================================
-# FORCE LAYOUT WIDTH FIX — applies to parent DOM (not iframe)
+# FORCE LAYOUT WIDTH FIX — applies to parent DOM
 # =========================================================
 st.markdown("""
 <script>
