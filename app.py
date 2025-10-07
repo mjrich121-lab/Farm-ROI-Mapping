@@ -591,7 +591,6 @@ def render_input_sections():
                 edited_flat["Cost per Acre ($/ac)"].sum()
             )
 
-   
 # ===========================
 # Map helpers / overlays
 # ===========================
