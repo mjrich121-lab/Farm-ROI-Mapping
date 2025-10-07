@@ -461,36 +461,29 @@ def render_fixed_inputs_and_strip():
 # =========================================================
 # SECTION: Variable Rate, Flat Rate, Corn vs Soy (3 Columns)
 # =========================================================
-def editor_no_scroll_height(df: pd.DataFrame, extra: int = 30) -> int:
-    """Pixel height to fit rows exactly—no scroll."""
-    return int(30 + 26 * max(1, len(df)) + extra)
+def editor_no_scroll_height(df: pd.DataFrame, row_h: int = 28, header: int = 34, pad: int = 12) -> int:
+    """Exact height so editor/dataframe never scrolls."""
+    return int(header + max(1, len(df)) * row_h + pad)
 
 
 def render_input_sections():
-    # --- Scoped CSS patch to fully disable scroll for all editors/dataframes in this section ---
+    # --- Scoped CSS: disable all internal overflow ---
     st.markdown("""
     <style>
     [data-testid="stDataEditorGrid"],
-    [data-testid="stDataEditorContainer"],
-    [data-testid="stDataFrame"],
     [data-testid="stDataFrameContainer"],
-    [data-testid="stDataFrameScrollableContainer"] {
+    [data-testid="stDataFrameScrollableContainer"],
+    [data-testid="stDataFrame"] {
         overflow: visible !important;
         height: auto !important;
         max-height: none !important;
         width: 100% !important;
-        max-width: 100% !important;
-        min-width: 0 !important;
     }
     [data-testid="stDataEditorGrid"] table,
     [data-testid="stDataFrame"] table {
         width: 100% !important;
         min-width: 100% !important;
         table-layout: fixed !important;
-    }
-    [data-testid="stVerticalBlock"],
-    [data-testid="stHorizontalBlock"] {
-        overflow: visible !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -509,38 +502,25 @@ def render_input_sections():
     fert_store = st.session_state.get("fert_layers_store", {})
     seed_store = st.session_state.get("seed_layers_store", {})
 
-    fert_products = []
-    for k, df in fert_store.items():
+    fert_products, seed_products = [], []
+    for _, df in fert_store.items():
         if isinstance(df, pd.DataFrame) and "product" in df.columns:
             fert_products.extend(list(df["product"].dropna().unique()))
-    seed_products = []
-    for k, df in seed_store.items():
+    for _, df in seed_store.items():
         if isinstance(df, pd.DataFrame) and "product" in df.columns:
             seed_products.extend(list(df["product"].dropna().unique()))
 
-    fert_products = sorted(list(set(fert_products)))
-    seed_products = sorted(list(set(seed_products)))
+    fert_products = sorted(set(fert_products))
+    seed_products = sorted(set(seed_products))
 
-    # Combine unique inputs for editors
-    all_variable_inputs = []
-    for p in fert_products:
-        all_variable_inputs.append(
-            {"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
-        )
-    for p in seed_products:
-        all_variable_inputs.append(
-            {"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0}
-        )
-
+    # build defaults
+    all_variable_inputs = (
+        [{"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in fert_products] +
+        [{"Type": "Seed", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in seed_products]
+    )
     if not all_variable_inputs:
-        # fallback row if nothing detected
-        all_variable_inputs = [
-            {"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}
-        ]
+        all_variable_inputs = [{"Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0}]
 
-    # =====================================
-    # 3 COLUMN LAYOUT (compact, no scroll)
-    # =====================================
     cols = st.columns(3, gap="small")
 
     # -------------------------------------------------
@@ -550,22 +530,22 @@ def render_input_sections():
         st.markdown("### Variable Rate Inputs")
         with st.expander("Open Variable Rate Inputs", expanded=False):
             st.caption("Enter price per unit and total units applied from RX maps or manually.")
-
             rx_df = pd.DataFrame(all_variable_inputs)
+
+            # no dynamic rows → no checkbox column
             edited = st.data_editor(
                 rx_df,
-                num_rows="dynamic",
                 hide_index=True,
+                num_rows="fixed",
                 use_container_width=True,
-                key="var_inputs_editor",
-                disabled=False,
+                key="var_inputs_editor_final",
                 column_config={
                     "Type": st.column_config.TextColumn(disabled=True),
                     "Product": st.column_config.TextColumn(),
                     "Units Applied": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(rx_df),
+                height=editor_no_scroll_height(rx_df)
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
@@ -578,7 +558,7 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited),
+                height=editor_no_scroll_height(edited)
             )
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
@@ -594,7 +574,6 @@ def render_input_sections():
         st.markdown("### Flat Rate Inputs")
         with st.expander("Open Flat Rate Inputs", expanded=False):
             st.caption("Uniform cost per acre for the entire field.")
-
             flat_products = fert_products + seed_products
             flat_df = pd.DataFrame([
                 {"Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}
@@ -607,17 +586,16 @@ def render_input_sections():
 
             edited_flat = st.data_editor(
                 flat_df,
-                num_rows="dynamic",
                 hide_index=True,
+                num_rows="fixed",
                 use_container_width=True,
-                key="flat_inputs_editor",
-                disabled=False,
+                key="flat_inputs_editor_final",
                 column_config={
                     "Product": st.column_config.TextColumn(),
                     "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
                     "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
                 },
-                height=editor_no_scroll_height(flat_df),
+                height=editor_no_scroll_height(flat_df)
             ).fillna(0.0)
 
             edited_flat["Cost per Acre ($/ac)"] = (
@@ -632,7 +610,7 @@ def render_input_sections():
                 }),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(edited_flat),
+                height=editor_no_scroll_height(edited_flat)
             )
 
             out_flat = edited_flat.copy()
@@ -653,25 +631,17 @@ def render_input_sections():
 
             c1, c2, c3, c4 = st.columns(4, gap="small")
             with c1:
-                corn_yield = st.number_input(
-                    "Corn Yield", min_value=0.0,
-                    value=float(st.session_state.get("corn_yield", 200.0))
-                )
+                corn_yield = st.number_input("Corn Yield", min_value=0.0,
+                                             value=float(st.session_state.get("corn_yield", 200.0)))
             with c2:
-                corn_price = st.number_input(
-                    "Corn $/bu", min_value=0.0,
-                    value=float(st.session_state.get("corn_price", 5.0))
-                )
+                corn_price = st.number_input("Corn $/bu", min_value=0.0,
+                                             value=float(st.session_state.get("corn_price", 5.0)))
             with c3:
-                bean_yield = st.number_input(
-                    "Soy Yield", min_value=0.0,
-                    value=float(st.session_state.get("bean_yield", 60.0))
-                )
+                bean_yield = st.number_input("Soy Yield", min_value=0.0,
+                                             value=float(st.session_state.get("bean_yield", 60.0)))
             with c4:
-                bean_price = st.number_input(
-                    "Soy $/bu", min_value=0.0,
-                    value=float(st.session_state.get("bean_price", 12.0))
-                )
+                bean_price = st.number_input("Soy $/bu", min_value=0.0,
+                                             value=float(st.session_state.get("bean_price", 12.0)))
 
             base_exp = float(st.session_state.get("base_expenses_per_acre", 0.0))
             df_cs = pd.DataFrame({
@@ -693,8 +663,9 @@ def render_input_sections():
                 }).applymap(_profit_color, subset=["Profit ($/ac)"]),
                 use_container_width=True,
                 hide_index=True,
-                height=editor_no_scroll_height(df_cs),
+                height=editor_no_scroll_height(df_cs)
             )
+
 
 # ===========================
 # Map helpers / overlays
