@@ -1105,7 +1105,7 @@ def render_profit_summary():
         )
 
         with st.expander("General Profit Comparison", expanded=True):
-    st.dataframe(
+        st.dataframe(
         comparison.style.applymap(
             _highlight_profit,
             subset=["Base (Target)", "Variable Rate", "Fixed Rate"]
