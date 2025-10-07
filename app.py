@@ -1000,7 +1000,7 @@ def render_profit_summary():
         return "font-weight:bold;"
 
     def _df_height(df, row_h=34, header_h=40, pad=8):
-    """Pixel-perfect height with tiny buffer to prevent scrollbars."""
+       """Pixel-perfect height with tiny buffer to prevent scrollbars."""
     try:
         n = len(df) if isinstance(df, pd.DataFrame) else 1
         return int(header_h + n * row_h + pad + 6)  # +6 buffer stops scrollbars on rerun
