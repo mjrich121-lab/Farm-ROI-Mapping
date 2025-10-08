@@ -830,13 +830,9 @@ apply_compact_theme()
 _bootstrap_defaults()
 render_uploaders()
 render_fixed_inputs_and_strip()
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>  INSERTED HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<<
 # Three collapsible input dropdowns ABOVE the map
 render_input_sections()
 st.markdown("---")
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>  END INSERT  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
 # ---------- build base map ----------
 m = make_base_map()
 
@@ -1089,19 +1085,31 @@ def render_profit_summary():
     # ---------- Layout (2 columns) ----------
     left, right = st.columns([2, 1], gap="large")
 
-    with left:
-        st.subheader("Profit Comparison")
-        styled_comp = (
-            comparison.style
-            .format(_money)
-            .applymap(_profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"])
-        )
-        st.dataframe(
-            styled_comp,
-            use_container_width=True,
-            hide_index=True,
-            height=_df_height(comparison, fudge=2),  # +2 to remove micro-scroll shadow
-        )
+    # --- tighten the left-column charts (profit + corn/soy) ---
+with left:
+    st.subheader("Profit Comparison")
+    styled_comp = (
+        comparison.style
+        .format(_money)
+        .applymap(_profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"])
+    )
+    # Reduced row height slightly and trimmed padding
+    st.dataframe(
+        styled_comp,
+        use_container_width=True,
+        hide_index=True,
+        height=_df_height(comparison, row_h=32, header_h=36, pad=-2, fudge=-6),
+    )
+
+    st.subheader("Corn vs Soybean Profitability")
+    styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
+    # Slightly smaller again to remove the visual “half row” buffer
+    st.dataframe(
+        styled_cs,
+        use_container_width=True,
+        hide_index=True,
+        height=_df_height(cornsoy, row_h=31, header_h=35, pad=-2, fudge=-8),
+    )
 
         # Compact horizontal formulas
         with st.expander("Show Calculation Formulas", expanded=False):
