@@ -1097,111 +1097,111 @@ def render_profit_summary():
 
     # ---------- Layout ----------
     left, right = st.columns([2, 1], gap="large")
-# ---------- LEFT COLUMN ----------
-with left:
-    st.subheader("Profit Comparison")
-    styled_comp = comparison.style.format(_money).applymap(
-        _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
-    )
-    st.dataframe(
-        styled_comp,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(comparison, fudge=-1),
-    )
 
-    # Compact horizontal formulas
-    with st.expander("Show Calculation Formulas", expanded=False):
-        st.markdown(
-            """
-            <div style="display:flex;flex-wrap:wrap;gap:6px;
-                        font-size:0.75rem;line-height:1.1rem;">
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Breakeven Budget</b><br>
-                (Target Yield × Sell Price) − Fixed Inputs
-              </div>
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Variable Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-              </div>
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Fixed Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # ---------- LEFT COLUMN ----------
+    with left:
+        st.subheader("Profit Comparison")
+        styled_comp = comparison.style.format(_money).applymap(
+            _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
         )
-
-    # ----- Corn vs Soybean Profitability -----
-    st.subheader("Corn vs Soybean Profitability")
-    cornsoy_id = "cornsoy_table"
-    st.markdown(f"<div id='{cornsoy_id}'>", unsafe_allow_html=True)
-
-    styled_cs = cornsoy.style.format(_money).applymap(
-        _profit_color, subset=["Profit ($/ac)"]
-    )
-    st.dataframe(
-        styled_cs,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(cornsoy, row_h=26, header_h=34, pad=-4, fudge=-10),
-    )
-
-    st.markdown(
-        f"""
-        <style>
-        /* Force Corn vs Soy table to fully expand with no scroll */
-        #{cornsoy_id} [data-testid="stDataFrameContainer"],
-        #{cornsoy_id} [data-testid="stVerticalBlock"] {{
-            overflow: visible !important;
-            height: auto !important;
-            max-height: none !important;
-            padding-bottom: 0 !important;
-            margin-bottom: -6px !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------- RIGHT COLUMN ----------
-with right:
-    st.subheader("Fixed Input Costs")
-    fixed_id = "fixed_inputs_table"
-    st.markdown(f"<div id='{fixed_id}'>", unsafe_allow_html=True)
-
-    if not fixed_df.empty:
         st.dataframe(
-            fixed_df.style.format(_money),
+            styled_comp,
             use_container_width=True,
             hide_index=True,
-            height=_df_height(fixed_df, row_h=27, header_h=34, pad=-2, fudge=-8),
+            height=_df_height(comparison, fudge=-1),
         )
+
+        # Compact horizontal formulas
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown(
+                """
+                <div style="display:flex;flex-wrap:wrap;gap:6px;
+                            font-size:0.75rem;line-height:1.1rem;">
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Breakeven Budget</b><br>
+                    (Target Yield × Sell Price) − Fixed Inputs
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Variable Rate</b><br>
+                    (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Fixed Rate</b><br>
+                    (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # ----- Corn vs Soybean Profitability -----
+        st.subheader("Corn vs Soybean Profitability")
+        cornsoy_id = "cornsoy_table"
+        st.markdown(f"<div id='{cornsoy_id}'>", unsafe_allow_html=True)
+
+        styled_cs = cornsoy.style.format(_money).applymap(
+            _profit_color, subset=["Profit ($/ac)"]
+        )
+        st.dataframe(
+            styled_cs,
+            use_container_width=True,
+            hide_index=True,
+            height=_df_height(cornsoy, row_h=26, header_h=34, pad=-4, fudge=-10),
+        )
+
         st.markdown(
             f"""
             <style>
-            /* Force Fixed Inputs table to render full height, no scroll */
-            #{fixed_id} [data-testid="stDataFrameContainer"],
-            #{fixed_id} [data-testid="stVerticalBlock"] {{
+            /* Force Corn vs Soy table to fully expand with no scroll */
+            #{cornsoy_id} [data-testid="stDataFrameContainer"],
+            #{cornsoy_id} [data-testid="stVerticalBlock"] {{
                 overflow: visible !important;
                 height: auto !important;
                 max-height: none !important;
                 padding-bottom: 0 !important;
-                margin-bottom: -4px !important;
+                margin-bottom: -6px !important;
             }}
             </style>
             """,
             unsafe_allow_html=True,
         )
-    else:
-        st.info("Enter your fixed inputs above to see totals here.")
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
+    # ---------- RIGHT COLUMN ----------
+    with right:
+        st.subheader("Fixed Input Costs")
+        fixed_id = "fixed_inputs_table"
+        st.markdown(f"<div id='{fixed_id}'>", unsafe_allow_html=True)
+
+        if not fixed_df.empty:
+            st.dataframe(
+                fixed_df.style.format(_money),
+                use_container_width=True,
+                hide_index=True,
+                height=_df_height(fixed_df, row_h=27, header_h=34, pad=-2, fudge=-8),
+            )
+            st.markdown(
+                f"""
+                <style>
+                /* Force Fixed Inputs table to render full height, no scroll */
+                #{fixed_id} [data-testid="stDataFrameContainer"],
+                #{fixed_id} [data-testid="stVerticalBlock"] {{
+                    overflow: visible !important;
+                    height: auto !important;
+                    max-height: none !important;
+                    padding-bottom: 0 !important;
+                    margin-bottom: -4px !important;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("Enter your fixed inputs above to see totals here.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------- render ----------
 render_profit_summary()
