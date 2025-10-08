@@ -793,26 +793,68 @@ def render_input_sections():
 # Map helpers / overlays
 # ===========================
 def make_base_map():
+    """Bullet-proof base map: OSM as default, Esri optional."""
     try:
         m = folium.Map(
-            location=[39.5, -98.35], zoom_start=5, min_zoom=2, tiles=None,
-            scrollWheelZoom=False, prefer_canvas=True
+            location=[39.5, -98.35],
+            zoom_start=5,
+            min_zoom=2,
+            tiles=None,                 # we add layers explicitly
+            control_scale=True,
+            prefer_canvas=True,
+            zoom_control=True,
         )
+
+        # --- Always add an OSM base that works everywhere ---
+        try:
+            folium.TileLayer(
+                tiles="OpenStreetMap",      # https://{s}.tile.openstreetmap.org
+                name="OpenStreetMap",
+                overlay=False,
+                control=True,
+                max_zoom=20,
+            ).add_to(m)
+        except Exception:
+            pass
+
+        # --- Optional basemaps (safe if they fail) ---
+        for tiles, name in [
+            ("CartoDB Positron", "CartoDB Positron"),
+            ("Stamen Terrain", "Stamen Terrain"),
+        ]:
+            try:
+                folium.TileLayer(
+                    tiles=tiles, name=name, overlay=False, control=True, max_zoom=20
+                ).add_to(m)
+            except Exception:
+                pass
+
+        # --- Esri imagery + labels (optional; may fail silently) ---
         try:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri", overlay=False, control=False
+                attr="Esri",
+                name="Esri World Imagery",
+                overlay=False,
+                control=True,
+                max_zoom=20,
             ).add_to(m)
         except Exception:
             pass
         try:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri", overlay=True, control=False
+                attr="Esri",
+                name="Esri Labels",
+                overlay=True,   # labels overlay on top of any base
+                control=True,
+                max_zoom=20,
+                opacity=0.9,
             ).add_to(m)
         except Exception:
             pass
 
+        # Keep your scroll-wheel behavior
         template = Template("""
             {% macro script(this, kwargs) %}
             var map = {{this._parent.get_name()}};
@@ -821,9 +863,9 @@ def make_base_map():
             map.on('mouseout', function(){ map.scrollWheelZoom.disable(); });
             {% endmacro %}
         """)
-        macro = MacroElement()
-        macro._template = template
+        macro = MacroElement(); macro._template = template
         m.get_root().add_child(macro)
+
         return m
     except Exception as e:
         st.error(f"Failed to build base map: {e}")
