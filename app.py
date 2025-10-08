@@ -1001,8 +1001,71 @@ def compute_bounds_for_heatmaps():
 
 def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
     try:
+        # Bail if nothing to draw
         if df is None or df.empty:
             return None, None
+
+        # Find coord columns
+        latc = find_col(df, ["latitude"]) or "Latitude"
+        lonc = find_col(df, ["longitude"]) or "Longitude"
+        if latc not in df.columns or lonc not in df.columns:
+            # No coordinates => skip overlay (do not synthesize)
+            return None, None
+
+        # Sanitize and keep only good rows
+        df = df.copy()
+        df[latc] = pd.to_numeric(df[latc], errors="coerce")
+        df[lonc] = pd.to_numeric(df[lonc], errors="coerce")
+        df[values.name] = pd.to_numeric(df[values.name], errors="coerce")
+        df.dropna(subset=[latc, lonc, values.name], inplace=True)
+        df = df[np.isfinite(df[latc]) & np.isfinite(df[lonc]) & np.isfinite(df[values.name])]
+
+        # Still nothing? skip
+        if df.empty:
+            return None, None
+
+        # If fewer than 3 real points, skip heatmap entirely (no markers)
+        if len(df) < 3:
+            return None, None
+
+        # Use provided bounds
+        south, west, north, east = bounds
+
+        vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
+        if vmin == vmax:
+            vmax = vmin + 1.0
+
+        pts_lon = df[lonc].astype(float).values
+        pts_lat = df[latc].astype(float).values
+        vals_ok = df[values.name].astype(float).values
+
+        n = 200
+        lon_lin = np.linspace(west, east, n)
+        lat_lin = np.linspace(south, north, n)
+        lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+
+        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
+        grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+
+        rgba = cmap((grid - vmin) / (vmax - vmin))
+        rgba = np.flipud(rgba)
+        rgba = (rgba * 255).astype(np.uint8)
+
+        folium.raster_layers.ImageOverlay(
+            image=rgba,
+            bounds=[[south, west], [north, east]],
+            opacity=0.5,
+            name=name,
+            overlay=True,
+            show=show_default
+        ).add_to(m)
+
+        return vmin, vmax
+
+    except Exception as e:
+        st.warning(f"Yield map overlay fallback triggered: {e}")
+        return None, None
 
         # --- coordinate detection or synthesize if missing ---
         latc = find_col(df, ["latitude"]) or "Latitude"
@@ -1215,20 +1278,28 @@ bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-if not (isinstance(ydf, pd.DataFrame) and not ydf.empty and
-        find_col(ydf, ["latitude"]) and find_col(ydf, ["longitude"])):
-    lat_center = (bounds[0] + bounds[2]) / 2.0
-    lon_center = (bounds[1] + bounds[3]) / 2.0
-    df_for_maps = pd.DataFrame({
-        "Yield": [float(st.session_state.get("target_yield", 200.0))],
-        "Latitude": [lat_center], "Longitude": [lon_center]
-    })
+# ✅ Only use real yield points; never create fake dots
+if isinstance(ydf, pd.DataFrame) and not ydf.empty:
+    latc = find_col(ydf, ["latitude"])
+    lonc = find_col(ydf, ["longitude"])
+    if latc and lonc:
+        df_for_maps = ydf.rename(columns={latc: "Latitude", lonc: "Longitude"}).copy()
+        df_for_maps = df_for_maps.dropna(subset=["Latitude", "Longitude"])
+    else:
+        df_for_maps = pd.DataFrame()
 else:
-    df_for_maps = ydf.copy()
-    latc = find_col(df_for_maps, ["latitude"])
-    lonc = find_col(df_for_maps, ["longitude"])
-    if latc and latc != "Latitude": df_for_maps.rename(columns={latc: "Latitude"}, inplace=True)
-    if lonc and lonc != "Longitude": df_for_maps.rename(columns={lonc: "Longitude"}, inplace=True)
+    df_for_maps = pd.DataFrame()
+
+# ✅ If there are valid coordinates, use them to zoom
+if not df_for_maps.empty:
+    south, west, north, east = (
+        df_for_maps["Latitude"].min(),
+        df_for_maps["Longitude"].min(),
+        df_for_maps["Latitude"].max(),
+        df_for_maps["Longitude"].max(),
+    )
+    bounds = (south, west, north, east)
+
 
 try:
     df_for_maps = df_for_maps.copy()
