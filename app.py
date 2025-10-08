@@ -235,15 +235,101 @@ def _bootstrap_defaults():
     st.session_state.setdefault("seed_gdf", None)
     st.session_state.setdefault("expenses_dict", {})
     st.session_state.setdefault("base_expenses_per_acre", 0.0)
-# ===========================
-# UI: Uploaders row + summaries (NUCLEAR HARDENED)
-# ===========================
+# =========================================================
+# UNIVERSAL NORMALIZER — ONE RING TO RULE THEM ALL
+# =========================================================
+def normalize_ag_data(df: pd.DataFrame, file_label: str = "unknown") -> pd.DataFrame:
+    """
+    Standardizes column names and fields across all ag data types
+    (yield, fertilizer, seed). Handles CRS quirks, yield vs rate,
+    cost and product normalization. Returns a clean DataFrame ready
+    for ROI, profit, and map overlay use.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # Normalize column names
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+
+    # Yield columns
+    yield_cols = ["yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+                  "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yield_dry", "yield_wet"]
+    ycol = find_col(df, yield_cols)
+    if ycol:
+        df.rename(columns={ycol: "Yield"}, inplace=True)
+    else:
+        if "yield" not in df.columns:
+            df["Yield"] = np.nan
+
+    # Rate columns
+    rate_cols = ["rate", "target_rate", "tgt_rate", "rx_rate", "application_rate", "tgt", "tgt_1"]
+    rcol = find_col(df, rate_cols)
+    if rcol:
+        df.rename(columns={rcol: "Rate"}, inplace=True)
+
+    # Product columns
+    prod_cols = ["product", "variety", "hybrid", "seed_type", "material", "name", "blend"]
+    pcol = find_col(df, prod_cols)
+    if pcol:
+        df.rename(columns={pcol: "Product"}, inplace=True)
+    else:
+        df["Product"] = f"Unknown_{file_label}"
+
+    # Unit columns
+    unit_cols = ["unit", "units", "rate_unit", "rate_uom", "uom"]
+    ucol = find_col(df, unit_cols)
+    if ucol:
+        df.rename(columns={ucol: "Unit"}, inplace=True)
+    else:
+        df["Unit"] = ""
+
+    # Cost fields
+    cost_cols = ["cost", "costtotal", "price", "price_per_unit", "total_cost"]
+    ccol = find_col(df, cost_cols)
+    if ccol:
+        df.rename(columns={ccol: "CostTotal"}, inplace=True)
+    else:
+        df["CostTotal"] = 0.0
+
+    # Acre fields
+    acre_cols = ["acres", "area_ac", "area", "calc_ac", "ac"]
+    acol = find_col(df, acre_cols)
+    if acol:
+        df.rename(columns={acol: "Acres"}, inplace=True)
+    else:
+        df["Acres"] = 0.0
+
+    # Lat / Lon fields
+    latc = find_col(df, ["latitude", "lat", "ycoord", "y_coord"]) or "latitude"
+    lonc = find_col(df, ["longitude", "lon", "xcoord", "x_coord"]) or "longitude"
+    if latc != "Latitude":
+        df.rename(columns={latc: "Latitude"}, inplace=True)
+    if lonc != "Longitude":
+        df.rename(columns={lonc: "Longitude"}, inplace=True)
+
+    # Clean numeric columns
+    for nf in ["Yield", "Rate", "Acres", "CostTotal", "Latitude", "Longitude"]:
+        if nf in df.columns:
+            df[nf] = pd.to_numeric(df[nf], errors="coerce")
+
+    # Drop missing rows
+    if "yield" in file_label.lower():
+        df = df.dropna(subset=["Latitude", "Longitude", "Yield"])
+    else:
+        df = df.dropna(subset=["Latitude", "Longitude"])
+
+    return df
+
+
+# =========================================================
+# UI: Uploaders row + summaries (FULLY NORMALIZED BUILD)
+# =========================================================
 def render_uploaders():
     st.subheader("Upload Maps")
 
     u1, u2, u3, u4 = st.columns(4)
 
-    # --- Zones (unchanged except for CRS safety) ---
+    # --- Zones ---
     with u1:
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
@@ -296,13 +382,12 @@ def render_uploaders():
         else:
             st.caption("No zone file uploaded.")
 
-    # --- Yield (Hardened) ---
+    # --- Yield ---
     with u2:
         st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
         yield_files = st.file_uploader("Yield", type=["csv", "geojson", "json", "zip"],
                                        key="up_yield", accept_multiple_files=True)
         st.session_state["yield_df"] = pd.DataFrame()
-
         if yield_files:
             frames, summary = [], []
             for yf in yield_files:
@@ -310,46 +395,29 @@ def render_uploaders():
                     name = yf.name.lower()
                     if name.endswith(".csv"):
                         df = pd.read_csv(yf)
-                        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
                     else:
-                        yg = load_vector_file(yf)
-                        if yg is None or yg.empty:
+                        gdf = load_vector_file(yf)
+                        if gdf is None or gdf.empty:
                             continue
-                        yg = yg.copy()
+                        if gdf.crs is None:
+                            gdf.set_crs(epsg=4326, inplace=True)
+                        elif gdf.crs.is_projected:
+                            gdf = gdf.to_crs(epsg=4326)
+                        gdf["geometry"] = gdf.geometry.buffer(0)
                         try:
-                            yg["geometry"] = yg.geometry.buffer(0)
-                        except Exception:
-                            pass
-                        try:
-                            yg = yg.explode(index_parts=False, ignore_index=True)
+                            gdf = gdf.explode(index_parts=False, ignore_index=True)
                         except TypeError:
-                            yg = yg.explode().reset_index(drop=True)
-                        yg["Longitude"] = yg.geometry.representative_point().x
-                        yg["Latitude"] = yg.geometry.representative_point().y
-                        df = pd.DataFrame(yg.drop(columns="geometry", errors="ignore"))
+                            gdf = gdf.explode().reset_index(drop=True)
+                        gdf["Longitude"] = gdf.geometry.representative_point().x
+                        gdf["Latitude"] = gdf.geometry.representative_point().y
+                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
 
-                    # Normalize columns
-                    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-                    ycol = find_col(df, ["yield", "yld_vol_dr", "yld_mass_dr",
-                                         "yield_dry", "dry_yield", "wet_yield"])
-                    if ycol and ycol != "Yield":
-                        df.rename(columns={ycol: "Yield"}, inplace=True)
-                    elif not ycol:
-                        df["Yield"] = 0.0
-                    latc = find_col(df, ["latitude"]) or "latitude"
-                    lonc = find_col(df, ["longitude"]) or "longitude"
-                    if latc != "Latitude":
-                        df.rename(columns={latc: "Latitude"}, inplace=True)
-                    if lonc != "Longitude":
-                        df.rename(columns={lonc: "Longitude"}, inplace=True)
-                    df = df.dropna(subset=["Latitude", "Longitude"])
-
+                    df = normalize_ag_data(df, "yield")
                     if not df.empty:
                         frames.append(df)
                         summary.append({"File": yf.name, "Rows": len(df)})
-
                 except Exception as e:
-                    st.warning(f"Yield file {yf.name}: {e}")
+                    st.warning(f"{yf.name}: {e}")
 
             if frames:
                 combined = pd.concat(frames, ignore_index=True)
@@ -357,41 +425,32 @@ def render_uploaders():
                 st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True,
                              height=df_px_height(len(summary)))
             else:
-                st.error("No valid yield data detected — check coordinate fields or geometry.")
+                st.error("No valid yield data detected — verify geometry or yield fields.")
         else:
             st.caption("No yield files uploaded.")
 
-    # --- Fertilizer (Hardened) ---
+    # --- Fertilizer ---
     with u3:
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         fert_files = st.file_uploader("Fert", type=["csv", "geojson", "json", "zip"],
                                       key="up_fert", accept_multiple_files=True)
         st.session_state["fert_layers_store"] = {}
         st.session_state["fert_gdfs"] = {}
-
         if fert_files:
             summ = []
             for f in fert_files:
                 try:
                     grouped, gdf_orig = process_prescription(f, "fertilizer")
                     if gdf_orig is not None and not gdf_orig.empty:
+                        df = pd.DataFrame(gdf_orig.drop(columns="geometry", errors="ignore"))
+                        df = normalize_ag_data(df, "fertilizer")
                         gdf_orig = gdf_orig.copy()
-                        try:
-                            gdf_orig["geometry"] = gdf_orig.geometry.buffer(0)
-                        except Exception:
-                            pass
-                        try:
-                            gdf_orig = gdf_orig.explode(index_parts=False, ignore_index=True)
-                        except TypeError:
-                            gdf_orig = gdf_orig.explode().reset_index(drop=True)
                         gdf_orig["Longitude"] = gdf_orig.geometry.representative_point().x
                         gdf_orig["Latitude"] = gdf_orig.geometry.representative_point().y
-
-                    if not grouped.empty:
                         key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                        st.session_state["fert_gdfs"][key] = gdf_orig
+                    if not grouped.empty:
                         st.session_state["fert_layers_store"][key] = grouped
-                        if gdf_orig is not None and not gdf_orig.empty:
-                            st.session_state["fert_gdfs"][key] = gdf_orig
                         summ.append({"File": f.name, "Products": len(grouped)})
                 except Exception as e:
                     st.warning(f"Fertilizer file {f.name}: {e}")
@@ -400,18 +459,17 @@ def render_uploaders():
                 st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
                              height=df_px_height(len(summ)))
             else:
-                st.error("No valid fertilizer RX maps detected — check geometry or attributes.")
+                st.error("No valid fertilizer RX maps detected.")
         else:
             st.caption("No fertilizer files uploaded.")
 
-    # --- Seed (Hardened) ---
+    # --- Seed ---
     with u4:
         st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         seed_files = st.file_uploader("Seed", type=["csv", "geojson", "json", "zip"],
                                       key="up_seed", accept_multiple_files=True)
         st.session_state["seed_layers_store"] = {}
         st.session_state["seed_gdf"] = None
-
         if seed_files:
             summ = []
             last_seed_gdf = None
@@ -419,38 +477,28 @@ def render_uploaders():
                 try:
                     grouped, gdf_orig = process_prescription(f, "seed")
                     if gdf_orig is not None and not gdf_orig.empty:
+                        df = pd.DataFrame(gdf_orig.drop(columns="geometry", errors="ignore"))
+                        df = normalize_ag_data(df, "seed")
                         gdf_orig = gdf_orig.copy()
-                        try:
-                            gdf_orig["geometry"] = gdf_orig.geometry.buffer(0)
-                        except Exception:
-                            pass
-                        try:
-                            gdf_orig = gdf_orig.explode(index_parts=False, ignore_index=True)
-                        except TypeError:
-                            gdf_orig = gdf_orig.explode().reset_index(drop=True)
                         gdf_orig["Longitude"] = gdf_orig.geometry.representative_point().x
                         gdf_orig["Latitude"] = gdf_orig.geometry.representative_point().y
-
+                        last_seed_gdf = gdf_orig
                     if not grouped.empty:
                         key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
                         st.session_state["seed_layers_store"][key] = grouped
-                        if gdf_orig is not None and not gdf_orig.empty:
-                            last_seed_gdf = gdf_orig
                         summ.append({"File": f.name, "Products": len(grouped)})
                 except Exception as e:
                     st.warning(f"Seed file {f.name}: {e}")
 
             if last_seed_gdf is not None and not last_seed_gdf.empty:
                 st.session_state["seed_gdf"] = last_seed_gdf
-
             if summ:
                 st.dataframe(pd.DataFrame(summ), use_container_width=True, hide_index=True,
                              height=df_px_height(len(summ)))
             else:
-                st.error("No valid seed RX maps detected — check geometry or attributes.")
+                st.error("No valid seed RX maps detected.")
         else:
             st.caption("No seed files uploaded.")
-
 
 # ===========================
 # UI: Fixed inputs + Variable/Flat/CornSoy strip
