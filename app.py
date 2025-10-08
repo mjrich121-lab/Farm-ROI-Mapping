@@ -990,22 +990,38 @@ def render_profit_summary():
     st.header("Profit Summary")
 
     # ---------- Helpers ----------
-    def _df_height(df, row_h=32, header_h=36, pad=0):
-        """Pixel-perfect table height; removes single-line scroll issues."""
+        # ---------- Helpers ----------
+    def _df_height(df, row_h: int = 28, header_h: int = 38, pad: int = 12) -> int:
+        """Return precise pixel height so tables never scroll but stay tight."""
         try:
             n = len(df) if isinstance(df, pd.DataFrame) else 1
-            # Base height formula
-            base = int(header_h + n * row_h + pad)
-            # Small tables (<20 rows) need a touch more height to avoid scrollbar hint
-            if n <= 20:
-                base += 6
-            # Extra safeguard for 1-row or 2-row tables
+            # Base height: header + n*row_h + small pad
+            base = header_h + (n * row_h) + pad
+            # Anti-scroll calibration: add small offsets by size tier
             if n <= 2:
+                base += 14     # tiny table safeguard
+            elif n <= 10:
                 base += 10
-            return base
+            elif n <= 20:
+                base += 6
+            return int(base)
         except Exception:
             return 180
 
+    def _money(x):
+        try:
+            return f"${x:,.2f}"
+        except Exception:
+            return x
+
+    def _profit_color(v):
+        if not isinstance(v, (int, float)):
+            return ""
+        if v > 0:
+            return "color:limegreen;font-weight:bold;"
+        if v < 0:
+            return "color:#ff4d4d;font-weight:bold;"
+        return "font-weight:bold;"
 
     def _money(x):
         try:
