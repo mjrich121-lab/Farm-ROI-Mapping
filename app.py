@@ -358,27 +358,77 @@ def render_uploaders():
         else:
             st.caption("No zone file uploaded.")
 
-    # --- Yield (Bulletproof, No Dummy Points) ---
+        # --- Yield (Shape-first robust loader) ---
     with u2:
-        st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
-        yield_files = st.file_uploader("Yield", type=["csv", "geojson", "json", "zip"],
+        st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
+        yield_files = st.file_uploader("Yield", type=["zip", "geojson", "json", "shp", "csv"],
                                        key="up_yield", accept_multiple_files=True)
         st.session_state["yield_df"] = pd.DataFrame()
 
         if yield_files:
             frames = []
             yield_source_info = []
+
             for yf in yield_files:
                 try:
                     name = yf.name.lower()
 
-                    # === CSV path ===
-                    if name.endswith(".csv"):
+                    # ==========================
+                    # --- SHAPE / GEOJSON PATH ---
+                    # ==========================
+                    if any(name.endswith(ext) for ext in [".zip", ".geojson", ".json", ".shp"]):
+                        gdf = load_vector_file(yf)
+                        if gdf is None or gdf.empty:
+                            st.warning(f"{yf.name}: empty or unreadable geometry.")
+                            continue
+
+                        # Extract coordinates from geometry (points or polygons)
+                        try:
+                            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
+                                gdf["Longitude"] = gdf.geometry.x
+                                gdf["Latitude"]  = gdf.geometry.y
+                            else:
+                                reps = gdf.geometry.representative_point()
+                                gdf["Longitude"] = reps.x
+                                gdf["Latitude"]  = reps.y
+                        except Exception as e:
+                            st.warning(f"{yf.name}: geometry extraction failed ({e})")
+                            continue
+
+                        # Normalize column names
+                        gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
+                        ycol = find_col(gdf, [
+                            "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield",
+                            "yld_vol_wt", "yld_mass_wt", "crop_flw_m"
+                        ])
+
+                        if ycol:
+                            if ycol != "yield":
+                                gdf.rename(columns={ycol: "Yield"}, inplace=True)
+                        else:
+                            st.warning(f"{yf.name}: no yield field detected — skipped.")
+                            continue
+
+                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                        df.rename(columns={"latitude": "Latitude", "longitude": "Longitude"}, inplace=True)
+                        df = df.dropna(subset=["Latitude", "Longitude", "Yield"])
+
+                        if df.empty:
+                            st.warning(f"{yf.name}: geometry extracted but no valid yield points.")
+                            continue
+
+                        frames.append(df[["Latitude", "Longitude", "Yield"]])
+                        yield_source_info.append(f"{yf.name} — using '{ycol}' field")
+
+                    # ==========================
+                    # --- CSV PATH (secondary) ---
+                    # ==========================
+                    else:
                         df = pd.read_csv(yf)
                         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-                        lat_col = find_col(df, ["latitude", "lat", "y", "point_y", "northing"])
-                        lon_col = find_col(df, ["longitude", "lon", "x", "point_x", "easting"])
+                        lat_col = find_col(df, ["latitude", "lat", "y", "point_y", "northing", "ycoord"])
+                        lon_col = find_col(df, ["longitude", "lon", "x", "point_x", "easting", "xcoord"])
                         ycol = find_col(df, [
                             "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield",
                             "yld_vol_wt", "yld_mass_wt", "crop_flw_m"
@@ -390,75 +440,33 @@ def render_uploaders():
                             st.warning(f"{yf.name}: no coordinate columns detected — skipped.")
                             continue
 
-                        if not ycol:
-                            st.warning(f"{yf.name}: no yield column found — skipped.")
-                            continue
-                        if ycol != "yield":
+                        if ycol and ycol != "yield":
                             df.rename(columns={ycol: "Yield"}, inplace=True)
+                        elif "yield" not in df.columns:
+                            st.warning(f"{yf.name}: no yield field found — skipped.")
+                            continue
 
-                        df = df[["Latitude", "Longitude", "Yield"]].dropna(subset=["Latitude", "Longitude", "Yield"])
+                        df = df.dropna(subset=["Latitude", "Longitude", "Yield"])
                         if df.empty:
                             st.warning(f"{yf.name}: all rows invalid — skipped.")
                             continue
 
-                        frames.append(df)
-                        yield_source_info.append(f"{yf.name} — using field '{ycol}'")
-
-                    # === GeoJSON / SHP / ZIP ===
-                    else:
-                        gdf = load_vector_file(yf)
-                        if gdf is None or gdf.empty:
-                            st.warning(f"{yf.name}: empty or unreadable geometry.")
-                            continue
-
-                        if "geometry" in gdf.columns or hasattr(gdf, "geometry"):
-                            try:
-                                if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
-                                    gdf["Longitude"] = gdf.geometry.x
-                                    gdf["Latitude"] = gdf.geometry.y
-                                else:
-                                    reps = gdf.geometry.representative_point()
-                                    gdf["Longitude"] = reps.x
-                                    gdf["Latitude"] = reps.y
-                            except Exception as e:
-                                st.warning(f"{yf.name}: geometry coord extraction failed ({e})")
-                                continue
-
-                        ycol = find_col(gdf, [
-                            "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield",
-                            "yld_vol_wt", "yld_mass_wt", "crop_flw_m"
-                        ])
-                        if not ycol:
-                            st.warning(f"{yf.name}: no yield column found — skipped.")
-                            continue
-                        if ycol != "yield":
-                            gdf.rename(columns={ycol: "Yield"}, inplace=True)
-
-                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        if "Latitude" not in df.columns or "Longitude" not in df.columns:
-                            st.warning(f"{yf.name}: no coordinates after extraction — skipped.")
-                            continue
-
-                        df = df[["Latitude", "Longitude", "Yield"]].dropna(subset=["Latitude", "Longitude", "Yield"])
-                        if df.empty:
-                            st.warning(f"{yf.name}: all rows invalid — skipped.")
-                            continue
-
-                        frames.append(df)
-                        yield_source_info.append(f"{yf.name} — using field '{ycol}'")
+                        frames.append(df[["Latitude", "Longitude", "Yield"]])
+                        yield_source_info.append(f"{yf.name} — using '{ycol}' field")
 
                 except Exception as e:
                     st.warning(f"Yield file {yf.name}: {e}")
 
+            # Merge all loaded yield dataframes
             if frames:
                 combined = pd.concat(frames, ignore_index=True)
                 st.session_state["yield_df"] = combined
-                st.success(f"✅ Yield data loaded successfully.\n" + "\n".join(yield_source_info))
+                used_sources = "\n".join(yield_source_info)
+                st.success(f"✅ Yield data loaded successfully.\n\n{used_sources}")
             else:
                 st.error("❌ No valid yield data found — nothing to map.")
         else:
             st.caption("No yield files uploaded.")
-
 
     # --- Fertilizer (Hardened) ---
     with u3:
