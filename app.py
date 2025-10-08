@@ -793,50 +793,48 @@ def render_input_sections():
 # Map helpers / overlays
 # ===========================
 def make_base_map():
-    """Final hardened base map — minimal, compact, always renders."""
+    """Scorched-earth fallback map — no attribution errors, no blank tiles."""
     try:
+        # Start with a normal Map using OpenStreetMap (always works)
         m = folium.Map(
             location=[39.5, -98.35],
             zoom_start=5,
             min_zoom=2,
-            tiles=None,
+            tiles="OpenStreetMap",
+            attr="© OpenStreetMap contributors",
             control_scale=False,
             prefer_canvas=True,
             zoom_control=True,
         )
 
-        # --- Primary satellite layer (Esri) ---
-        folium.TileLayer(
-            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            attr="",  # remove corner attribution
-            overlay=False,
-            control=False,
-            max_zoom=19,
-            no_wrap=True
-        ).add_to(m)
+        # Try to overlay Esri World Imagery (if reachable)
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Tiles © Esri — fallback © OpenStreetMap",
+                overlay=False,
+                control=False,
+                max_zoom=19,
+                no_wrap=True
+            ).add_to(m)
+        except Exception:
+            pass  # even if Esri fails, OSM remains visible
 
-        # --- Fallback layer (OSM) ---
-        folium.TileLayer(
-            tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            attr="",  # hide attribution
-            overlay=False,
-            control=False,
-            max_zoom=19,
-            no_wrap=True
-        ).add_to(m)
+        # Labels overlay (optional)
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                attr="© Esri",
+                overlay=True,
+                control=False,
+                opacity=0.9,
+                max_zoom=19,
+                no_wrap=True
+            ).add_to(m)
+        except Exception:
+            pass
 
-        # --- Overlay labels (only once) ---
-        folium.TileLayer(
-            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-            attr="",
-            overlay=True,
-            control=False,
-            opacity=0.9,
-            max_zoom=19,
-            no_wrap=True
-        ).add_to(m)
-
-        # --- JS behavior: scroll handling & graceful fallback ---
+        # Hide bottom-corner clutter
         template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
@@ -844,18 +842,6 @@ def make_base_map():
         map.on('click', () => map.scrollWheelZoom.enable());
         map.on('mouseout', () => map.scrollWheelZoom.disable());
 
-        // Detect Esri tile errors and fade them out so OSM shows
-        map.eachLayer(function(l){
-          if (l instanceof L.TileLayer && l._url && l._url.includes("World_Imagery")) {
-            let err = 0;
-            l.on('tileerror', function(){
-              err += 1;
-              if (err > 4) { l.setOpacity(0); }  // hide Esri so OSM is visible
-            });
-          }
-        });
-
-        // Remove all bottom-left text and logos (compact)
         const cleanup = () => {
           document.querySelectorAll('.leaflet-control-attribution, .leaflet-control-scale')
             .forEach(el => el.style.display='none');
@@ -870,7 +856,8 @@ def make_base_map():
         return m
 
     except Exception as e:
-        st.error(f"Base map init failed: {e}")
+        # Absolute fallback: bare map so app never crashes
+        st.error(f"Map fallback triggered: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=4)
 
 def add_gradient_legend(m, name, vmin, vmax, cmap, index):
