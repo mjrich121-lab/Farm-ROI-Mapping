@@ -981,12 +981,27 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — Profit Comparison + Corn/Soy + Fixed Inputs
+# 9. PROFIT SUMMARY — Breakeven + Corn/Soy + Fixed Inputs
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
-    # ---------- Local helpers (unique; no duplicates) ----------
+    # ---------- Helpers ----------
+    def _df_height(df, row_h: int = 28, header_h: int = 38, pad: int = 12, fudge: int = 0) -> int:
+        """Return precise pixel height so tables never scroll but stay tight."""
+        try:
+            n = len(df) if isinstance(df, pd.DataFrame) else 1
+            base = header_h + (n * row_h) + pad + fudge
+            if n <= 2:
+                base += 14
+            elif n <= 10:
+                base += 10
+            elif n <= 20:
+                base += 6
+            return int(base)
+        except Exception:
+            return 180
+
     def _money(x):
         try:
             return f"${x:,.2f}"
@@ -1002,166 +1017,152 @@ def render_profit_summary():
             return "color:#ff4d4d;font-weight:bold;"
         return "font-weight:bold;"
 
-    def _df_height(df: pd.DataFrame, row_h: int = 34, header_h: int = 40, pad: int = 6, fudge: int = 0) -> int:
-        """
-        Pixel-exact height so st.dataframe never scrolls and never shows a partial blank row.
-        Calibrated for Streamlit's dataframe row metrics (row ~34px, header ~40px).
-        'fudge' lets us nudge individual tables (e.g., add 2–6px if needed).
-        """
-        try:
-            n = len(df) if isinstance(df, pd.DataFrame) else 1
-            # base linear height
-            h = header_h + (max(1, n) * row_h) + pad
-            # tiny tables need a touch more to avoid the "half line" artifact
-            if n <= 2:
-                h += 8
-            # one more safety pixel
-            return int(h + fudge)
-        except Exception:
-            return 200
-
-    # ---------- Safe state pulls ----------
-    expenses = st.session_state.get("expenses_dict", {}) or {}
-    base_exp = float(st.session_state.get("base_expenses_per_acre", sum(expenses.values()) if expenses else 0.0))
-
+    # ---------- Safe defaults ----------
+    expenses = st.session_state.get("expenses_dict", {})
+    base_exp = float(
+        st.session_state.get(
+            "base_expenses_per_acre",
+            sum(expenses.values()) if expenses else 0.0,
+        )
+    )
     corn_yield = float(st.session_state.get("corn_yield", 200))
     corn_price = float(st.session_state.get("corn_price", 5))
     bean_yield = float(st.session_state.get("bean_yield", 60))
     bean_price = float(st.session_state.get("bean_price", 12))
-
     target_yield = float(st.session_state.get("target_yield", 200))
     sell_price = float(st.session_state.get("sell_price", corn_price))
 
-    # ---------- Profit math (base / variable / fixed) ----------
+    # ---------- Profit math ----------
     revenue_per_acre = target_yield * sell_price
     fixed_inputs = base_exp
 
     fert_costs_var = seed_costs_var = 0.0
     df_fert = st.session_state.get("fert_products")
     if isinstance(df_fert, pd.DataFrame) and "CostPerAcre" in df_fert.columns:
-        fert_costs_var = pd.to_numeric(df_fert["CostPerAcre"], errors="coerce").fillna(0.0).sum()
+        fert_costs_var = pd.to_numeric(df_fert["CostPerAcre"], errors="coerce").sum()
     df_seed = st.session_state.get("seed_products")
     if isinstance(df_seed, pd.DataFrame) and "CostPerAcre" in df_seed.columns:
-        seed_costs_var = pd.to_numeric(df_seed["CostPerAcre"], errors="coerce").fillna(0.0).sum()
+        seed_costs_var = pd.to_numeric(df_seed["CostPerAcre"], errors="coerce").sum()
     expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
     profit_var = revenue_per_acre - expenses_var
 
     fert_costs_fix = seed_costs_fix = 0.0
     df_fix = st.session_state.get("fixed_products")
-    if isinstance(df_fix, pd.DataFrame) and not df_fix.empty:
+    if isinstance(df_fix, pd.DataFrame):
         if "Type" in df_fix.columns and "$/ac" in df_fix.columns:
-            fert_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"], errors="coerce").fillna(0.0).sum()
-            seed_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Seed", "$/ac"], errors="coerce").fillna(0.0).sum()
+            fert_costs_fix = pd.to_numeric(
+                df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"], errors="coerce"
+            ).sum()
+            seed_costs_fix = pd.to_numeric(
+                df_fix.loc[df_fix["Type"] == "Seed", "$/ac"], errors="coerce"
+            ).sum()
         elif "$/ac" in df_fix.columns:
-            fert_costs_fix = seed_costs_fix = pd.to_numeric(df_fix["$/ac"], errors="coerce").fillna(0.0).sum()
+            fert_costs_fix = seed_costs_fix = pd.to_numeric(
+                df_fix["$/ac"], errors="coerce"
+            ).sum()
     expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
     profit_fix = revenue_per_acre - expenses_fix
 
     # ---------- Tables ----------
-    # 1) Profit comparison
-    comparison = pd.DataFrame({
-        "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
-        "Breakeven Budget": [revenue_per_acre, fixed_inputs, revenue_per_acre - fixed_inputs],
-        "Variable Rate":    [revenue_per_acre, expenses_var, profit_var],
-        "Fixed Rate":       [revenue_per_acre, expenses_fix, profit_fix],
-    })
+    comparison = pd.DataFrame(
+        {
+            "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+            "Breakeven Budget": [
+                revenue_per_acre,
+                fixed_inputs,
+                revenue_per_acre - fixed_inputs,
+            ],
+            "Variable Rate": [revenue_per_acre, expenses_var, profit_var],
+            "Fixed Rate": [revenue_per_acre, expenses_fix, profit_fix],
+        }
+    )
 
-    # 2) Corn vs Soy
-    cornsoy = pd.DataFrame({
-        "Crop": ["Corn", "Soybeans"],
-        "Yield (bu/ac)": [corn_yield, bean_yield],
-        "Sell Price ($/bu)": [corn_price, bean_price],
-    })
+    cornsoy = pd.DataFrame(
+        {
+            "Crop": ["Corn", "Soybeans"],
+            "Yield (bu/ac)": [corn_yield, bean_yield],
+            "Sell Price ($/bu)": [corn_price, bean_price],
+        }
+    )
     cornsoy["Revenue ($/ac)"] = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
     cornsoy["Fixed Inputs ($/ac)"] = base_exp
     cornsoy["Profit ($/ac)"] = cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
 
-    # 3) Fixed inputs breakdown (right column)
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
     if not fixed_df.empty:
-        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
+        total_row = pd.DataFrame(
+            [{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}]
+        )
         fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
 
-    # ---------- Layout (2 columns) ----------
+    # ---------- Layout ----------
     left, right = st.columns([2, 1], gap="large")
 
-    # --- tighten the left-column charts (profit + corn/soy) ---
-with left:
-    st.subheader("Profit Comparison")
-    styled_comp = (
-        comparison.style
-        .format(_money)
-        .applymap(_profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"])
-    )
-    # Reduced row height slightly and trimmed padding
-    st.dataframe(
-        styled_comp,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(comparison, row_h=32, header_h=36, pad=-2, fudge=-6),
-    )
-
-    st.subheader("Corn vs Soybean Profitability")
-    styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
-     # Slightly smaller again to remove the visual “half row” buffer
-    st.dataframe(
-        styled_cs,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(cornsoy, row_h=31, header_h=35, pad=-2, fudge=-8),
-    )
-
-    # Compact horizontal formulas
-    with st.expander("Show Calculation Formulas", expanded=False):
-        st.markdown(
-            """
-            <div style="display:flex;flex-wrap:wrap;gap:6px;
-                        font-size:0.75rem;line-height:1.1rem;">
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Breakeven Budget</b><br>
-                (Target Yield × Sell Price) − Fixed Inputs
-              </div>
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Variable Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-              </div>
-              <div style="flex:1;min-width:180px;border:1px solid #444;
-                          border-radius:6px;padding:5px;background-color:#111;">
-                <b>Fixed Rate</b><br>
-                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # ---------- LEFT COLUMN ----------
+    with left:
+        st.subheader("Profit Comparison")
+        styled_comp = comparison.style.format(_money).applymap(
+            _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
         )
-
-    # Corn vs Soybean Profitability
-    st.subheader("Corn vs Soybean Profitability")
-    styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
-    st.dataframe(
-        styled_cs,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(cornsoy, fudge=1),  # tiny nudge to eliminate the partial-row hint
-    )
-
-with right:
-    st.subheader("Fixed Input Costs")
-    if not fixed_df.empty:
         st.dataframe(
-            fixed_df.style.format(_money),
+            styled_comp,
             use_container_width=True,
             hide_index=True,
-            height=_df_height(fixed_df, fudge=4),  # right table historically needed +4px
+            height=_df_height(comparison, fudge=-2),
         )
-    else:
-        st.info("Enter your fixed inputs above to see totals here.")
+
+        # Compact horizontal formulas
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown(
+                """
+                <div style="display:flex;flex-wrap:wrap;gap:6px;
+                            font-size:0.75rem;line-height:1.1rem;">
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Breakeven Budget</b><br>
+                    (Target Yield × Sell Price) − Fixed Inputs
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Variable Rate</b><br>
+                    (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+                  </div>
+                  <div style="flex:1;min-width:180px;border:1px solid #444;
+                              border-radius:6px;padding:5px;background-color:#111;">
+                    <b>Fixed Rate</b><br>
+                    (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # Corn vs Soybean table
+        st.subheader("Corn vs Soybean Profitability")
+        styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
+        st.dataframe(
+            styled_cs,
+            use_container_width=True,
+            hide_index=True,
+            height=_df_height(cornsoy, fudge=0),
+        )
+
+    # ---------- RIGHT COLUMN ----------
+    with right:
+        st.subheader("Fixed Input Costs")
+        if not fixed_df.empty:
+            st.dataframe(
+                fixed_df.style.format(_money),
+                use_container_width=True,
+                hide_index=True,
+                height=_df_height(fixed_df, fudge=4),
+            )
+        else:
+            st.info("Enter your fixed inputs above to see totals here.")
+
 
 # ---------- render ----------
 render_profit_summary()
- 
 
 # --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
 st.markdown("""
