@@ -793,76 +793,75 @@ def render_input_sections():
 # Map helpers / overlays
 # ===========================
 def make_base_map():
-    """Robust basemap: Esri imagery with auto-fallback to OSM and persistent labels."""
+    """Final hardened base map — minimal, compact, always renders."""
     try:
         m = folium.Map(
             location=[39.5, -98.35],
             zoom_start=5,
             min_zoom=2,
             tiles=None,
-            control_scale=True,
+            control_scale=False,
             prefer_canvas=True,
             zoom_control=True,
         )
 
-        # 0) OSM fallback (always present under everything)
+        # --- Primary satellite layer (Esri) ---
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="",  # remove corner attribution
+            overlay=False,
+            control=False,
+            max_zoom=19,
+            no_wrap=True
+        ).add_to(m)
+
+        # --- Fallback layer (OSM) ---
         folium.TileLayer(
             tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            attr="© OpenStreetMap contributors",
+            attr="",  # hide attribution
             overlay=False,
             control=False,
-            max_zoom=20,
-            no_wrap=True,
+            max_zoom=19,
+            no_wrap=True
         ).add_to(m)
 
-        # 1) Esri World Imagery (primary)
-        esri_img = folium.TileLayer(
-            tiles="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            attr="Tiles © Esri — World Imagery",
-            overlay=False,
-            control=False,
-            max_zoom=20,
-            no_wrap=True,
-            cross_origin=True,
-        ).add_to(m)
-
-        # 2) Esri labels overlay (only makes sense if imagery loads)
+        # --- Overlay labels (only once) ---
         folium.TileLayer(
-            tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-            attr="Labels © Esri",
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            attr="",
             overlay=True,
             control=False,
             opacity=0.9,
-            max_zoom=20,
-            no_wrap=True,
-            cross_origin=True,
+            max_zoom=19,
+            no_wrap=True
         ).add_to(m)
 
-        # 3) Light JS to manage zoom and Esri tile error fallback (no Python-side layer removal)
+        # --- JS behavior: scroll handling & graceful fallback ---
         template = Template("""
-            {% macro script(this, kwargs) %}
-            var map = {{this._parent.get_name()}};
+        {% macro script(this, kwargs) %}
+        var map = {{this._parent.get_name()}};
+        map.scrollWheelZoom.disable();
+        map.on('click', () => map.scrollWheelZoom.enable());
+        map.on('mouseout', () => map.scrollWheelZoom.disable());
 
-            // Enable scroll only on click
-            map.scrollWheelZoom.disable();
-            map.on('click', function(){ map.scrollWheelZoom.enable(); });
-            map.on('mouseout', function(){ map.scrollWheelZoom.disable(); });
-
-            // Detect tile failures and gracefully fallback to OSM
-            map.eachLayer(function(l){
-              if (l instanceof L.TileLayer && l._url &&
-                  l._url.indexOf('arcgisonline.com/ArcGIS') !== -1) {
-                var err = 0;
-                l.on('tileerror', function(){
-                  err += 1;
-                  if (err > 4) {
-                    console.warn('Esri imagery failing, letting OSM show through');
-                    l.setOpacity(0);   // effectively hides Esri tiles instead of remove_layer()
-                  }
-                });
-              }
+        // Detect Esri tile errors and fade them out so OSM shows
+        map.eachLayer(function(l){
+          if (l instanceof L.TileLayer && l._url && l._url.includes("World_Imagery")) {
+            let err = 0;
+            l.on('tileerror', function(){
+              err += 1;
+              if (err > 4) { l.setOpacity(0); }  // hide Esri so OSM is visible
             });
-            {% endmacro %}
+          }
+        });
+
+        // Remove all bottom-left text and logos (compact)
+        const cleanup = () => {
+          document.querySelectorAll('.leaflet-control-attribution, .leaflet-control-scale')
+            .forEach(el => el.style.display='none');
+        };
+        setTimeout(cleanup, 500);
+        {% endmacro %}
         """)
         macro = MacroElement()
         macro._template = template
@@ -871,9 +870,8 @@ def make_base_map():
         return m
 
     except Exception as e:
-        st.error(f"Failed to build base map: {e}")
+        st.error(f"Base map init failed: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=4)
-
 
 def add_gradient_legend(m, name, vmin, vmax, cmap, index):
     top_offset = 20 + (index * 80)
