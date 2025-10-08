@@ -1279,19 +1279,40 @@ bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-# ✅ Only use real yield points; never create fake dots
+# ✅ Only use real yield points; no synthetic dots
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     latc = find_col(ydf, ["latitude"])
     lonc = find_col(ydf, ["longitude"])
     if latc and lonc:
         df_for_maps = ydf.rename(columns={latc: "Latitude", lonc: "Longitude"}).copy()
         df_for_maps = df_for_maps.dropna(subset=["Latitude", "Longitude"])
+
+        # --- Detect and select dry yield ---
+        dry_candidates = ["yld_vol_dr", "yld_mass_d", "yld_vol_we", "yld_vol_dr_", "yld_mass_d_"]
+        ycol = find_col(df_for_maps, dry_candidates)
+        if ycol and ycol in df_for_maps.columns:
+            df_for_maps["Yield"] = pd.to_numeric(df_for_maps[ycol], errors="coerce")
+        else:
+            st.warning("No dry yield column found — using zeros.")
+            df_for_maps["Yield"] = 0.0
+
+        # --- Normalize yield (clip 5th–95th percentile) ---
+        if not df_for_maps["Yield"].dropna().empty:
+            low, high = np.nanpercentile(df_for_maps["Yield"], [5, 95])
+            df_for_maps = df_for_maps[(df_for_maps["Yield"] >= low) & (df_for_maps["Yield"] <= high)]
+
+        # --- Convert to bushels/acre if not already ---
+        # Many AgLeader / Deere shapefiles are already bu/ac, but we normalize scale
+        if df_for_maps["Yield"].max() > 400:
+            # assume it's kg/ha or lb/ac, apply generic scale-down
+            df_for_maps["Yield"] = df_for_maps["Yield"] / 15.93  # rough kg/ha -> bu/ac corn conversion
+
     else:
         df_for_maps = pd.DataFrame()
 else:
     df_for_maps = pd.DataFrame()
 
-# ✅ If there are valid coordinates, use them to zoom
+# ✅ Zoom bounds based on valid yield data
 if not df_for_maps.empty:
     south, west, north, east = (
         df_for_maps["Latitude"].min(),
@@ -1301,11 +1322,8 @@ if not df_for_maps.empty:
     )
     bounds = (south, west, north, east)
 
-
 try:
     df_for_maps = df_for_maps.copy()
-    if "Yield" not in df_for_maps.columns:
-        df_for_maps["Yield"] = 0.0
     df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0.0)
     df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
 
@@ -1340,19 +1358,19 @@ try:
                 )
     df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
 
-except Exception:
-    st.warning("Could not compute profit metrics for heatmaps; using zeros.")
+except Exception as e:
+    st.warning(f"Profit metric computation failed: {e}")
     df_for_maps["Revenue_per_acre"] = 0.0
     df_for_maps["NetProfit_Variable"] = 0.0
     df_for_maps["NetProfit_Fixed"] = 0.0
 
 # ---------- Heatmap overlays + stacked legends ----------
-ymin, ymax = add_heatmap_overlay(m, df_for_maps, df_for_maps["Yield"], "Yield (bu/ac)", plt.cm.RdYlGn, False, bounds)
+ymin, ymax = add_heatmap_overlay(m, df_for_maps, df_for_maps["Yield"], "Yield (bu/ac)", plt.cm.RdYlGn, True, bounds)
 if ymin is not None:
     add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
 
 vmin, vmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Variable"],
-                                 "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, True, bounds)
+                                 "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False, bounds)
 if vmin is not None:
     add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
 
@@ -1361,7 +1379,7 @@ fmin, fmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Fixed"],
 if fmin is not None:
     add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
-# ---------- FORCE-ON-TOP zone outlines + FINAL GLOBAL fit_bounds ----------
+# ---------- Top zone outlines + zoom ----------
 try:
     if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         folium.GeoJson(
@@ -1373,23 +1391,17 @@ try:
                 "weight": 3,
                 "opacity": 1.0,
             },
-            tooltip=None
         ).add_to(m)
 
-    south, west, north, east = compute_bounds_for_heatmaps()
-    if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
-        zb = zones_gdf.total_bounds
-        south = min(south, zb[1]); west = min(west, zb[0])
-        north = max(north, zb[3]);  east = max(east, zb[2])
-
-    m.fit_bounds([[south, west], [north, east]])
+    m.fit_bounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]])
 except Exception as e:
-    st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
+    st.warning(f"Auto-zoom fallback: {e}")
+
+st_folium(m, use_container_width=True, height=600)
 
 # NOTE: removed LayerControl to prevent selectors
 
 st_folium(m, use_container_width=True, height=600)
-
 
 # =========================================================
 # 9. PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
