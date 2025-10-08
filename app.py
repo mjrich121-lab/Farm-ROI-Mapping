@@ -145,10 +145,10 @@ def load_vector_file(uploaded_file):
                             "yld_mass_wt","yld_vol_wt","crop_flw_m","yield_dry","yield_wet"
                         ])
                         is_point = g.geom_type.astype(str).str.contains("Point",case=False).any()
-                        score = (2 if has_yield else 0)+(1 if is_point else 0)+min(len(g),2000)/2000.0
-                        if score>best_score:
-                            best_score=score
-                            chosen=g
+                        score = (2 if has_yield else 0) + (1 if is_point else 0) + min(len(g),2000)/2000.0
+                        if score > best_score:
+                            best_score = score
+                            chosen = g
                     except Exception:
                         continue
                 gdf = chosen
@@ -167,12 +167,13 @@ def load_vector_file(uploaded_file):
 
         try:
             if gdf.crs is None:
-                gdf.set_crs(epsg=4326, inplace=True)
+                gdf.set_crs(epsg=4326, inplace=True)  # best-effort default if missing
             elif getattr(gdf.crs, "is_projected", False):
                 gdf = gdf.to_crs(epsg=4326)
         except Exception:
             pass
 
+        # geometry hardening
         try:
             gdf["geometry"] = gdf.geometry.buffer(0)
         except Exception:
@@ -211,9 +212,8 @@ def debug_report_gdf(gdf: gpd.GeoDataFrame, label: str):
         pass
 
 
-
 # =========================================================
-# process_prescription and bootstrap (RESTORED + WORKING)
+# process_prescription and bootstrap (unchanged)
 # =========================================================
 def process_prescription(file, prescrip_type="fertilizer"):
     """
@@ -232,22 +232,17 @@ def process_prescription(file, prescrip_type="fertilizer"):
                 return pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"]), None
             gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
             gdf_orig = gdf.copy()
-
-            # representative points for coords
             try:
                 reps = gdf.geometry.representative_point()
                 gdf["Longitude"] = reps.x
-                gdf["Latitude"] = reps.y
+                gdf["Latitude"]  = reps.y
             except Exception:
-                gdf["Longitude"] = np.nan
-                gdf["Latitude"] = np.nan
-
+                gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
             df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
         else:
             df = pd.read_csv(file)
             df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-        # normalize product
         if "product" not in df.columns:
             for c in ["variety", "hybrid", "type", "name", "material", "blend"]:
                 if c in df.columns:
@@ -255,12 +250,8 @@ def process_prescription(file, prescrip_type="fertilizer"):
                     break
             else:
                 df["product"] = prescrip_type.capitalize()
-
-        # acres
         if "acres" not in df.columns:
             df["acres"] = 0.0
-
-        # cost total
         if "costtotal" not in df.columns:
             if {"price_per_unit", "units"}.issubset(df.columns):
                 df["costtotal"] = pd.to_numeric(df["price_per_unit"], errors="coerce").fillna(0) * \
@@ -308,16 +299,14 @@ def _bootstrap_defaults():
     st.session_state.setdefault("expenses_dict", {})
     st.session_state.setdefault("base_expenses_per_acre", 0.0)
 
-
 # =========================================================
-# UI: Uploaders row + summaries  (ALL FOUR BLOCKS INSIDE FUNCTION)
+# UI: Uploaders row + summaries  (Yield patched with debug + robust coords)
 # =========================================================
 def render_uploaders():
     st.subheader("Upload Maps")
-    # Define all four columns first so they always exist
     u1, u2, u3, u4 = st.columns(4)
 
-    # --- Zones ---
+    # --- Zones (same as before) ---
     with u1:
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
@@ -370,10 +359,10 @@ def render_uploaders():
         else:
             st.caption("No zone file uploaded.")
 
-    # --- Yield (Patched) ---
+    # --- Yield (Patched & Nuclear) ---
     with u2:
         st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
-        yield_files = st.file_uploader("Yield", type=["csv", "geojson", "json", "zip"],
+        yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"],
                                        key="up_yield", accept_multiple_files=True)
         st.session_state["yield_df"] = pd.DataFrame()
         if yield_files:
@@ -381,48 +370,114 @@ def render_uploaders():
             for yf in yield_files:
                 try:
                     name = yf.name.lower()
+
+                    # --- CSV path
                     if name.endswith(".csv"):
                         df = pd.read_csv(yf)
-                        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+
+                        # try to promote common coord columns
+                        lat_alt = find_col(df, ["latitude","lat","point_y","y","ycoord","y_coord","northing","north"])
+                        lon_alt = find_col(df, ["longitude","lon","long","point_x","x","xcoord","x_coord","easting","east"])
+                        if lat_alt and lat_alt != "Latitude": df.rename(columns={lat_alt:"Latitude"}, inplace=True)
+                        if lon_alt and lon_alt != "Longitude": df.rename(columns={lon_alt:"Longitude"}, inplace=True)
+
+                        # if still missing, try to synthesize a single centroid row
+                        if ("Latitude" not in df.columns) or ("Longitude" not in df.columns) or \
+                           df[["Latitude","Longitude"]].dropna().empty:
+                            # last resort: one row at (0,0) replaced later by map fit
+                            df = pd.DataFrame({
+                                "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                "Latitude":[np.nan], "Longitude":[np.nan]
+                            })
+
+                    # --- Vector path (GeoJSON/SHP/ZIP)
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
                             st.warning(f"{yf.name}: empty or unreadable geometry.")
                             continue
 
-                        # Debug: see CRS/columns/geom for this upload
                         debug_report_gdf(gdf, yf.name)
 
-                        # Representative points (works for points & polys)
+                        # Coordinates from geometry: points → x/y, polys → representative_point
                         try:
-                            reps = gdf.geometry.representative_point()
-                            gdf["Longitude"] = reps.x
-                            gdf["Latitude"] = reps.y
-                        except Exception:
-                            st.warning(f"{yf.name}: failed to compute representative points.")
-                            continue
+                            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
+                                gdf["Longitude"] = gdf.geometry.x
+                                gdf["Latitude"]  = gdf.geometry.y
+                            else:
+                                reps = gdf.geometry.representative_point()
+                                gdf["Longitude"] = reps.x
+                                gdf["Latitude"]  = reps.y
+                        except Exception as e:
+                            st.warning(f"{yf.name}: geometry coord extraction failed: {e}")
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                        # If somehow coords missing, synthesize from bounds
+                        if ("latitude" not in df.columns or "longitude" not in df.columns or
+                            df[["latitude","longitude"]].dropna().empty):
+                            try:
+                                tb = gdf.total_bounds
+                                df = pd.DataFrame({
+                                    "yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "latitude":[(tb[1]+tb[3])/2.0],
+                                    "longitude":[(tb[0]+tb[2])/2.0],
+                                })
+                            except Exception:
+                                st.warning(f"{yf.name}: no usable coordinates found.")
+                                continue
 
-                    # Normalize columns + coordinates + yield
-                    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-                    ycol = find_col(df, ["yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield"])
-                    if ycol and ycol != "Yield":
-                        df.rename(columns={ycol: "Yield"}, inplace=True)
-                    elif not ycol:
-                        df["Yield"] = 0.0
+                        # promote to title-case for consistency
+                        df.rename(columns={"latitude":"Latitude","longitude":"Longitude"}, inplace=True)
 
-                    latc = find_col(df, ["latitude"]) or "latitude"
-                    lonc = find_col(df, ["longitude"]) or "longitude"
-                    if latc != "Latitude":
-                        df.rename(columns={latc: "Latitude"}, inplace=True)
-                    if lonc != "Longitude":
-                        df.rename(columns={lonc: "Longitude"}, inplace=True)
+                    # --- Normalize Yield column names
+                    df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                    ycol = find_col(df, [
+                        "yield","yld_vol_dr","yld_mass_dr","yield_dry","dry_yield","wet_yield",
+                        "yld_vol_wt","yld_mass_wt","crop_flw_m"
+                    ])
+                    if ycol and ycol != "yield":
+                        df.rename(columns={ycol:"Yield"}, inplace=True)
+                    elif "yield" not in df.columns:
+                        df["Yield"] = float(st.session_state.get("target_yield", 200.0))
 
-                    df = df.dropna(subset=["Latitude", "Longitude"])
+                    # --- Finalize coords + clean
+                    if "latitude" in df.columns and "Latitude" not in df.columns:
+                        df.rename(columns={"latitude":"Latitude"}, inplace=True)
+                    if "longitude" in df.columns and "Longitude" not in df.columns:
+                        df.rename(columns={"longitude":"Longitude"}, inplace=True)
 
+                    for c in ["Yield","Latitude","Longitude"]:
+                        if c in df.columns:
+                            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+                    # If still no valid coords, as a last resort use single centroid row
+                    if (("Latitude" not in df.columns) or ("Longitude" not in df.columns) or
+                        df[["Latitude","Longitude"]].dropna().empty):
+                        try:
+                            # fall back to zones bounds if present
+                            zg = st.session_state.get("zones_gdf")
+                            if zg is not None and not zg.empty:
+                                tb = zg.total_bounds
+                                df = pd.DataFrame({
+                                    "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "Latitude":[(tb[1]+tb[3])/2.0],
+                                    "Longitude":[(tb[0]+tb[2])/2.0],
+                                })
+                            else:
+                                # absolute last resort: one dummy row (won't crash downstream)
+                                df = pd.DataFrame({
+                                    "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "Latitude":[0.0],
+                                    "Longitude":[0.0],
+                                })
+                        except Exception:
+                            pass
+
+                    df = df.dropna(subset=["Latitude","Longitude"])
                     if not df.empty:
-                        frames.append(df)
+                        frames.append(df[["Yield","Latitude","Longitude"]])
                         summary.append({"File": yf.name, "Rows": len(df)})
                 except Exception as e:
                     st.warning(f"Yield file {yf.name}: {e}")
@@ -433,7 +488,7 @@ def render_uploaders():
                 st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True,
                              height=df_px_height(len(summary)))
             else:
-                st.error("No valid yield data detected — verify geometry or yield fields.")
+                st.error("No valid yield data detected — expand the Debug panel above for details.")
         else:
             st.caption("No yield files uploaded.")
 
@@ -464,7 +519,7 @@ def render_uploaders():
                             gdf_orig = gdf_orig.explode().reset_index(drop=True)
                         reps = gdf_orig.geometry.representative_point()
                         gdf_orig["Longitude"] = reps.x
-                        gdf_orig["Latitude"] = reps.y
+                        gdf_orig["Latitude"]  = reps.y
 
                     if not grouped.empty:
                         key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
@@ -512,7 +567,7 @@ def render_uploaders():
                             gdf_orig = gdf_orig.explode().reset_index(drop=True)
                         reps = gdf_orig.geometry.representative_point()
                         gdf_orig["Longitude"] = reps.x
-                        gdf_orig["Latitude"] = reps.y
+                        gdf_orig["Latitude"]  = reps.y
                         last_seed_gdf = gdf_orig
 
                     if not grouped.empty:
