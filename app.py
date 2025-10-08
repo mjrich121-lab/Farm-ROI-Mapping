@@ -389,7 +389,8 @@ def render_uploaders():
                 st.error("Could not read zone file.")
         else:
             st.caption("No zone file uploaded.")
-        # --- Yield (robust + no dummy points) ---
+
+    # --- Yield (robust + no dummy points) ---
     with u2:
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
@@ -405,79 +406,110 @@ def render_uploaders():
             for yf in yield_files:
                 try:
                     name = yf.name.lower()
-
-                    # -------- read file to DataFrame (with coords) --------
                     df = None
                     gdf = None
 
+                    # --- CSV path ---
                     if name.endswith(".csv"):
                         df = pd.read_csv(yf)
                         df.columns = [c.strip() for c in df.columns]
-                    else:
-                        gdf = load_vector_file(yf)  # already handles .zip/.shp/.geojson
-                        if gdf is not None:
-                            st.write("DEBUG – Columns in", yf.name, ":", list(gdf.columns))
 
+                    # --- Vector path (.shp, .geojson, .zip) ---
+                    else:
+                        gdf = load_vector_file(yf)
+                        if gdf is None or gdf.empty:
+                            messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
 
-                        # geometry → coords (points; or polygon centroids)
+                        st.write("DEBUG – Columns in", yf.name, ":", list(gdf.columns))
+
+                        # Geometry → coords (points or centroids)
                         try:
                             if hasattr(gdf, "geom_type") and gdf.geom_type.astype(str).str.contains("Point", case=False).any():
                                 gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"]  = gdf.geometry.y
+                                gdf["Latitude"] = gdf.geometry.y
                             else:
                                 reps = gdf.geometry.representative_point()
                                 gdf["Longitude"] = reps.x
-                                gdf["Latitude"]  = reps.y
+                                gdf["Latitude"] = reps.y
                         except Exception as e:
                             messages.append(f"{yf.name}: geometry coord extraction failed: {e}")
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
                         df.columns = [c.strip() for c in df.columns]
 
+                    # --- Ensure Yield, Latitude, Longitude exist (dry yield preference) ---
+                    dry_candidates = ["yld_vol_dr", "yld_mass_d", "yield", "dry_yield", "yld_vol_we", "yld_mass_dr"]
+                    lat_raw = pick_col(df, LAT_PREFS)
+                    lon_raw = pick_col(df, LON_PREFS)
+                    y_raw = pick_col(df, dry_candidates)
+
+                    if y_raw is None:
+                        st.warning(f"{yf.name}: no yield-like column found — adding dummy Yield=0")
+                        df["Yield"] = 0.0
+                    else:
+                        df["Yield"] = pd.to_numeric(df[y_raw], errors="coerce").fillna(0.0)
+
+                    if not lat_raw or not lon_raw:
+                        try:
+                            reps = gdf.geometry.representative_point()
+                            df["Latitude"], df["Longitude"] = reps.y, reps.x
+                        except Exception:
+                            df["Latitude"], df["Longitude"] = 39.5, -98.35
+                    else:
+                        df.rename(columns={lat_raw: "Latitude", lon_raw: "Longitude"}, inplace=True)
+
+                    # --- Clip Yield values to 5–95% range ---
+                    try:
+                        low, high = np.nanpercentile(df["Yield"], [5, 95])
+                        df["Yield"] = df["Yield"].clip(lower=low, upper=high)
+                    except Exception:
+                        pass
+
                     if df is None or df.empty:
                         messages.append(f"{yf.name}: no rows after read — skipped.")
                         continue
 
-                    # -------- find yield / lat / lon columns --------
-                    # normalize map for selection
+                    # --- Normalize column names ---
                     df_ren = df.rename(columns={c: _norm(c) for c in df.columns})
-
                     ycol_raw = pick_col(df_ren, YIELD_PREFS)
-                    lat_raw  = pick_col(df_ren, LAT_PREFS)
-                    lon_raw  = pick_col(df_ren, LON_PREFS)
+                    lat_raw = pick_col(df_ren, LAT_PREFS)
+                    lon_raw = pick_col(df_ren, LON_PREFS)
 
                     if ycol_raw is None:
                         messages.append(f"{yf.name}: no yield column found — skipped.")
                         continue
 
-                    # bring to standard names
-                    df_std = df_ren.rename(columns={
-                        ycol_raw: "yield_val",
-                        **({lat_raw: "lat"} if lat_raw else {}),
-                        **({lon_raw: "lon"} if lon_raw else {}),
-                    })
+                    df_std = df_ren.rename(
+                        columns={
+                            ycol_raw: "yield_val",
+                            **({lat_raw: "lat"} if lat_raw else {}),
+                            **({lon_raw: "lon"} if lon_raw else {}),
+                        }
+                    )
 
-                    # If coords missing (shouldn’t happen for shapefiles we processed), skip safely
                     if "lat" not in df_std.columns or "lon" not in df_std.columns:
                         messages.append(f"{yf.name}: geometry extracted but no valid lat/lon — skipped.")
                         continue
 
-                    # numeric + clean
                     for c in ["yield_val", "lat", "lon"]:
                         df_std[c] = pd.to_numeric(df_std[c], errors="coerce")
 
                     df_std = df_std.dropna(subset=["yield_val", "lat", "lon"])
-                    df_std = df_std[np.isfinite(df_std["yield_val"]) & np.isfinite(df_std["lat"]) & np.isfinite(df_std["lon"])]
+                    df_std = df_std[
+                        np.isfinite(df_std["yield_val"])
+                        & np.isfinite(df_std["lat"])
+                        & np.isfinite(df_std["lon"])
+                    ]
 
                     if df_std.empty:
                         messages.append(f"{yf.name}: geometry extracted but no valid yield points.")
                         continue
 
                     frames.append(df_std[["yield_val", "lat", "lon"]])
-                    # report which field we used (original column name)
                     used_yield = next((c for c in df.columns if _norm(c) == ycol_raw), ycol_raw)
                     messages.append(f"{yf.name}: using field '{used_yield}' for yield.")
+
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
 
@@ -491,7 +523,7 @@ def render_uploaders():
         else:
             st.caption("No yield files uploaded.")
 
-        
+                  
     # --- Fertilizer (Hardened) ---
     with u3:
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
