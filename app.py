@@ -822,9 +822,8 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
     except Exception as e:
         st.warning(f"Skipping heatmap {name}: {e}")
         return None, None
-
 # ===========================
-# MAIN APP
+# MAIN APP — HARDENED + STACKED LEGENDS
 # ===========================
 apply_compact_theme()
 _bootstrap_defaults()
@@ -833,41 +832,94 @@ render_fixed_inputs_and_strip()
 # Three collapsible input dropdowns ABOVE the map
 render_input_sections()
 st.markdown("---")
+
 # ---------- build base map ----------
 m = make_base_map()
 
-# ---------- Zones overlay ----------
+# ---------- STACKED LEGEND SYSTEM ----------
+def init_legend_rails(m):
+    """Injects fixed legend containers (top-left rail used)."""
+    rails_css = """
+    <style>
+      .legend-rail { position:absolute; z-index:9999; font-family:sans-serif; }
+      #legend-tl { top: 14px; left: 10px; width: 220px; }
+      .legend-card {
+        color: #fff; background: rgba(0,0,0,0.65);
+        padding: 6px 10px; border-radius: 6px; margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+        user-select: none;
+      }
+      .legend-title { font-weight: 600; margin-bottom: 4px; }
+      .legend-bar { height: 14px; border-radius: 2px; margin-bottom: 4px; }
+      .legend-minmax { display:flex; justify-content:space-between; font-size:12px; }
+    </style>
+    <div id="legend-tl" class="legend-rail"></div>
+    """
+    m.get_root().html.add_child(folium.Element(rails_css))
+    st.session_state.setdefault("_legend_counts", {"tl": 0})
+
+def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
+    """Adds a gradient legend to the chosen rail (top-left default)."""
+    if vmin is None or vmax is None:
+        return
+    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
+    idx = st.session_state.get("_legend_counts", {}).get(corner, 0)
+    card_html = f"""
+    <div class="legend-card" id="legend-{corner}-{idx}">
+      <div class="legend-title">{name}</div>
+      <div class="legend-bar" style="background:linear-gradient(90deg, {gradient_css});"></div>
+      <div class="legend-minmax"><span>{vmin:.1f}</span><span>{vmax:.1f}</span></div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(f"""
+      <script>
+        (function() {{
+          var rail = document.getElementById("legend-{corner}");
+          if (rail) {{
+            rail.insertAdjacentHTML("beforeend", `{card_html}`);
+          }}
+        }})();
+      </script>
+    """))
+    st.session_state["_legend_counts"][corner] = idx + 1
+
+# Initialize the legend rail
+init_legend_rails(m)
+
+# ---------- Zones overlay (fill; outlines added later on TOP) ----------
 zones_gdf = st.session_state.get("zones_gdf")
 if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
     try:
-        zb = zones_gdf.total_bounds
-        # Compute bounds for zoom
-        south, west, north, east = zb[1], zb[0], zb[3], zb[2]
-        m.fit_bounds([[south, west], [north, east]])   # 👈 forces map to zoom/center correctly
+        zones_gdf = zones_gdf.copy()
+        try:
+            zones_gdf["geometry"] = zones_gdf.geometry.buffer(0)
+        except Exception:
+            pass
+        try:
+            zones_gdf = zones_gdf.explode(index_parts=False, ignore_index=True)
+        except TypeError:
+            zones_gdf = zones_gdf.explode().reset_index(drop=True)
 
-        # color palette and zone mapping
         palette = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400",
                    "#1E90FF", "#8A2BE2", "#FFC0CB", "#A52A2A", "#00CED1"]
         unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
         color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
 
-        # Stronger border (weight=2) + visible fillOpacity
         folium.GeoJson(
             zones_gdf,
-            name="Zones",
+            name="Zones (Fill)",
             style_function=lambda feature: {
                 "fillColor": color_map.get(str(feature["properties"].get("Zone", "")), "#808080"),
-                "color": "black",           # border color
-                "weight": 2,                # 👈 makes zone lines visible
-                "fillOpacity": 0.25,        # 👈 slightly higher fill
+                "color": "#202020",
+                "weight": 1,
+                "fillOpacity": 0.25,
             },
             tooltip=folium.GeoJsonTooltip(
-                fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"]
-                        if c in zones_gdf.columns]
+                fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
             ),
         ).add_to(m)
 
-        # Legend (same as before)
         legend_items = "".join(
             f"<div style='display:flex;align-items:center;margin:2px 0;'>"
             f"<div style='background:{color_map[z]};width:14px;height:14px;margin-right:6px;'></div>{z}</div>"
@@ -887,7 +939,6 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         </div>
         """
         m.get_root().html.add_child(folium.Element(legend_html))
-
     except Exception as e:
         st.warning(f"Skipping zones overlay: {e}")
 
@@ -925,7 +976,6 @@ else:
 
 try:
     df_for_maps = df_for_maps.copy()
-
     if "Yield" not in df_for_maps.columns:
         df_for_maps["Yield"] = 0.0
     df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0.0)
@@ -968,26 +1018,53 @@ except Exception:
     df_for_maps["NetProfit_Variable"] = 0.0
     df_for_maps["NetProfit_Fixed"] = 0.0
 
-legend_i = legend_ix
+# ---------- Heatmap overlays + stacked legends ----------
 ymin, ymax = add_heatmap_overlay(m, df_for_maps, df_for_maps["Yield"], "Yield (bu/ac)", plt.cm.RdYlGn, False, bounds)
 if ymin is not None:
-    add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, legend_i); legend_i += 1
+    add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
 
 vmin, vmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Variable"],
                                  "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, True, bounds)
 if vmin is not None:
-    add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, legend_i); legend_i += 1
+    add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
 
 fmin, fmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Fixed"],
                                  "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False, bounds)
 if fmin is not None:
-    add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, legend_i); legend_i += 1
+    add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
+
+# ---------- FORCE-ON-TOP zone outlines + FINAL GLOBAL fit_bounds ----------
+try:
+    if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+        folium.GeoJson(
+            zones_gdf,
+            name="Zone Outlines (Top)",
+            style_function=lambda feature: {
+                "fillOpacity": 0,
+                "color": "#000000",
+                "weight": 3,
+                "opacity": 1.0,
+            },
+            tooltip=None
+        ).add_to(m)
+
+    south, west, north, east = compute_bounds_for_heatmaps()
+    if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+        zb = zones_gdf.total_bounds
+        south = min(south, zb[1]); west = min(west, zb[0])
+        north = max(north, zb[3]);  east = max(east, zb[2])
+
+    m.fit_bounds([[south, west], [north, east]])
+except Exception as e:
+    st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
 
 try:
     folium.LayerControl(collapsed=False, position="topright").add_to(m)
 except Exception:
     pass
+
 st_folium(m, use_container_width=True, height=600)
+
 
 # =========================================================
 # 9. PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
