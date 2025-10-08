@@ -1178,54 +1178,29 @@ new MutationObserver(killScrollbars)
 """, unsafe_allow_html=True)
 
 # =========================================================
-# GLOBAL NO-SCROLL + WIDTH FIX — FINAL OVERRIDE
+# 9B. NUCLEAR NO-SCROLL FIX (Browser-level adjustment)
 # =========================================================
 st.markdown("""
-<style>
-/* kill all editor and dataframe scrolls */
-[data-testid="stDataFrameContainer"],
-[data-testid="stDataEditorGrid"],
-[data-testid="stDataFrame"],
-[data-testid="stVerticalBlock"],
-[data-testid="stHorizontalBlock"],
-[data-testid="stDataEditorContainer"] {
-    overflow: visible !important;
-    height: auto !important;
-    max-height: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-}
-/* force table body & header to render full height */
-[data-testid="stDataEditorGrid"] table,
-[data-testid="stDataFrame"] table {
-    min-width: 100% !important;
-}
-/* remove Streamlit’s auto-scroll shadows */
-[data-testid="stDataEditorResizer"],
-[data-testid="stDataFrameResizer"] {
-    display: none !important;
-}
-</style>
-
 <script>
-function fixLayoutAndScroll() {
-    const outer = window.parent?.document?.querySelector('.block-container');
-    if (outer) {
-        outer.style.maxWidth = '85%';
-        outer.style.margin = 'auto';
-        outer.style.paddingTop = '0.5rem';
-        outer.style.paddingBottom = '1rem';
+function adjustAllTables(){
+  const tables = parent.document.querySelectorAll('[data-testid="stDataFrameContainer"]');
+  tables.forEach(tbl=>{
+    // Find the actual inner table element and measure it
+    const inner = tbl.querySelector('table');
+    if(inner){
+      const innerHeight = inner.getBoundingClientRect().height;
+      if(innerHeight>0){
+        tbl.style.height = (innerHeight + 2) + 'px';
+        tbl.style.maxHeight = (innerHeight + 2) + 'px';
+        tbl.style.overflow = 'visible';
+      }
     }
-    // force every grid to expand fully
-    document.querySelectorAll('[data-testid="stDataFrameContainer"],[data-testid="stDataEditorContainer"]').forEach(el=>{
-        el.style.overflow='visible';
-        el.style.height='auto';
-        el.style.maxHeight='none';
-    });
+  });
 }
-fixLayoutAndScroll();
-setTimeout(fixLayoutAndScroll, 500);
-setTimeout(fixLayoutAndScroll, 1500);
-setTimeout(fixLayoutAndScroll, 4000);
+// Run once and then again after Streamlit reflows
+adjustAllTables();
+new MutationObserver(adjustAllTables)
+  .observe(parent.document.body,{childList:true,subtree:true});
 </script>
 """, unsafe_allow_html=True)
+
