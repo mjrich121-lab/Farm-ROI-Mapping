@@ -359,19 +359,19 @@ def render_uploaders():
         else:
             st.caption("No zone file uploaded.")
 # --- Yield (FINAL — Bulletproof, No Dummy Points) ---
-with u2:
-    st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
-    yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"],
+    with u2:
+        st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
+        yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"],
                                    key="up_yield", accept_multiple_files=True)
-    st.session_state["yield_df"] = pd.DataFrame()
+        st.session_state["yield_df"] = pd.DataFrame()
 
-    if yield_files:
-        frames = []
-        yield_source_info = []
+        if yield_files:
+             frames = []
+            yield_source_info = []
 
-        for yf in yield_files:
-            try:
-                name = yf.name.lower()
+            for yf in yield_files:
+                try:
+                    name = yf.name.lower()
 
                 # === CSV path ===
                 if name.endswith(".csv"):
