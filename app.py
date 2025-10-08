@@ -1097,7 +1097,6 @@ def render_profit_summary():
 
     # ---------- Layout ----------
     left, right = st.columns([2, 1], gap="large")
-
 # ---------- LEFT COLUMN ----------
 with left:
     st.subheader("Profit Comparison")
@@ -1202,8 +1201,8 @@ with right:
     else:
         st.info("Enter your fixed inputs above to see totals here.")
     st.markdown("</div>", unsafe_allow_html=True)
-  
-    
+
+
 # ---------- render ----------
 render_profit_summary()
 
