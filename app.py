@@ -1146,9 +1146,6 @@ def render_profit_summary():
 # ---------- render ----------
 render_profit_summary()
 
-
-# ---------- render ----------
-render_profit_summary()
 # --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
 st.markdown("""
 <script>
