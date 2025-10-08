@@ -415,8 +415,9 @@ def render_uploaders():
                         df.columns = [c.strip() for c in df.columns]
                     else:
                         gdf = load_vector_file(yf)  # already handles .zip/.shp/.geojson
-                        if gdf is None or gdf.empty:
-                            messages.append(f"{yf.name}: empty or unreadable — skipped.")
+                        if gdf is not None:
+                            st.write("DEBUG – Columns in", yf.name, ":", list(gdf.columns))
+
                             continue
 
                         # geometry → coords (points; or polygon centroids)
