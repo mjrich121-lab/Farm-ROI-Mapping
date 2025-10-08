@@ -420,9 +420,14 @@ def render_uploaders():
                         df = pd.read_csv(yf)
                         df.columns = [c.strip() for c in df.columns]
                     else:
-                        gdf = load_vector_file(yf)
-                        if gdf is None or gdf.empty:
-                            messages.append(f"{yf.name}: geometry missing — skipped.")
+                        if gdf is not None and not gdf.empty:
+                            st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
+                            st.write(f"DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
+                            if "Yld_Vol_Dr" in gdf.columns:
+                            st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
+                        else:
+                            st.write("Yld_Vol_Dr not found in columns.")
+
                             continue
                         if hasattr(gdf, "geom_type") and gdf.geom_type.astype(str).str.contains("Point", case=False).any():
                             gdf["Longitude"] = gdf.geometry.x
