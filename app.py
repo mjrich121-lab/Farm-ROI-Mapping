@@ -1112,23 +1112,39 @@ with left:
     )
 
         # Compact horizontal formulas
-        with st.expander("Show Calculation Formulas", expanded=False):
-            st.markdown(
-                """
-                <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:0.75rem;line-height:1.1rem;">
-                  <div style="flex:1;min-width:180px;border:1px solid #444;border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Breakeven Budget</b><br>(Target Yield × Sell Price) − Fixed Inputs
-                  </div>
-                  <div style="flex:1;min-width:180px;border:1px solid #444;border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Variable Rate</b><br>(Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-                  </div>
-                  <div style="flex:1;min-width:180px;border:1px solid #444;border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Fixed Rate</b><br>(Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+       st.dataframe(
+        styled_cs,
+        use_container_width=True,
+        hide_index=True,
+        height=_df_height(cornsoy, row_h=31, header_h=35, pad=-2, fudge=-8),
+    )
+
+    # Compact horizontal formulas
+    with st.expander("Show Calculation Formulas", expanded=False):
+        st.markdown(
+            """
+            <div style="display:flex;flex-wrap:wrap;gap:6px;
+                        font-size:0.75rem;line-height:1.1rem;">
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Breakeven Budget</b><br>
+                (Target Yield × Sell Price) − Fixed Inputs
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Variable Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Fixed Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+   
 
         st.subheader("Corn vs Soybean Profitability")
         styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
