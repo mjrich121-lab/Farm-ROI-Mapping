@@ -383,7 +383,7 @@ def render_uploaders():
                 st.error("Could not read zone file.")
         else:
             st.caption("No zone file uploaded.")
-       # ------------------------- YIELD -------------------------
+        # ------------------------- YIELD -------------------------
     with u2:
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
@@ -395,6 +395,7 @@ def render_uploaders():
         if yield_files:
             frames, messages = [], []
 
+            # Common yield field names across AgLeader / JD / Trimble / Case
             YIELD_PREFS = [
                 "yld_vol_dr", "yld_mass_d", "yld_mass_dr", "dry_yield", "dry_yld",
                 "dryyield", "yielddry", "ylddry", "yield_dry", "dry_yield_bu_ac",
@@ -424,7 +425,7 @@ def render_uploaders():
                             st.write(f"DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
                             st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
 
-                        # ✅ Extract coordinates BEFORE flattening
+                        # ✅ Extract coordinates *immediately* from geometry
                         reps = gdf.geometry.representative_point()
                         gdf["Longitude"] = reps.x
                         gdf["Latitude"] = reps.y
@@ -437,7 +438,7 @@ def render_uploaders():
                         messages.append(f"{yf.name}: no data after read — skipped.")
                         continue
 
-                    # --- Identify yield column (exact column names preserved) ---
+                    # --- Identify yield column ---
                     yield_col = None
                     for c in df.columns:
                         cname = c.strip().lower().replace(" ", "_")
@@ -451,23 +452,25 @@ def render_uploaders():
 
                     # --- Clean yield and coordinates ---
                     df["Yield"] = pd.to_numeric(df[yield_col], errors="coerce").fillna(0)
-                    df["Latitude"] = pd.to_numeric(df.get("Latitude"), errors="coerce")
-                    df["Longitude"] = pd.to_numeric(df.get("Longitude"), errors="coerce")
 
-                    # ✅ If lat/lon are NaN, recover from geometry centroids
-                    if df["Latitude"].isna().all() or df["Longitude"].isna().all():
-                        if "geometry" in locals() and gdf is not None:
+                    # ✅ Handle missing coordinate columns — always extract from geometry first
+                    if "Latitude" not in df.columns or "Longitude" not in df.columns:
+                        if gdf is not None and hasattr(gdf, "geometry"):
                             reps = gdf.geometry.representative_point()
                             df["Longitude"] = reps.x
                             df["Latitude"] = reps.y
 
+                    df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
+                    df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
                     df = df.dropna(subset=["Latitude", "Longitude"])
+
+                    # Clip to valid coordinates
                     df = df[
                         (df["Latitude"].between(-90, 90)) &
                         (df["Longitude"].between(-180, 180))
                     ]
 
-                    # Remove outliers (5th–95th percentile)
+                    # Remove extreme outliers
                     if len(df) > 10:
                         p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
                         df = df[df["Yield"].between(p5, p95)]
@@ -476,9 +479,11 @@ def render_uploaders():
                         messages.append(f"{yf.name}: no valid yield points after cleaning.")
                         continue
 
-                    # --- Finalize ---
+                    # ✅ Success — finalize
                     frames.append(df[["Yield", "Latitude", "Longitude"]])
-                    messages.append(f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points.")
+                    messages.append(
+                        f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points."
+                    )
 
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
