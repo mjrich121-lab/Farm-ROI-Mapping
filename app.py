@@ -383,7 +383,7 @@ def render_uploaders():
                 st.error("Could not read zone file.")
         else:
             st.caption("No zone file uploaded.")
-# ------------------------- YIELD -------------------------
+    # ------------------------- YIELD -------------------------
     with u2:
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
@@ -395,13 +395,12 @@ def render_uploaders():
         if yield_files:
             frames, messages = [], []
 
-            # Common yield field names across platforms
+            # Common yield field names across platforms (AgLeader / JD / Trimble / Case)
             YIELD_PREFS = [
-                "yld_vol_dr", "yld_mass_d", "dry_yield", "dry_yld", "dryyield",
-                "yielddry", "ylddry", "dry_yield_bu_ac", "dry_yield_bua",
-                "dryyield_bu_ac", "yld_vol_we", "yld_mass_w", "yield",
-                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield",
-                "yld_bu_per_ac"
+                "yld_vol_dr", "yld_mass_d", "yld_mass_dr", "dry_yield", "dry_yld",
+                "dryyield", "yielddry", "ylddry", "yield_dry", "dry_yield_bu_ac",
+                "dry_yield_bua", "yld_bu_ac", "yield", "harvestyield",
+                "crop_yield", "prod_yield", "yld_bu_per_ac"
             ]
 
             for yf in yield_files:
@@ -409,12 +408,12 @@ def render_uploaders():
                     name = yf.name.lower()
                     df, gdf = None, None
 
-                    # --- CSV ---
+                    # --- CSV FILE ---
                     if name.endswith(".csv"):
                         df = pd.read_csv(yf)
                         df.columns = [c.strip() for c in df.columns]
 
-                    # --- SHP/ZIP/GEOJSON ---
+                    # --- SHP/ZIP/GEOJSON FILE ---
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
@@ -423,13 +422,16 @@ def render_uploaders():
 
                         st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
                         if "Yld_Vol_Dr" in gdf.columns:
+                            st.write(f"DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
                             st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
 
                         # Extract coordinates
-                        gdf["Longitude"] = gdf.geometry.centroid.x
-                        gdf["Latitude"] = gdf.geometry.centroid.y
+                        if hasattr(gdf, "geometry"):
+                            reps = gdf.geometry.representative_point()
+                            gdf["Longitude"] = reps.x
+                            gdf["Latitude"] = reps.y
 
-                        # Move to pandas
+                        # Flatten into DataFrame
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
                         df.columns = [c.strip() for c in df.columns]
 
@@ -437,24 +439,35 @@ def render_uploaders():
                         messages.append(f"{yf.name}: no data after read — skipped.")
                         continue
 
-                    # Normalize and detect yield column
-                    df_norm = df.rename(columns={c: _norm(c) for c in df.columns})
-                    y_raw = pick_col(df_norm, YIELD_PREFS)
-                    lat_raw = pick_col(df_norm, LAT_PREFS)
-                    lon_raw = pick_col(df_norm, LON_PREFS)
+                    # --- Identify yield column using ACTUAL column names ---
+                    yield_col = None
+                    for c in df.columns:
+                        cname = c.strip().lower().replace(" ", "_")
+                        if cname in YIELD_PREFS:
+                            yield_col = c
+                            break
 
-                    # If missing, fall back to geometry-derived coordinates
-                    if not lat_raw or not lon_raw:
-                        lat_raw, lon_raw = "Latitude", "Longitude"
-
-                    if not y_raw:
-                        messages.append(f"{yf.name}: no yield column found — skipped.")
+                    if not yield_col:
+                        messages.append(f"{yf.name}: no recognized yield column — skipped.")
                         continue
 
-                    # Clean yield values
-                    df["Yield"] = pd.to_numeric(df[y_raw], errors="coerce").fillna(0)
-                    df["Latitude"] = pd.to_numeric(df[lat_raw], errors="coerce")
-                    df["Longitude"] = pd.to_numeric(df[lon_raw], errors="coerce")
+                    # --- Detect Latitude / Longitude columns ---
+                    lat_col, lon_col = None, None
+                    for c in df.columns:
+                        cname = c.strip().lower()
+                        if cname in ["lat", "latitude", "y_coord", "ycoord"]:
+                            lat_col = c
+                        if cname in ["lon", "long", "longitude", "x_coord", "xcoord"]:
+                            lon_col = c
+
+                    # Fallback if missing
+                    if not lat_col or not lon_col:
+                        lat_col, lon_col = "Latitude", "Longitude"
+
+                    # --- Clean yield + coordinate data ---
+                    df["Yield"] = pd.to_numeric(df[yield_col], errors="coerce").fillna(0)
+                    df["Latitude"] = pd.to_numeric(df[lat_col], errors="coerce")
+                    df["Longitude"] = pd.to_numeric(df[lon_col], errors="coerce")
                     df = df.dropna(subset=["Latitude", "Longitude"])
 
                     # Clip to valid Earth coordinates
@@ -463,7 +476,7 @@ def render_uploaders():
                         (df["Longitude"].between(-180, 180))
                     ]
 
-                    # Normalize yield to remove extreme noise
+                    # Remove extreme outliers (5th–95th percentile)
                     if len(df) > 10:
                         p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
                         df = df[df["Yield"].between(p5, p95)]
@@ -472,16 +485,16 @@ def render_uploaders():
                         messages.append(f"{yf.name}: no valid yield points after cleaning.")
                         continue
 
-                    # Finalize for mapping
+                    # --- Finalize for mapping ---
                     frames.append(df[["Yield", "Latitude", "Longitude"]])
                     messages.append(
-                        f"{yf.name}: using '{y_raw}' with {len(df):,} valid yield points."
+                        f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points."
                     )
 
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
 
-            # Combine & store
+            # --- Combine and store ---
             if frames:
                 combo = pd.concat(frames, ignore_index=True)
                 st.session_state["yield_df"] = combo
@@ -490,7 +503,6 @@ def render_uploaders():
                 st.error("❌ No valid yield data found.\n" + "\n".join(messages))
         else:
             st.caption("No yield files uploaded.")
-
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
