@@ -981,41 +981,61 @@ except Exception:
 st_folium(m, use_container_width=True, height=600)
 
 # =========================================================
-# 9. PROFIT SUMMARY — Breakeven + Corn/Soy + Fixed Inputs
+# 9. PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
 # =========================================================
 def render_profit_summary():
     st.header("Profit Summary")
 
-    # ---------- Helpers (scoped to Section 9) ----------
-    def _df_height(df, row_h: int = 30, header_h: int = 36, pad: int = 2, fudge: int = 0) -> int:
-        """
-        Pixel-perfect height so st.dataframe never shows an inner scrollbar
-        and doesn't leave a phantom extra line. Tune per table with 'fudge'.
-        """
-        try:
-            n = len(df) if isinstance(df, pd.DataFrame) else 1
-            base = header_h + n * row_h + pad
-            # Small tables sometimes leave a visual buffer; trim a few pixels.
-            if n <= 2:
-                base -= 6
-            return int(base + fudge)
-        except Exception:
-            return 180
-
-    def _money(x):
+    # ---------- helpers ----------
+    def fmt_money(x):
         try:
             return f"${x:,.2f}"
         except Exception:
             return x
 
-    def _profit_color(v):
-        if not isinstance(v, (int, float)):
-            return ""
+    def color_profit(val):
+        try:
+            v = float(val)
+        except Exception:
+            return "color:white;"
         if v > 0:
             return "color:limegreen;font-weight:bold;"
-        if v < 0:
+        elif v < 0:
             return "color:#ff4d4d;font-weight:bold;"
-        return "font-weight:bold;"
+        else:
+            return "font-weight:bold;color:white;"
+
+    def render_static_table(df: pd.DataFrame, title: str):
+        """Render static HTML table — no scrollbars, fully expanded."""
+        if df is None or df.empty:
+            st.info(f"No data available for {title}.")
+            return
+        # Build header
+        html = f"<h5 style='margin-top:10px;margin-bottom:6px;'>{title}</h5>"
+        html += """
+        <style>
+        .static-table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+        .static-table th, .static-table td {
+            border:1px solid #444; padding:4px 6px; text-align:right;
+        }
+        .static-table th {
+            background-color:#111; color:white; font-weight:600; text-align:left;
+        }
+        .static-table td:first-child, .static-table th:first-child { text-align:left; }
+        </style>
+        <table class='static-table'>
+        <thead><tr>""" + "".join(f"<th>{c}</th>" for c in df.columns) + "</tr></thead><tbody>"
+
+        # Build rows with conditional coloring
+        for _, row in df.iterrows():
+            html += "<tr>"
+            for c, v in row.items():
+                val = fmt_money(v) if isinstance(v, (int, float)) else v
+                style = color_profit(v) if "Profit" in c or "Rate" in c else ""
+                html += f"<td style='{style}'>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        st.markdown(html, unsafe_allow_html=True)
 
     # ---------- Safe defaults ----------
     expenses = st.session_state.get("expenses_dict", {})
@@ -1055,7 +1075,6 @@ def render_profit_summary():
             fert_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"], errors="coerce").sum()
             seed_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Seed", "$/ac"], errors="coerce").sum()
         elif "$/ac" in df_fix.columns:
-            # If no Type split, treat total as combined fixed inputs (rare, but safe)
             fert_costs_fix = seed_costs_fix = pd.to_numeric(df_fix["$/ac"], errors="coerce").sum()
     expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
     profit_fix   = revenue_per_acre - expenses_fix
@@ -1077,9 +1096,9 @@ def render_profit_summary():
             "Sell Price ($/bu)":  [corn_price, bean_price],
         }
     )
-    cornsoy["Revenue ($/ac)"]        = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
-    cornsoy["Fixed Inputs ($/ac)"]   = base_exp
-    cornsoy["Profit ($/ac)"]         = cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
+    cornsoy["Revenue ($/ac)"]      = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
+    cornsoy["Fixed Inputs ($/ac)"] = base_exp
+    cornsoy["Profit ($/ac)"]       = cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
 
     fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
     if not fixed_df.empty:
@@ -1089,108 +1108,36 @@ def render_profit_summary():
     # ---------- Layout ----------
     left, right = st.columns([2, 1], gap="large")
 
-    # LEFT: Profit comparison + Corn/Soy
     with left:
-        st.subheader("Profit Comparison")
-        styled_comp = comparison.style.format(_money).applymap(
-            _profit_color, subset=["Breakeven Budget", "Variable Rate", "Fixed Rate"]
-        )
-        # 3 rows -> these numbers sit perfectly flush with no extra buffer
-        st.dataframe(
-            styled_comp,
-            use_container_width=True,
-            hide_index=True,
-            height=_df_height(comparison, row_h=30, header_h=36, pad=2, fudge=-2),
-        )
+        render_static_table(comparison, "Profit Comparison")
 
         with st.expander("Show Calculation Formulas", expanded=False):
-            st.markdown(
-                """
-                <div style="display:flex;flex-wrap:wrap;gap:6px;
-                            font-size:0.75rem;line-height:1.1rem;">
-                  <div style="flex:1;min-width:180px;border:1px solid #444;
-                              border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Breakeven Budget</b><br>
-                    (Target Yield × Sell Price) − Fixed Inputs
-                  </div>
-                  <div style="flex:1;min-width:180px;border:1px solid #444;
-                              border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Variable Rate</b><br>
-                    (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
-                  </div>
-                  <div style="flex:1;min-width:180px;border:1px solid #444;
-                              border-radius:6px;padding:5px;background-color:#111;">
-                    <b>Fixed Rate</b><br>
-                    (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.markdown("""
+            <div style="display:flex;flex-wrap:wrap;gap:6px;
+                        font-size:0.75rem;line-height:1.1rem;">
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Breakeven Budget</b><br>
+                (Target Yield × Sell Price) − Fixed Inputs
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Variable Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Fixed Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.subheader("Corn vs Soybean Profitability")
-        styled_cs = cornsoy.style.format(_money).applymap(
-            _profit_color, subset=["Profit ($/ac)"]
-        )
-        # 2 rows -> slightly smaller header & a little negative fudge to avoid the “half row”
-        st.dataframe(
-            styled_cs,
-            use_container_width=True,
-            hide_index=True,
-            height=_df_height(cornsoy, row_h=30, header_h=34, pad=0, fudge=-6),
-        )
+        render_static_table(cornsoy, "Corn vs Soybean Profitability")
 
-    # RIGHT: Fixed input costs
     with right:
-        st.subheader("Fixed Input Costs")
-        if not fixed_df.empty:
-            # N rows (varies). These values keep it tight but never scrolling.
-            st.dataframe(
-                fixed_df.style.format(_money),
-                use_container_width=True,
-                hide_index=True,
-                height=_df_height(fixed_df, row_h=30, header_h=36, pad=2, fudge=-4),
-            )
-        else:
-            st.info("Enter your fixed inputs above to see totals here.")
+        render_static_table(fixed_df, "Fixed Input Costs")
+
 
 # ---------- render ----------
 render_profit_summary()
-
-# =========================================================
-# 9C. HARD-LOCK TABLE HEIGHT (Ultimate no-scroll enforcement)
-# =========================================================
-st.markdown("""
-<script>
-function hardLockTables(){
-  const root = parent.document;
-  const containers = root.querySelectorAll('[data-testid*="stDataFrame"],[data-testid*="stDataEditor"]');
-  containers.forEach(c=>{
-    const table = c.querySelector('table');
-    if(table){
-      const rect = table.getBoundingClientRect();
-      if(rect.height>0){
-        // hard-lock container to inner table height
-        c.style.height = rect.height + 'px';
-        c.style.maxHeight = rect.height + 'px';
-        c.style.overflow = 'hidden';
-        // also kill scroll hints on ancestors
-        c.parentElement?.style?.setProperty('overflow','visible','important');
-      }
-    }
-  });
-}
-
-// Run repeatedly until Streamlit is stable, then watch for changes
-let attempts = 0;
-const repeater = setInterval(()=>{
-  hardLockTables();
-  attempts++;
-  if(attempts>15) clearInterval(repeater); // stop after ~3s
-}, 200);
-
-// Permanent watcher for later rerenders
-new MutationObserver(()=>hardLockTables())
-  .observe(parent.document.body,{childList:true,subtree:true});
-</script>
-""", unsafe_allow_html=True)
