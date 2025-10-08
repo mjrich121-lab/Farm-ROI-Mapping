@@ -399,7 +399,6 @@ def render_uploaders():
                         # if still missing, synthesize single centroid
                         if ("Latitude" not in df.columns) or ("Longitude" not in df.columns) or \
                            df[["Latitude","Longitude"]].dropna().empty:
-                           else:
                                 st.warning(f"{yf.name}: no valid coordinates loaded")
                                 continue
 
