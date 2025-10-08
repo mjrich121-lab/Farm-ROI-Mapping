@@ -399,9 +399,10 @@ def render_uploaders():
                         # if still missing, synthesize single centroid
                         if ("Latitude" not in df.columns) or ("Longitude" not in df.columns) or \
                            df[["Latitude","Longitude"]].dropna().empty:
-                            df = pd.DataFrame({
-                                "Yield":[float(st.session_state.get("target_yield", 200.0))],
-                                "Latitude":[np.nan], "Longitude":[np.nan]
+                           else:
+                                st.warning(f"{yf.name}: no valid coordinates loaded")
+                                continue
+
                             })
 
                     # --- Vector path (GeoJSON/SHP/ZIP)
