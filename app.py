@@ -1103,16 +1103,8 @@ with left:
 
     st.subheader("Corn vs Soybean Profitability")
     styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
-    # Slightly smaller again to remove the visual “half row” buffer
+     # Slightly smaller again to remove the visual “half row” buffer
     st.dataframe(
-        styled_cs,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height(cornsoy, row_h=31, header_h=35, pad=-2, fudge=-8),
-    )
-
-        # Compact horizontal formulas
-       st.dataframe(
         styled_cs,
         use_container_width=True,
         hide_index=True,
@@ -1144,31 +1136,32 @@ with left:
             """,
             unsafe_allow_html=True,
         )
-   
 
-        st.subheader("Corn vs Soybean Profitability")
-        styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
+    # Corn vs Soybean Profitability
+    st.subheader("Corn vs Soybean Profitability")
+    styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
+    st.dataframe(
+        styled_cs,
+        use_container_width=True,
+        hide_index=True,
+        height=_df_height(cornsoy, fudge=1),  # tiny nudge to eliminate the partial-row hint
+    )
+
+with right:
+    st.subheader("Fixed Input Costs")
+    if not fixed_df.empty:
         st.dataframe(
-            styled_cs,
+            fixed_df.style.format(_money),
             use_container_width=True,
             hide_index=True,
-            height=_df_height(cornsoy, fudge=1),  # tiny nudge to eliminate the partial-row hint
+            height=_df_height(fixed_df, fudge=4),  # right table historically needed +4px
         )
-
-    with right:
-        st.subheader("Fixed Input Costs")
-        if not fixed_df.empty:
-            st.dataframe(
-                fixed_df.style.format(_money),
-                use_container_width=True,
-                hide_index=True,
-                height=_df_height(fixed_df, fudge=4),  # right table historically needed +4px
-            )
-        else:
-            st.info("Enter your fixed inputs above to see totals here.")
+    else:
+        st.info("Enter your fixed inputs above to see totals here.")
 
 # ---------- render ----------
 render_profit_summary()
+ 
 
 # --- FINAL SCROLL CLEANUP (runs after Streamlit's rerender) ---
 st.markdown("""
