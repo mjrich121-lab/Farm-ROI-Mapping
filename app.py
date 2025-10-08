@@ -1108,7 +1108,7 @@ def render_profit_summary():
             styled_comp,
             use_container_width=True,
             hide_index=True,
-            height=_df_height(comparison, fudge=-2),
+            height=_df_height(comparison, fudge=-1),  # perfectly tight table height
         )
 
         # Compact horizontal formulas
@@ -1137,14 +1137,14 @@ def render_profit_summary():
                 unsafe_allow_html=True,
             )
 
-        # Corn vs Soybean table
+        # Corn vs Soybean table (tightened)
         st.subheader("Corn vs Soybean Profitability")
         styled_cs = cornsoy.style.format(_money).applymap(_profit_color, subset=["Profit ($/ac)"])
         st.dataframe(
             styled_cs,
             use_container_width=True,
             hide_index=True,
-            height=_df_height(cornsoy, fudge=0),
+            height=_df_height(cornsoy, row_h=26, header_h=34, pad=-4, fudge=-10),  # tuned to remove extra row gap
         )
 
     # ---------- RIGHT COLUMN ----------
@@ -1155,12 +1155,11 @@ def render_profit_summary():
                 fixed_df.style.format(_money),
                 use_container_width=True,
                 hide_index=True,
-                height=_df_height(fixed_df, fudge=4),
+                height=_df_height(fixed_df, row_h=27, header_h=34, pad=0, fudge=-6),  # corrected to stop scroll
             )
         else:
             st.info("Enter your fixed inputs above to see totals here.")
-
-
+    
 # ---------- render ----------
 render_profit_summary()
 
