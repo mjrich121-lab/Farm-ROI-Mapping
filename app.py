@@ -1158,29 +1158,39 @@ def render_profit_summary():
 render_profit_summary()
 
 # =========================================================
-# 9B. NUCLEAR NO-SCROLL FIX (Browser-level adjustment)
+# 9C. HARD-LOCK TABLE HEIGHT (Ultimate no-scroll enforcement)
 # =========================================================
 st.markdown("""
 <script>
-function adjustAllTables(){
-  const tables = parent.document.querySelectorAll('[data-testid="stDataFrameContainer"]');
-  tables.forEach(tbl=>{
-    // Find the actual inner table element and measure it
-    const inner = tbl.querySelector('table');
-    if(inner){
-      const innerHeight = inner.getBoundingClientRect().height;
-      if(innerHeight>0){
-        tbl.style.height = (innerHeight + 2) + 'px';
-        tbl.style.maxHeight = (innerHeight + 2) + 'px';
-        tbl.style.overflow = 'visible';
+function hardLockTables(){
+  const root = parent.document;
+  const containers = root.querySelectorAll('[data-testid*="stDataFrame"],[data-testid*="stDataEditor"]');
+  containers.forEach(c=>{
+    const table = c.querySelector('table');
+    if(table){
+      const rect = table.getBoundingClientRect();
+      if(rect.height>0){
+        // hard-lock container to inner table height
+        c.style.height = rect.height + 'px';
+        c.style.maxHeight = rect.height + 'px';
+        c.style.overflow = 'hidden';
+        // also kill scroll hints on ancestors
+        c.parentElement?.style?.setProperty('overflow','visible','important');
       }
     }
   });
 }
-// Run once and then again after Streamlit reflows
-adjustAllTables();
-new MutationObserver(adjustAllTables)
+
+// Run repeatedly until Streamlit is stable, then watch for changes
+let attempts = 0;
+const repeater = setInterval(()=>{
+  hardLockTables();
+  attempts++;
+  if(attempts>15) clearInterval(repeater); // stop after ~3s
+}, 200);
+
+// Permanent watcher for later rerenders
+new MutationObserver(()=>hardLockTables())
   .observe(parent.document.body,{childList:true,subtree:true});
 </script>
 """, unsafe_allow_html=True)
-
