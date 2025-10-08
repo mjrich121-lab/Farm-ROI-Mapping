@@ -402,8 +402,6 @@ def render_uploaders():
                                 st.warning(f"{yf.name}: no valid coordinates loaded")
                                 continue
 
-                            })
-
                     # --- Vector path (GeoJSON/SHP/ZIP)
                     else:
                         gdf = load_vector_file(yf)
