@@ -81,6 +81,38 @@ def apply_compact_theme():
 # ===========================
 # HELPERS
 # ===========================
+import re
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(s).lower()).strip("_")
+
+def pick_col(df: pd.DataFrame, preferred: list[str]) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    norm_map = {_norm(c): c for c in df.columns}
+    # exact / preferred order first
+    for key in preferred:
+        if key in norm_map:
+            return norm_map[key]
+    # then fuzzy contains “yield” / “yld”
+    for k, orig in norm_map.items():
+        if "yield" in k or re.search(r"\byld\b", k):
+            return orig
+    return None
+
+YIELD_PREFS = [
+    "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield",
+    "yld_vol_wt", "yld_mass_wt", "wet_yield", "crop_flw_m"
+]
+
+LAT_PREFS = [
+    "latitude", "lat", "point_y", "y", "ycoord", "y_coord", "northing", "north"
+]
+
+LON_PREFS = [
+    "longitude", "lon", "long", "point_x", "x", "xcoord", "x_coord", "easting", "east"
+]
+
 def auto_height(df: pd.DataFrame, row_h: int = 36, header: int = 44, pad: int = 16) -> int:
     n = max(1, len(df))
     return int(header + n * row_h + pad)
@@ -357,34 +389,39 @@ def render_uploaders():
                 st.error("Could not read zone file.")
         else:
             st.caption("No zone file uploaded.")
-
-        # --- Yield (Shape-first robust loader) ---
+        # --- Yield (robust + no dummy points) ---
     with u2:
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
-        yield_files = st.file_uploader("Yield", type=["zip", "geojson", "json", "shp", "csv"],
-                                       key="up_yield", accept_multiple_files=True)
-        st.session_state["yield_df"] = pd.DataFrame()
+        yield_files = st.file_uploader(
+            "Yield", type=["zip", "shp", "geojson", "json", "csv"],
+            key="up_yield", accept_multiple_files=True
+        )
 
+        st.session_state["yield_df"] = pd.DataFrame()
         if yield_files:
             frames = []
-            yield_source_info = []
+            messages = []
 
             for yf in yield_files:
                 try:
                     name = yf.name.lower()
 
-                    # ==========================
-                    # --- SHAPE / GEOJSON PATH ---
-                    # ==========================
-                    if any(name.endswith(ext) for ext in [".zip", ".geojson", ".json", ".shp"]):
-                        gdf = load_vector_file(yf)
+                    # -------- read file to DataFrame (with coords) --------
+                    df = None
+                    gdf = None
+
+                    if name.endswith(".csv"):
+                        df = pd.read_csv(yf)
+                        df.columns = [c.strip() for c in df.columns]
+                    else:
+                        gdf = load_vector_file(yf)  # already handles .zip/.shp/.geojson
                         if gdf is None or gdf.empty:
-                            st.warning(f"{yf.name}: empty or unreadable geometry.")
+                            messages.append(f"{yf.name}: empty or unreadable — skipped.")
                             continue
 
-                        # Extract coordinates from geometry (points or polygons)
+                        # geometry → coords (points; or polygon centroids)
                         try:
-                            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
+                            if hasattr(gdf, "geom_type") and gdf.geom_type.astype(str).str.contains("Point", case=False).any():
                                 gdf["Longitude"] = gdf.geometry.x
                                 gdf["Latitude"]  = gdf.geometry.y
                             else:
@@ -392,82 +429,68 @@ def render_uploaders():
                                 gdf["Longitude"] = reps.x
                                 gdf["Latitude"]  = reps.y
                         except Exception as e:
-                            st.warning(f"{yf.name}: geometry extraction failed ({e})")
-                            continue
-
-                        # Normalize column names
-                        gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
-                        ycol = find_col(gdf, [
-                            "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield",
-                            "yld_vol_wt", "yld_mass_wt", "crop_flw_m"
-                        ])
-
-                        if ycol:
-                            if ycol != "yield":
-                                gdf.rename(columns={ycol: "Yield"}, inplace=True)
-                        else:
-                            st.warning(f"{yf.name}: no yield field detected — skipped.")
-                            continue
+                            messages.append(f"{yf.name}: geometry coord extraction failed: {e}")
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        df.rename(columns={"latitude": "Latitude", "longitude": "Longitude"}, inplace=True)
-                        df = df.dropna(subset=["Latitude", "Longitude", "Yield"])
+                        df.columns = [c.strip() for c in df.columns]
 
-                        if df.empty:
-                            st.warning(f"{yf.name}: geometry extracted but no valid yield points.")
-                            continue
+                    if df is None or df.empty:
+                        messages.append(f"{yf.name}: no rows after read — skipped.")
+                        continue
 
-                        frames.append(df[["Latitude", "Longitude", "Yield"]])
-                        yield_source_info.append(f"{yf.name} — using '{ycol}' field")
+                    # -------- find yield / lat / lon columns --------
+                    # normalize map for selection
+                    df_ren = df.rename(columns={c: _norm(c) for c in df.columns})
 
-                    # ==========================
-                    # --- CSV PATH (secondary) ---
-                    # ==========================
-                    else:
-                        df = pd.read_csv(yf)
-                        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+                    ycol_raw = pick_col(df_ren, YIELD_PREFS)
+                    lat_raw  = pick_col(df_ren, LAT_PREFS)
+                    lon_raw  = pick_col(df_ren, LON_PREFS)
 
-                        lat_col = find_col(df, ["latitude", "lat", "y", "point_y", "northing", "ycoord"])
-                        lon_col = find_col(df, ["longitude", "lon", "x", "point_x", "easting", "xcoord"])
-                        ycol = find_col(df, [
-                            "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield", "wet_yield",
-                            "yld_vol_wt", "yld_mass_wt", "crop_flw_m"
-                        ])
+                    if ycol_raw is None:
+                        messages.append(f"{yf.name}: no yield column found — skipped.")
+                        continue
 
-                        if lat_col and lon_col:
-                            df.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
-                        else:
-                            st.warning(f"{yf.name}: no coordinate columns detected — skipped.")
-                            continue
+                    # bring to standard names
+                    df_std = df_ren.rename(columns={
+                        ycol_raw: "yield_val",
+                        **({lat_raw: "lat"} if lat_raw else {}),
+                        **({lon_raw: "lon"} if lon_raw else {}),
+                    })
 
-                        if ycol and ycol != "yield":
-                            df.rename(columns={ycol: "Yield"}, inplace=True)
-                        elif "yield" not in df.columns:
-                            st.warning(f"{yf.name}: no yield field found — skipped.")
-                            continue
+                    # If coords missing (shouldn’t happen for shapefiles we processed), skip safely
+                    if "lat" not in df_std.columns or "lon" not in df_std.columns:
+                        messages.append(f"{yf.name}: geometry extracted but no valid lat/lon — skipped.")
+                        continue
 
-                        df = df.dropna(subset=["Latitude", "Longitude", "Yield"])
-                        if df.empty:
-                            st.warning(f"{yf.name}: all rows invalid — skipped.")
-                            continue
+                    # numeric + clean
+                    for c in ["yield_val", "lat", "lon"]:
+                        df_std[c] = pd.to_numeric(df_std[c], errors="coerce")
 
-                        frames.append(df[["Latitude", "Longitude", "Yield"]])
-                        yield_source_info.append(f"{yf.name} — using '{ycol}' field")
+                    df_std = df_std.dropna(subset=["yield_val", "lat", "lon"])
+                    df_std = df_std[np.isfinite(df_std["yield_val"]) & np.isfinite(df_std["lat"]) & np.isfinite(df_std["lon"])]
 
+                    if df_std.empty:
+                        messages.append(f"{yf.name}: geometry extracted but no valid yield points.")
+                        continue
+
+                    frames.append(df_std[["yield_val", "lat", "lon"]])
+                    # report which field we used (original column name)
+                    used_yield = next((c for c in df.columns if _norm(c) == ycol_raw), ycol_raw)
+                    messages.append(f"{yf.name}: using field '{used_yield}' for yield.")
                 except Exception as e:
-                    st.warning(f"Yield file {yf.name}: {e}")
+                    messages.append(f"{yf.name}: {e}")
 
-            # Merge all loaded yield dataframes
             if frames:
-                combined = pd.concat(frames, ignore_index=True)
-                st.session_state["yield_df"] = combined
-                used_sources = "\n".join(yield_source_info)
-                st.success(f"✅ Yield data loaded successfully.\n\n{used_sources}")
+                combo = pd.concat(frames, ignore_index=True)
+                combo.rename(columns={"yield_val": "Yield", "lat": "Latitude", "lon": "Longitude"}, inplace=True)
+                st.session_state["yield_df"] = combo
+                st.success("Yield data loaded successfully.\n" + "\n".join(messages))
             else:
-                st.error("❌ No valid yield data found — nothing to map.")
+                st.error("No valid yield data found — nothing to map.\n" + "\n".join(messages))
         else:
             st.caption("No yield files uploaded.")
 
+        
     # --- Fertilizer (Hardened) ---
     with u3:
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
