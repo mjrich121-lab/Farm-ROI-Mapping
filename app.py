@@ -793,74 +793,66 @@ def render_input_sections():
 # Map helpers / overlays
 # ===========================
 def make_base_map():
-    """Bullet-proof base map: OSM as default, Esri optional."""
+    """Single basemap: Esri Imagery + always-on labels, with OSM fallback and no selectors."""
     try:
         m = folium.Map(
             location=[39.5, -98.35],
             zoom_start=5,
             min_zoom=2,
-            tiles=None,                 # we add layers explicitly
+            tiles=None,           # add layers explicitly
             control_scale=True,
             prefer_canvas=True,
             zoom_control=True,
         )
 
-        # --- Always add an OSM base that works everywhere ---
-        try:
-            folium.TileLayer(
-                tiles="OpenStreetMap",      # https://{s}.tile.openstreetmap.org
-                name="OpenStreetMap",
-                overlay=False,
-                control=True,
-                max_zoom=20,
-            ).add_to(m)
-        except Exception:
-            pass
+        # 0) OSM fallback (hidden; shows only if Esri fails and is removed)
+        folium.TileLayer(
+            tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            attr="© OpenStreetMap",
+            overlay=False,
+            control=False,
+            max_zoom=20,
+        ).add_to(m)
 
-        # --- Optional basemaps (safe if they fail) ---
-        for tiles, name in [
-            ("CartoDB Positron", "CartoDB Positron"),
-            ("Stamen Terrain", "Stamen Terrain"),
-        ]:
-            try:
-                folium.TileLayer(
-                    tiles=tiles, name=name, overlay=False, control=True, max_zoom=20
-                ).add_to(m)
-            except Exception:
-                pass
+        # 1) Esri World Imagery (primary)
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri",
+            overlay=False,
+            control=False,   # no selector
+            max_zoom=20,
+        ).add_to(m)
 
-        # --- Esri imagery + labels (optional; may fail silently) ---
-        try:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri",
-                name="Esri World Imagery",
-                overlay=False,
-                control=True,
-                max_zoom=20,
-            ).add_to(m)
-        except Exception:
-            pass
-        try:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri",
-                name="Esri Labels",
-                overlay=True,   # labels overlay on top of any base
-                control=True,
-                max_zoom=20,
-                opacity=0.9,
-            ).add_to(m)
-        except Exception:
-            pass
+        # 2) Esri labels overlay (always on)
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri",
+            overlay=True,
+            control=False,   # no selector
+            opacity=0.9,
+            max_zoom=20,
+        ).add_to(m)
 
-        # Keep your scroll-wheel behavior
+        # Scroll behavior + Esri tile error auto-fallback
         template = Template("""
             {% macro script(this, kwargs) %}
             var map = {{this._parent.get_name()}};
             map.scrollWheelZoom.disable();
             map.on('click', function(){ map.scrollWheelZoom.enable(); });
             map.on('mouseout', function(){ map.scrollWheelZoom.disable(); });
+
+            // If Esri tiles error repeatedly, remove them so OSM is visible
+            map.eachLayer(function(l){
+              if (l instanceof L.TileLayer && l._url && l._url.indexOf('arcgisonline.com/ArcGIS') !== -1) {
+                var err = 0;
+                l.on('tileerror', function(){
+                  err += 1;
+                  if (err > 3) {
+                    try { map.removeLayer(l); } catch(e){}
+                  }
+                });
+              }
+            });
             {% endmacro %}
         """)
         macro = MacroElement(); macro._template = template
@@ -1303,10 +1295,7 @@ try:
 except Exception as e:
     st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
 
-try:
-    folium.LayerControl(collapsed=False, position="topright").add_to(m)
-except Exception:
-    pass
+# NOTE: removed LayerControl to prevent selectors
 
 st_folium(m, use_container_width=True, height=600)
 
