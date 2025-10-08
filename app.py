@@ -1306,62 +1306,60 @@ for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
         add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", plt.cm.Blues, legend_ix)
         legend_ix += 1
 
-# ---------- Heatmaps (yield / profits) ----------
+# ---------- Heatmaps (yield / profits) — FOOLPROOF ----------
 bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-# ✅ Only use real yield points; no synthetic dots
+# Use only real yield points; never synthesize points from thin air
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
-    latc = find_col(ydf, ["latitude"])
-    lonc = find_col(ydf, ["longitude"])
-    if latc and lonc:
-        df_for_maps = ydf.rename(columns={latc: "Latitude", lonc: "Longitude"}).copy()
-        df_for_maps = df_for_maps.dropna(subset=["Latitude", "Longitude"])
-
-        # --- Detect and select dry yield ---
-        dry_candidates = ["yld_vol_dr", "yld_mass_d", "yld_vol_we", "yld_vol_dr_", "yld_mass_d_"]
-        ycol = find_col(df_for_maps, dry_candidates)
-        if ycol and ycol in df_for_maps.columns:
-            df_for_maps["Yield"] = pd.to_numeric(df_for_maps[ycol], errors="coerce")
-        else:
-            st.warning("No dry yield column found — using zeros.")
-            df_for_maps["Yield"] = 0.0
-
-        # --- Normalize yield (clip 5th–95th percentile) ---
-        if not df_for_maps["Yield"].dropna().empty:
-            low, high = np.nanpercentile(df_for_maps["Yield"], [5, 95])
-            df_for_maps = df_for_maps[(df_for_maps["Yield"] >= low) & (df_for_maps["Yield"] <= high)]
-
-        # --- Convert to bushels/acre if not already ---
-        # Many AgLeader / Deere shapefiles are already bu/ac, but we normalize scale
-        if df_for_maps["Yield"].max() > 400:
-            # assume it's kg/ha or lb/ac, apply generic scale-down
-            df_for_maps["Yield"] = df_for_maps["Yield"] / 15.93  # rough kg/ha -> bu/ac corn conversion
-
-    else:
-        df_for_maps = pd.DataFrame()
+    latc = find_col(ydf, ["latitude"]) or "Latitude"
+    lonc = find_col(ydf, ["longitude"]) or "Longitude"
+    keep = [c for c in [latc, lonc, "Yield"] if c in ydf.columns]
+    df_for_maps = ydf[keep].copy()
+    for c in keep:
+        df_for_maps[c] = pd.to_numeric(df_for_maps[c], errors="coerce")
+    df_for_maps.dropna(subset=[latc, lonc], inplace=True)
+    df_for_maps.rename(columns={latc: "Latitude", lonc: "Longitude"}, inplace=True)
 else:
-    df_for_maps = pd.DataFrame()
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
-# ✅ Zoom bounds based on valid yield data
-if not df_for_maps.empty:
+# Guarantee Yield exists and is numeric
+if "Yield" not in df_for_maps.columns:
+    df_for_maps["Yield"] = 0.0
+df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0.0)
+
+# 5–95% clip to normalize
+try:
+    if df_for_maps["Yield"].dropna().size > 0:
+        low, high = np.nanpercentile(df_for_maps["Yield"], [5, 95])
+        if np.isfinite(low) and np.isfinite(high) and low < high:
+            df_for_maps["Yield"] = df_for_maps["Yield"].clip(lower=low, upper=high)
+except Exception:
+    pass
+
+# Heuristic unit fix (if values look way too large)
+try:
+    if df_for_maps["Yield"].dropna().size > 0 and df_for_maps["Yield"].max() > 400:
+        df_for_maps["Yield"] = df_for_maps["Yield"] / 15.93
+except Exception:
+    pass
+
+# Zoom from data if present
+if not df_for_maps.empty and df_for_maps[["Latitude", "Longitude"]].dropna().shape[0] > 0:
     south, west, north, east = (
-        df_for_maps["Latitude"].min(),
-        df_for_maps["Longitude"].min(),
-        df_for_maps["Latitude"].max(),
-        df_for_maps["Longitude"].max(),
+        float(df_for_maps["Latitude"].min()),
+        float(df_for_maps["Longitude"].min()),
+        float(df_for_maps["Latitude"].max()),
+        float(df_for_maps["Longitude"].max()),
     )
     bounds = (south, west, north, east)
 
+# Compute profit columns defensively
 try:
-    df_for_maps = df_for_maps.copy()
-    df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0.0)
-    df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
-
     base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
     if not base_expenses_per_acre:
-        base_expenses_per_acre = float(sum(st.session_state.get("expenses_dict", {}).values()))
+        base_expenses_per_acre = float(sum(st.session_state.get("expenses_dict", {}).values() or [0.0]))
     st.session_state["base_expenses_per_acre"] = base_expenses_per_acre
 
     fert_var = 0.0
@@ -1373,10 +1371,8 @@ try:
         if isinstance(d, pd.DataFrame) and not d.empty:
             seed_var += float(pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0.0).sum())
 
-    df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
-
-    fixed_costs = 0.0
     fx = st.session_state.get("fixed_products", pd.DataFrame())
+    fixed_costs = 0.0
     if isinstance(fx, pd.DataFrame) and not fx.empty:
         if "$/ac" in fx.columns:
             fixed_costs = float(pd.to_numeric(fx["$/ac"], errors="coerce").fillna(0.0).sum())
@@ -1388,31 +1384,44 @@ try:
                     (pd.to_numeric(fx[rcol], errors="coerce").fillna(0.0) *
                      pd.to_numeric(fx[pcol], errors="coerce").fillna(0.0)).sum()
                 )
-    df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
 
+    df_for_maps["Revenue_per_acre"]   = df_for_maps["Yield"] * sell_price
+    df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
+    df_for_maps["NetProfit_Fixed"]    = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
 except Exception as e:
-    st.warning(f"Profit metric computation failed: {e}")
-    df_for_maps["Revenue_per_acre"] = 0.0
-    df_for_maps["NetProfit_Variable"] = 0.0
-    df_for_maps["NetProfit_Fixed"] = 0.0
+    st.warning(f"Profit metric computation fallback: {e}")
+    for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
+        if c not in df_for_maps.columns:
+            df_for_maps[c] = 0.0
+        df_for_maps[c] = pd.to_numeric(df_for_maps[c], errors="coerce").fillna(0.0)
 
-# ---------- Heatmap overlays + stacked legends ----------
-ymin, ymax = add_heatmap_overlay(m, df_for_maps, df_for_maps["Yield"], "Yield (bu/ac)", plt.cm.RdYlGn, True, bounds)
+# ---------- Heatmap overlays + legends (decoupled) ----------
+def safe_overlay(colname, title, cmap, show_default):
+    if colname not in df_for_maps.columns or df_for_maps.empty:
+        return None, None
+    try:
+        return add_heatmap_overlay(
+            m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
+        )
+    except Exception as e:
+        st.warning(f"Overlay '{title}' failed: {e}")
+        return None, None
+
+ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
 if ymin is not None:
     add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
 
-vmin, vmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Variable"],
-                                 "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False, bounds)
+vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
 if vmin is not None:
     add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
 
-fmin, fmax = add_heatmap_overlay(m, df_for_maps, df_for_maps["NetProfit_Fixed"],
-                                 "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False, bounds)
+fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
 if fmin is not None:
     add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
-# ---------- Top zone outlines + zoom ----------
+# ---------- Top zone outlines + final fit ----------
 try:
+    zones_gdf = st.session_state.get("zones_gdf")
     if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         folium.GeoJson(
             zones_gdf,
@@ -1423,15 +1432,14 @@ try:
                 "weight": 3,
                 "opacity": 1.0,
             },
+            tooltip=None
         ).add_to(m)
 
-    m.fit_bounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]])
+    # final fit using all available layers
+    south, west, north, east = compute_bounds_for_heatmaps()
+    m.fit_bounds([[south, west], [north, east]])
 except Exception as e:
-    st.warning(f"Auto-zoom fallback: {e}")
-
-st_folium(m, use_container_width=True, height=600)
-
-# NOTE: removed LayerControl to prevent selectors
+    st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
 
 st_folium(m, use_container_width=True, height=600)
 
