@@ -306,7 +306,7 @@ def render_uploaders():
     st.subheader("Upload Maps")
     u1, u2, u3, u4 = st.columns(4)
 
-     # --- Zones (same as before) ---
+    # --- Zones (same as before) ---
     with u1:
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
@@ -359,148 +359,148 @@ def render_uploaders():
         else:
             st.caption("No zone file uploaded.")
 
- # --- Yield (Patched & Nuclear) ---
-with u2:
-    st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
-    yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"],
-                                   key="up_yield", accept_multiple_files=True)
-    st.session_state["yield_df"] = pd.DataFrame()
-    if yield_files:
-        frames = []
-        yield_source_info = []  # store which file & which yield field
-        for yf in yield_files:
-            try:
-                name = yf.name.lower()
+    # --- Yield (Patched & Nuclear) ---
+    with u2:
+        st.caption("Yield Map(s) · CSV/GeoJSON/JSON/ZIP(SHP)")
+        yield_files = st.file_uploader("Yield", type=["csv","geojson","json","zip"],
+                                       key="up_yield", accept_multiple_files=True)
+        st.session_state["yield_df"] = pd.DataFrame()
+        if yield_files:
+            frames = []
+            yield_source_info = []  # store which file & which yield field
+            for yf in yield_files:
+                try:
+                    name = yf.name.lower()
 
-                # --- CSV path
-                if name.endswith(".csv"):
-                    df = pd.read_csv(yf)
-                    df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                    # --- CSV path
+                    if name.endswith(".csv"):
+                        df = pd.read_csv(yf)
+                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
 
-                    # --- Debug coordinate fields ---
-                    st.write("DEBUG columns:", list(df.columns))
+                        # --- Debug coordinate fields ---
+                        st.write("DEBUG columns:", list(df.columns))
 
-                    # Attempt aggressive coordinate promotion
-                    for cand_lat in ["lat", "latitude", "y", "point_y", "northing"]:
-                        if cand_lat.lower() in [c.lower() for c in df.columns]:
-                            df.rename(columns={cand_lat: "Latitude"}, inplace=True)
-                            break
-                    for cand_lon in ["lon", "longitude", "x", "point_x", "easting"]:
-                        if cand_lon.lower() in [c.lower() for c in df.columns]:
-                            df.rename(columns={cand_lon: "Longitude"}, inplace=True)
-                            break
+                        # Attempt aggressive coordinate promotion
+                        for cand_lat in ["lat", "latitude", "y", "point_y", "northing"]:
+                            if cand_lat.lower() in [c.lower() for c in df.columns]:
+                                df.rename(columns={cand_lat: "Latitude"}, inplace=True)
+                                break
+                        for cand_lon in ["lon", "longitude", "x", "point_x", "easting"]:
+                            if cand_lon.lower() in [c.lower() for c in df.columns]:
+                                df.rename(columns={cand_lon: "Longitude"}, inplace=True)
+                                break
 
-                    # try to promote common coord columns
-                    lat_alt = find_col(df, ["latitude","lat","point_y","y","ycoord","y_coord","northing","north"])
-                    lon_alt = find_col(df, ["longitude","lon","long","point_x","x","xcoord","x_coord","easting","east"])
-                    if lat_alt and lat_alt != "Latitude": df.rename(columns={lat_alt:"Latitude"}, inplace=True)
-                    if lon_alt and lon_alt != "Longitude": df.rename(columns={lon_alt:"Longitude"}, inplace=True)
+                        # try to promote common coord columns
+                        lat_alt = find_col(df, ["latitude","lat","point_y","y","ycoord","y_coord","northing","north"])
+                        lon_alt = find_col(df, ["longitude","lon","long","point_x","x","xcoord","x_coord","easting","east"])
+                        if lat_alt and lat_alt != "Latitude": df.rename(columns={lat_alt:"Latitude"}, inplace=True)
+                        if lon_alt and lon_alt != "Longitude": df.rename(columns={lon_alt:"Longitude"}, inplace=True)
 
-                    # if still missing, synthesize single centroid
-                    if ("Latitude" not in df.columns) or ("Longitude" not in df.columns) or \
-                       df[["Latitude","Longitude"]].dropna().empty:
-                        df = pd.DataFrame({
-                            "Yield":[float(st.session_state.get("target_yield", 200.0))],
-                            "Latitude":[np.nan], "Longitude":[np.nan]
-                        })
-
-                # --- Vector path (GeoJSON/SHP/ZIP)
-                else:
-                    gdf = load_vector_file(yf)
-                    if gdf is None or gdf.empty:
-                        st.warning(f"{yf.name}: empty or unreadable geometry.")
-                        continue
-
-                    debug_report_gdf(gdf, yf.name)
-
-                    # ✅ Force geometry extraction for yield data (properly indented here)
-                    if "geometry" in gdf.columns or hasattr(gdf, "geometry"):
-                        try:
-                            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
-                                gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"] = gdf.geometry.y
-                            else:
-                                reps = gdf.geometry.representative_point()
-                                gdf["Longitude"] = reps.x
-                                gdf["Latitude"] = reps.y
-                        except Exception as e:
-                            st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
-
-                    df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                    df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
-                    if ("latitude" not in df.columns or "longitude" not in df.columns or
-                        df[["latitude","longitude"]].dropna().empty):
-                        try:
-                            tb = gdf.total_bounds
+                        # if still missing, synthesize single centroid
+                        if ("Latitude" not in df.columns) or ("Longitude" not in df.columns) or \
+                           df[["Latitude","Longitude"]].dropna().empty:
                             df = pd.DataFrame({
-                                "yield":[float(st.session_state.get("target_yield", 200.0))],
-                                "latitude":[(tb[1]+tb[3])/2.0],
-                                "longitude":[(tb[0]+tb[2])/2.0],
+                                "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                "Latitude":[np.nan], "Longitude":[np.nan]
                             })
-                        except Exception:
-                            st.warning(f"{yf.name}: no usable coordinates found.")
+
+                    # --- Vector path (GeoJSON/SHP/ZIP)
+                    else:
+                        gdf = load_vector_file(yf)
+                        if gdf is None or gdf.empty:
+                            st.warning(f"{yf.name}: empty or unreadable geometry.")
                             continue
-                    df.rename(columns={"latitude":"Latitude","longitude":"Longitude"}, inplace=True)
 
-                # --- Normalize Yield column names
-                df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
-                ycol = find_col(df, [
-                    "yield","yld_vol_dr","yld_mass_dr","yield_dry","dry_yield","wet_yield",
-                    "yld_vol_wt","yld_mass_wt","crop_flw_m"
-                ])
-                if ycol and ycol != "yield":
-                    df.rename(columns={ycol:"Yield"}, inplace=True)
-                elif "yield" not in df.columns:
-                    df["Yield"] = float(st.session_state.get("target_yield", 200.0))
+                        debug_report_gdf(gdf, yf.name)
 
-                # --- Finalize coords + clean
-                if "latitude" in df.columns and "Latitude" not in df.columns:
-                    df.rename(columns={"latitude":"Latitude"}, inplace=True)
-                if "longitude" in df.columns and "Longitude" not in df.columns:
-                    df.rename(columns={"longitude":"Longitude"}, inplace=True)
+                        # ✅ Force geometry extraction for yield data (properly indented here)
+                        if "geometry" in gdf.columns or hasattr(gdf, "geometry"):
+                            try:
+                                if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
+                                    gdf["Longitude"] = gdf.geometry.x
+                                    gdf["Latitude"] = gdf.geometry.y
+                                else:
+                                    reps = gdf.geometry.representative_point()
+                                    gdf["Longitude"] = reps.x
+                                    gdf["Latitude"] = reps.y
+                            except Exception as e:
+                                st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
 
-                for c in ["Yield","Latitude","Longitude"]:
-                    if c in df.columns:
-                        df[c] = pd.to_numeric(df[c], errors="coerce")
+                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                        if ("latitude" not in df.columns or "longitude" not in df.columns or
+                            df[["latitude","longitude"]].dropna().empty):
+                            try:
+                                tb = gdf.total_bounds
+                                df = pd.DataFrame({
+                                    "yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "latitude":[(tb[1]+tb[3])/2.0],
+                                    "longitude":[(tb[0]+tb[2])/2.0],
+                                })
+                            except Exception:
+                                st.warning(f"{yf.name}: no usable coordinates found.")
+                                continue
+                        df.rename(columns={"latitude":"Latitude","longitude":"Longitude"}, inplace=True)
 
-                # Last-resort coordinate patch
-                if (("Latitude" not in df.columns) or ("Longitude" not in df.columns) or
-                    df[["Latitude","Longitude"]].dropna().empty):
-                    try:
-                        zg = st.session_state.get("zones_gdf")
-                        if zg is not None and not zg.empty:
-                            tb = zg.total_bounds
-                            df = pd.DataFrame({
-                                "Yield":[float(st.session_state.get("target_yield", 200.0))],
-                                "Latitude":[(tb[1]+tb[3])/2.0],
-                                "Longitude":[(tb[0]+tb[2])/2.0],
-                            })
-                        else:
-                            df = pd.DataFrame({
-                                "Yield":[float(st.session_state.get("target_yield", 200.0))],
-                                "Latitude":[0.0],
-                                "Longitude":[0.0],
-                            })
-                    except Exception:
-                        pass
+                    # --- Normalize Yield column names
+                    df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
+                    ycol = find_col(df, [
+                        "yield","yld_vol_dr","yld_mass_dr","yield_dry","dry_yield","wet_yield",
+                        "yld_vol_wt","yld_mass_wt","crop_flw_m"
+                    ])
+                    if ycol and ycol != "yield":
+                        df.rename(columns={ycol:"Yield"}, inplace=True)
+                    elif "yield" not in df.columns:
+                        df["Yield"] = float(st.session_state.get("target_yield", 200.0))
 
-                df = df.dropna(subset=["Latitude","Longitude"])
-                if not df.empty:
-                    frames.append(df[["Yield","Latitude","Longitude"]])
-                    yield_source_info.append(f"{yf.name} — using field '{ycol or 'yield'}' for dry yield data")
-            except Exception as e:
-                st.warning(f"Yield file {yf.name}: {e}")
+                    # --- Finalize coords + clean
+                    if "latitude" in df.columns and "Latitude" not in df.columns:
+                        df.rename(columns={"latitude":"Latitude"}, inplace=True)
+                    if "longitude" in df.columns and "Longitude" not in df.columns:
+                        df.rename(columns={"longitude":"Longitude"}, inplace=True)
 
-        if frames:
-            combined = pd.concat(frames, ignore_index=True)
-            st.session_state["yield_df"] = combined
-            used_sources = "\n".join(yield_source_info)
-            st.success(f"✅ Yield data loaded successfully.\n\n{used_sources}")
+                    for c in ["Yield","Latitude","Longitude"]:
+                        if c in df.columns:
+                            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+                    # Last-resort coordinate patch
+                    if (("Latitude" not in df.columns) or ("Longitude" not in df.columns) or
+                        df[["Latitude","Longitude"]].dropna().empty):
+                        try:
+                            zg = st.session_state.get("zones_gdf")
+                            if zg is not None and not zg.empty:
+                                tb = zg.total_bounds
+                                df = pd.DataFrame({
+                                    "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "Latitude":[(tb[1]+tb[3])/2.0],
+                                    "Longitude":[(tb[0]+tb[2])/2.0],
+                                })
+                            else:
+                                df = pd.DataFrame({
+                                    "Yield":[float(st.session_state.get("target_yield", 200.0))],
+                                    "Latitude":[0.0],
+                                    "Longitude":[0.0],
+                                })
+                        except Exception:
+                            pass
+
+                    df = df.dropna(subset=["Latitude","Longitude"])
+                    if not df.empty:
+                        frames.append(df[["Yield","Latitude","Longitude"]])
+                        yield_source_info.append(f"{yf.name} — using field '{ycol or 'yield'}' for dry yield data")
+                except Exception as e:
+                    st.warning(f"Yield file {yf.name}: {e}")
+
+            if frames:
+                combined = pd.concat(frames, ignore_index=True)
+                st.session_state["yield_df"] = combined
+                used_sources = "\n".join(yield_source_info)
+                st.success(f"✅ Yield data loaded successfully.\n\n{used_sources}")
+            else:
+                st.error("No valid yield data detected — expand the Debug panel above for details.")
         else:
-            st.error("No valid yield data detected — expand the Debug panel above for details.")
-    else:
-        st.caption("No yield files uploaded.")
- 
+            st.caption("No yield files uploaded.")
+
     # --- Fertilizer (Hardened) ---
     with u3:
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
