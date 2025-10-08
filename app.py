@@ -377,6 +377,20 @@ def render_uploaders():
                         df = pd.read_csv(yf)
                         df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
 
+                        # --- Debug coordinate fields ---
+                        st.write("DEBUG columns:", list(df.columns))
+
+                        # Attempt aggressive coordinate promotion
+                        for cand_lat in ["lat", "latitude", "y", "point_y", "northing"]:
+                            if cand_lat.lower() in [c.lower() for c in df.columns]:
+                                df.rename(columns={cand_lat: "Latitude"}, inplace=True)
+                                break
+                        for cand_lon in ["lon", "longitude", "x", "point_x", "easting"]:
+                            if cand_lon.lower() in [c.lower() for c in df.columns]:
+                                df.rename(columns={cand_lon: "Longitude"}, inplace=True)
+                                break
+
+
                         # try to promote common coord columns
                         lat_alt = find_col(df, ["latitude","lat","point_y","y","ycoord","y_coord","northing","north"])
                         lon_alt = find_col(df, ["longitude","lon","long","point_x","x","xcoord","x_coord","easting","east"])
