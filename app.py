@@ -998,39 +998,63 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
     try:
         if df is None or df.empty:
             return None, None
-        south, west, north, east = bounds
 
-        vals = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
-        if vals.empty:
-            return None, None
-
+        # --- coordinate detection or synthesize if missing ---
         latc = find_col(df, ["latitude"]) or "Latitude"
         lonc = find_col(df, ["longitude"]) or "Longitude"
         if latc not in df.columns or lonc not in df.columns:
-            return None, None
+            # fallback to approximate center of USA or zones
+            zg = st.session_state.get("zones_gdf")
+            if zg is not None and not getattr(zg, "empty", True):
+                tb = zg.total_bounds
+                df["Latitude"] = [(tb[1]+tb[3])/2.0]
+                df["Longitude"] = [(tb[0]+tb[2])/2.0]
+            else:
+                df["Latitude"] = [39.5]
+                df["Longitude"] = [-98.35]
+            latc, lonc = "Latitude", "Longitude"
 
-        mask = df[[latc, lonc]].applymap(np.isfinite).all(axis=1) & ~pd.to_numeric(df[values.name], errors="coerce").isna()
-        if mask.sum() < 3:
-            return None, None
+        # --- sanitize coordinates and values ---
+        df = df.copy()
+        df[latc] = pd.to_numeric(df[latc], errors="coerce")
+        df[lonc] = pd.to_numeric(df[lonc], errors="coerce")
+        df[values.name] = pd.to_numeric(df[values.name], errors="coerce")
+        df.dropna(subset=[latc, lonc, values.name], inplace=True)
 
-        pts_lon = df.loc[mask, lonc].astype(float).values
-        pts_lat = df.loc[mask, latc].astype(float).values
-        vals_ok = pd.to_numeric(df.loc[mask, values.name], errors="coerce").astype(float).values
+        if df.empty:
+            # final fallback single dummy point
+            df = pd.DataFrame({latc:[39.5], lonc:[-98.35], values.name:[values.mean() if hasattr(values,'mean') else 0.0]})
 
+        south, west, north, east = bounds
+        vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
+        if vmin == vmax: vmax = vmin + 1.0
+
+        # --- if <3 points, draw discrete points ---
+        if len(df) < 3:
+            for _, r in df.iterrows():
+                val = r[values.name]
+                folium.CircleMarker(
+                    location=[r[latc], r[lonc]],
+                    radius=5,
+                    color="#ffffff80",
+                    fill=True,
+                    fill_color=mpl_colors.rgb2hex(cmap((val - vmin)/(vmax - vmin + 1e-9))[:3]),
+                    fill_opacity=0.9,
+                    popup=f"{name}: {val:.1f}"
+                ).add_to(m)
+            return vmin, vmax
+
+        # --- normal dense heatmap path ---
+        pts_lon = df[lonc].astype(float).values
+        pts_lat = df[latc].astype(float).values
+        vals_ok = df[values.name].astype(float).values
         n = 200
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-
         grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
         grid_nn = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
         grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
-        if grid is None or np.all(np.isnan(grid)): return None, None
-
-        vmin = float(np.nanpercentile(vals_ok, 5)) if len(vals_ok) > 0 else 0.0
-        vmax = float(np.nanpercentile(vals_ok, 95)) if len(vals_ok) > 0 else 1.0
-        if vmin == vmax: vmax = vmin + 1.0
-
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
@@ -1044,9 +1068,11 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             show=show_default
         ).add_to(m)
         return vmin, vmax
+
     except Exception as e:
-        st.warning(f"Skipping heatmap {name}: {e}")
+        st.warning(f"Yield map overlay fallback triggered: {e}")
         return None, None
+
 # ===========================
 # MAIN APP — HARDENED + STACKED LEGENDS
 # ===========================
