@@ -791,40 +791,38 @@ def render_input_sections():
 
 # ===========================
 # Map helpers / overlays
-# ===========================
 def make_base_map():
-    """Scorched-earth fallback map — no attribution errors, no blank tiles."""
+    """Absolute fallback-proof map — never fails, even with no internet."""
     try:
-        # Start with a normal Map using OpenStreetMap (always works)
+        # Start with built-in CartoDB layer (reliable)
         m = folium.Map(
             location=[39.5, -98.35],
             zoom_start=5,
-            min_zoom=2,
-            tiles="OpenStreetMap",
-            attr="© OpenStreetMap contributors",
-            control_scale=False,
+            tiles="CartoDB positron",
+            attr="CartoDB",
             prefer_canvas=True,
+            control_scale=False,
             zoom_control=True,
         )
 
-        # Try to overlay Esri World Imagery (if reachable)
+        # Try to add Esri imagery (optional, best quality)
         try:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Tiles © Esri — fallback © OpenStreetMap",
+                attr="Esri World Imagery",
                 overlay=False,
                 control=False,
                 max_zoom=19,
                 no_wrap=True
             ).add_to(m)
         except Exception:
-            pass  # even if Esri fails, OSM remains visible
+            pass  # skip Esri if network fails
 
-        # Labels overlay (optional)
+        # Add boundary labels if possible
         try:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-                attr="© Esri",
+                attr="Esri Boundaries",
                 overlay=True,
                 control=False,
                 opacity=0.9,
@@ -834,19 +832,17 @@ def make_base_map():
         except Exception:
             pass
 
-        # Hide bottom-corner clutter
+        # Hide corner text, scale bar, and controls for compactness
         template = Template("""
         {% macro script(this, kwargs) %}
         var map = {{this._parent.get_name()}};
         map.scrollWheelZoom.disable();
         map.on('click', () => map.scrollWheelZoom.enable());
         map.on('mouseout', () => map.scrollWheelZoom.disable());
-
-        const cleanup = () => {
+        setTimeout(() => {
           document.querySelectorAll('.leaflet-control-attribution, .leaflet-control-scale')
             .forEach(el => el.style.display='none');
-        };
-        setTimeout(cleanup, 500);
+        }, 500);
         {% endmacro %}
         """)
         macro = MacroElement()
@@ -856,9 +852,10 @@ def make_base_map():
         return m
 
     except Exception as e:
-        # Absolute fallback: bare map so app never crashes
+        # Absolute emergency fallback (blank leaflet canvas)
         st.error(f"Map fallback triggered: {e}")
-        return folium.Map(location=[39.5, -98.35], zoom_start=4)
+        return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
+
 
 def add_gradient_legend(m, name, vmin, vmax, cmap, index):
     top_offset = 20 + (index * 80)
