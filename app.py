@@ -405,41 +405,19 @@ def render_uploaders():
                                 "Latitude":[np.nan], "Longitude":[np.nan]
                             })
 
-                    # --- Vector path (GeoJSON/SHP/ZIP)
-                    else:
-                        gdf = load_vector_file(yf)
-                        if gdf is None or gdf.empty:
-                            st.warning(f"{yf.name}: empty or unreadable geometry.")
-                            continue
+                      # Force geometry extraction for yield data
+    if "geometry" in gdf.columns or hasattr(gdf, "geometry"):
+        try:
+            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
+                gdf["Longitude"] = gdf.geometry.x
+                gdf["Latitude"] = gdf.geometry.y
+            else:
+                reps = gdf.geometry.representative_point()
+                gdf["Longitude"] = reps.x
+                gdf["Latitude"] = reps.y
+        except Exception as e:
+            st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
 
-                        debug_report_gdf(gdf, yf.name)
-
-                        try:
-                            if gdf.geom_type.astype(str).str.contains("Point", case=False).any():
-                                gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"]  = gdf.geometry.y
-                            else:
-                                reps = gdf.geometry.representative_point()
-                                gdf["Longitude"] = reps.x
-                                gdf["Latitude"]  = reps.y
-                        except Exception as e:
-                            st.warning(f"{yf.name}: geometry coord extraction failed: {e}")
-
-                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
-                        if ("latitude" not in df.columns or "longitude" not in df.columns or
-                            df[["latitude","longitude"]].dropna().empty):
-                            try:
-                                tb = gdf.total_bounds
-                                df = pd.DataFrame({
-                                    "yield":[float(st.session_state.get("target_yield", 200.0))],
-                                    "latitude":[(tb[1]+tb[3])/2.0],
-                                    "longitude":[(tb[0]+tb[2])/2.0],
-                                })
-                            except Exception:
-                                st.warning(f"{yf.name}: no usable coordinates found.")
-                                continue
-                        df.rename(columns={"latitude":"Latitude","longitude":"Longitude"}, inplace=True)
 
                     # --- Normalize Yield column names
                     df.columns = [c.strip().lower().replace(" ","_") for c in df.columns]
