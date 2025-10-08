@@ -395,7 +395,7 @@ def render_uploaders():
         if yield_files:
             frames, messages = [], []
 
-            # Common yield column variants across major monitor brands
+            # Common yield field names across platforms
             YIELD_PREFS = [
                 "yld_vol_dr", "yld_mass_d", "dry_yield", "dry_yld", "dryyield",
                 "yielddry", "ylddry", "dry_yield_bu_ac", "dry_yield_bua",
@@ -404,131 +404,93 @@ def render_uploaders():
                 "yld_bu_per_ac"
             ]
 
-            def _clean_yld_vals(series):
-                """Remove units/commas and convert to numeric safely."""
-                return pd.to_numeric(
-                    series.astype(str)
-                    .str.replace(r"[^\d.\-]", "", regex=True)
-                    .replace("", np.nan),
-                    errors="coerce"
-                )
-
             for yf in yield_files:
                 try:
                     name = yf.name.lower()
                     df, gdf = None, None
 
-                    # --- CSV Case ---
+                    # --- CSV ---
                     if name.endswith(".csv"):
                         df = pd.read_csv(yf)
                         df.columns = [c.strip() for c in df.columns]
 
-                    # --- SHP / GEOJSON / ZIP Case ---
+                    # --- SHP/ZIP/GEOJSON ---
                     else:
                         gdf = load_vector_file(yf)
-                        if gdf is not None and not gdf.empty:
-                            # Debug info to verify structure
-                            st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
-                            st.write("DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
-
-                            if "Yld_Vol_Dr" in gdf.columns:
-                                st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
-                            else:
-                                st.write("Yld_Vol_Dr not found in columns.")
-
-                            # Geometry → Coordinates
-                            if (
-                                hasattr(gdf, "geom_type")
-                                and gdf.geom_type.astype(str)
-                                .str.contains("Point", case=False)
-                                .any()
-                            ):
-                                gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"] = gdf.geometry.y
-                            else:
-                                reps = gdf.geometry.representative_point()
-                                gdf["Longitude"], gdf["Latitude"] = reps.x, reps.y
-
-                            df = pd.DataFrame(
-                                gdf.drop(columns="geometry", errors="ignore")
-                            )
-                        else:
+                        if gdf is None or gdf.empty:
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
+
+                        st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
+                        if "Yld_Vol_Dr" in gdf.columns:
+                            st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
+
+                        # Extract coordinates
+                        gdf["Longitude"] = gdf.geometry.centroid.x
+                        gdf["Latitude"] = gdf.geometry.centroid.y
+
+                        # Move to pandas
+                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                        df.columns = [c.strip() for c in df.columns]
 
                     if df is None or df.empty:
                         messages.append(f"{yf.name}: no data after read — skipped.")
                         continue
 
-                    # Normalize column names
+                    # Normalize and detect yield column
                     df_norm = df.rename(columns={c: _norm(c) for c in df.columns})
                     y_raw = pick_col(df_norm, YIELD_PREFS)
                     lat_raw = pick_col(df_norm, LAT_PREFS)
                     lon_raw = pick_col(df_norm, LON_PREFS)
 
-                    if not y_raw or not lat_raw or not lon_raw:
-                        messages.append(f"{yf.name}: missing core columns — skipped.")
+                    # If missing, fall back to geometry-derived coordinates
+                    if not lat_raw or not lon_raw:
+                        lat_raw, lon_raw = "Latitude", "Longitude"
+
+                    if not y_raw:
+                        messages.append(f"{yf.name}: no yield column found — skipped.")
                         continue
 
-                    # Standardize to Yield / Lat / Lon
-                    df_std = df_norm.rename(
-                        columns={
-                            y_raw: "yield_val",
-                            lat_raw: "Latitude",
-                            lon_raw: "Longitude",
-                        }
-                    )
-                    df_std["yield_val"] = _clean_yld_vals(df_std["yield_val"])
-                    df_std["Latitude"] = pd.to_numeric(df_std["Latitude"], errors="coerce")
-                    df_std["Longitude"] = pd.to_numeric(df_std["Longitude"], errors="coerce")
-                    df_std.dropna(subset=["yield_val", "Latitude", "Longitude"], inplace=True)
+                    # Clean yield values
+                    df["Yield"] = pd.to_numeric(df[y_raw], errors="coerce").fillna(0)
+                    df["Latitude"] = pd.to_numeric(df[lat_raw], errors="coerce")
+                    df["Longitude"] = pd.to_numeric(df[lon_raw], errors="coerce")
+                    df = df.dropna(subset=["Latitude", "Longitude"])
 
-                    # Convert to bushels if mass-based
-                    if "mass" in y_raw and "vol" not in y_raw:
-                        bw = float(st.session_state.get("bushel_weight_lb", 56))
-                        med = df_std["yield_val"].median()
-                        if med > 800:  # kg/ha
-                            df_std["yield_val"] = df_std["yield_val"] / 62.7272
-                        else:  # lb/ac
-                            df_std["yield_val"] = df_std["yield_val"] / bw
-
-                    # Clip outliers (5–95%)
-                    if len(df_std) > 10:
-                        p5, p95 = np.nanpercentile(df_std["yield_val"], [5, 95])
-                        keep = df_std["yield_val"].between(p5, p95)
-                        if keep.sum() > 0.2 * len(df_std):
-                            df_std = df_std[keep]
-
-                    # Sanity check coordinates
-                    df_std = df_std[
-                        (df_std["Latitude"].between(-90, 90))
-                        & (df_std["Longitude"].between(-180, 180))
+                    # Clip to valid Earth coordinates
+                    df = df[
+                        (df["Latitude"].between(-90, 90)) &
+                        (df["Longitude"].between(-180, 180))
                     ]
 
-                    if df_std.empty:
+                    # Normalize yield to remove extreme noise
+                    if len(df) > 10:
+                        p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
+                        df = df[df["Yield"].between(p5, p95)]
+
+                    if df.empty:
                         messages.append(f"{yf.name}: no valid yield points after cleaning.")
                         continue
 
-                    frames.append(df_std[["yield_val", "Latitude", "Longitude"]])
+                    # Finalize for mapping
+                    frames.append(df[["Yield", "Latitude", "Longitude"]])
                     messages.append(
-                        f"{yf.name}: using '{y_raw}' — {len(df_std):,} points OK"
+                        f"{yf.name}: using '{y_raw}' with {len(df):,} valid yield points."
                     )
 
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
 
-            # --- Combine all results ---
+            # Combine & store
             if frames:
                 combo = pd.concat(frames, ignore_index=True)
-                combo.rename(columns={"yield_val": "Yield"}, inplace=True)
                 st.session_state["yield_df"] = combo
-                st.success("Yield loaded successfully.\n" + "\n".join(messages))
+                st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
             else:
-                st.error("No valid yield data found.\n" + "\n".join(messages))
+                st.error("❌ No valid yield data found.\n" + "\n".join(messages))
         else:
             st.caption("No yield files uploaded.")
 
-  
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
