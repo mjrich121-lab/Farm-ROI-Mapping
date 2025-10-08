@@ -793,70 +793,153 @@ def render_input_sections():
 # Map helpers / overlays
 # ===========================
 def make_base_map():
-    """Single basemap: Esri Imagery + always-on labels, with OSM fallback and no selectors."""
+    """Robust basemap: Esri World Imagery with auto-fallback to alternate Esri
+    endpoint, then OSM. Labels overlay stays only when imagery is present.
+    No layer control UI."""
     try:
         m = folium.Map(
             location=[39.5, -98.35],
             zoom_start=5,
             min_zoom=2,
-            tiles=None,           # add layers explicitly
+            tiles=None,            # we add layers manually
             control_scale=True,
             prefer_canvas=True,
             zoom_control=True,
         )
 
-        # 0) OSM fallback (hidden; shows only if Esri fails and is removed)
-        folium.TileLayer(
+        # --- 0) OSM fallback (added but kept beneath everything, shows if Esri fails) ---
+        osm = folium.TileLayer(
             tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            attr="© OpenStreetMap",
+            attr="© OpenStreetMap contributors",
+            name="OSM",
             overlay=False,
             control=False,
             max_zoom=20,
+            no_wrap=True,
         ).add_to(m)
 
-        # 1) Esri World Imagery (primary)
-        folium.TileLayer(
-            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            attr="Esri",
+        # --- 1) Primary Esri endpoint (services.* is generally more reliable) ---
+        esri_primary = folium.TileLayer(
+            tiles="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Tiles © Esri — World Imagery",
+            name="Esri Imagery (primary)",
             overlay=False,
-            control=False,   # no selector
+            control=False,
             max_zoom=20,
+            no_wrap=True,
+            cross_origin=True,
         ).add_to(m)
 
-        # 2) Esri labels overlay (always on)
-        folium.TileLayer(
-            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-            attr="Esri",
+        # --- 1b) Backup Esri endpoint (server.*) — not shown unless primary errors ---
+        esri_backup = folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Tiles © Esri — World Imagery",
+            name="Esri Imagery (backup)",
+            overlay=False,
+            control=False,
+            max_zoom=20,
+            no_wrap=True,
+            cross_origin=True,
+        )
+        # NOTE: don't add backup yet—only if primary fails
+
+        # --- 2) Esri labels overlay (only keep if any imagery layer is alive) ---
+        esri_labels = folium.TileLayer(
+            tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            attr="Labels © Esri",
+            name="Esri Labels",
             overlay=True,
-            control=False,   # no selector
+            control=False,
             opacity=0.9,
             max_zoom=20,
+            no_wrap=True,
+            cross_origin=True,
         ).add_to(m)
 
-        # Scroll behavior + Esri tile error auto-fallback
-        template = Template("""
+        # --- Leaflet script: handle tile errors and fail over cleanly ---
+        template = Template(r"""
             {% macro script(this, kwargs) %}
             var map = {{this._parent.get_name()}};
+
+            // Gentle scroll behavior
             map.scrollWheelZoom.disable();
             map.on('click', function(){ map.scrollWheelZoom.enable(); });
             map.on('mouseout', function(){ map.scrollWheelZoom.disable(); });
 
-            // If Esri tiles error repeatedly, remove them so OSM is visible
-            map.eachLayer(function(l){
-              if (l instanceof L.TileLayer && l._url && l._url.indexOf('arcgisonline.com/ArcGIS') !== -1) {
-                var err = 0;
-                l.on('tileerror', function(){
-                  err += 1;
-                  if (err > 3) {
-                    try { map.removeLayer(l); } catch(e){}
+            // Helper: add backup Esri if primary fails repeatedly
+            var addedBackup = false;
+            function addBackupIfNeeded() {
+              if (!addedBackup) {
+                try {
+                  // Backup layer object injected by folium with a JS variable name
+                  var backupName = "{{kwargs.get('backup_name', 'esri_backup_layer')}}";
+                  var layers = map._layers;
+                  // Find the backup layer created server-side but not yet added
+                  for (var k in layers) {
+                    if (layers[k] && layers[k].options && layers[k].options.name === "Esri Imagery (backup)") {
+                      map.addLayer(layers[k]);
+                      addedBackup = true;
+                      break;
+                    }
                   }
-                });
+                } catch (e) {}
+              }
+            }
+
+            var imageryAlive = false;
+
+            // Watch each tile layer for errors
+            map.eachLayer(function(l){
+              if (l instanceof L.TileLayer && l.options && l.options.name) {
+
+                // Track if an imagery layer is alive so we can keep labels only then
+                if (l.options.name.indexOf("Esri Imagery") !== -1) {
+                  l.on('load', function(){ imageryAlive = true; });
+
+                  var errCount = 0;
+                  l.on('tileerror', function(){
+                    errCount += 1;
+
+                    // After a few errors, try the backup Esri endpoint
+                    if (l.options.name === "Esri Imagery (primary)" && errCount >= 3) {
+                      addBackupIfNeeded();
+                    }
+
+                    // If both imagery layers are failing a lot, remove labels overlay
+                    if (errCount >= 5) {
+                      // remove this failing layer so OSM shows through
+                      try { map.removeLayer(l); } catch(e) {}
+                      // if no imagery left, also remove labels
+                      var anyImageryLeft = false;
+                      map.eachLayer(function(ll){
+                        if (ll instanceof L.TileLayer && ll.options && ll.options.name &&
+                            ll.options.name.indexOf("Esri Imagery") !== -1) {
+                          anyImageryLeft = true;
+                        }
+                      });
+                      if (!anyImageryLeft) {
+                        map.eachLayer(function(ll){
+                          if (ll instanceof L.TileLayer && ll.options && ll.options.name === "Esri Labels") {
+                            try { map.removeLayer(ll); } catch(e) {}
+                          }
+                        });
+                      }
+                    }
+                  });
+                }
               }
             });
             {% endmacro %}
         """)
-        macro = MacroElement(); macro._template = template
+        macro = MacroElement()
+        macro._template = template
+        # Attach a ref to the backup layer so the script can find it
+        macro._template.module_kwargs = {"backup_name": "esri_backup_layer"}
         m.get_root().add_child(macro)
+
+        # Important: actually attach the backup layer object to the map (but not add it)
+        esri_backup.add_to(m)     # attach to map object...
+        m.remove_layer(esri_backup)  # ...but keep it detached until needed
 
         return m
     except Exception as e:
