@@ -841,25 +841,33 @@ zones_gdf = st.session_state.get("zones_gdf")
 if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
     try:
         zb = zones_gdf.total_bounds
-        m.location = [(zb[1] + zb[3]) / 2, (zb[0] + zb[2]) / 2]
-        m.zoom_start = 15
+        # Compute bounds for zoom
+        south, west, north, east = zb[1], zb[0], zb[3], zb[2]
+        m.fit_bounds([[south, west], [north, east]])   # 👈 forces map to zoom/center correctly
 
-        palette = ["#FF0000","#FF8C00","#FFFF00","#32CD32","#006400",
-                   "#1E90FF","#8A2BE2","#FFC0CB","#A52A2A","#00CED1"]
+        # color palette and zone mapping
+        palette = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400",
+                   "#1E90FF", "#8A2BE2", "#FFC0CB", "#A52A2A", "#00CED1"]
         unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
         color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
 
+        # Stronger border (weight=2) + visible fillOpacity
         folium.GeoJson(
-            zones_gdf, name="Zones",
+            zones_gdf,
+            name="Zones",
             style_function=lambda feature: {
                 "fillColor": color_map.get(str(feature["properties"].get("Zone", "")), "#808080"),
-                "color": "black", "weight": 1, "fillOpacity": 0.08,
+                "color": "black",           # border color
+                "weight": 2,                # 👈 makes zone lines visible
+                "fillOpacity": 0.25,        # 👈 slightly higher fill
             },
             tooltip=folium.GeoJsonTooltip(
-                fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
-            )
+                fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"]
+                        if c in zones_gdf.columns]
+            ),
         ).add_to(m)
 
+        # Legend (same as before)
         legend_items = "".join(
             f"<div style='display:flex;align-items:center;margin:2px 0;'>"
             f"<div style='background:{color_map[z]};width:14px;height:14px;margin-right:6px;'></div>{z}</div>"
@@ -879,6 +887,7 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         </div>
         """
         m.get_root().html.add_child(folium.Element(legend_html))
+
     except Exception as e:
         st.warning(f"Skipping zones overlay: {e}")
 
