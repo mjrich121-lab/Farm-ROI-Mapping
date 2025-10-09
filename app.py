@@ -1275,17 +1275,25 @@ else:
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     # ✅ Preserve geometry if it exists
     if "geometry" in ydf.columns:
-        try:
-            gdf = gpd.GeoDataFrame(ydf, geometry="geometry")
-            df_for_maps = gdf.copy()
-            df_for_maps["Longitude"] = gdf.geometry.x
-            df_for_maps["Latitude"] = gdf.geometry.y
-            st.success("✅ Coordinates extracted directly from shapefile geometry.")
-        except Exception as e:
-            st.warning(f"Coordinate extraction failed: {e}")
-            df_for_maps = ydf.copy()
-    else:
-        df_for_maps = ydf.copy()
+    try:
+        # =========================================================
+        # ✅ UNIVERSAL COORDINATE EXTRACTION — POINTS OR POLYGONS
+        # =========================================================
+        geom_type = ydf.geometry.geom_type.unique()
+        if any(gt.startswith("Point") for gt in geom_type):
+            # Direct point geometries
+            df_for_maps["Longitude"] = ydf.geometry.x
+            df_for_maps["Latitude"]  = ydf.geometry.y
+            st.info("✅ Coordinates extracted directly from Point geometry.")
+        else:
+            # Polygon, MultiPolygon, or LineString → use centroids
+            centroids = ydf.geometry.representative_point()
+            df_for_maps["Longitude"] = centroids.x
+            df_for_maps["Latitude"]  = centroids.y
+            st.info("✅ Coordinates extracted from polygon centroids.")
+    except Exception as e:
+        st.warning(f"Coordinate extraction failed: {e}")
+
 
         # ✅ Fallback for CSV/GeoJSON with lat/lon columns
         if {"longitude", "latitude"}.issubset(set(ydf.columns)):
