@@ -418,15 +418,7 @@ def render_uploaders():
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
 
-                        st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
-                        st.write(f"DEBUG — Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
-                        st.write(f"DEBUG — CRS: {gdf.crs}")
-                        st.write(f"DEBUG — Total bounds: {gdf.total_bounds}")
-                        st.write(f"DEBUG — Sample geometry: {gdf.geometry.iloc[0] if len(gdf) > 0 else 'No geometries'}")
-                        
-                        if "Yld_Vol_Dr" in gdf.columns:
-                            st.write("DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
-                            st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
+                        # Debug info removed for cleaner interface
 
                         gdf_keep = gdf.copy()
 
@@ -1340,52 +1332,7 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
         st.info("✅ Found existing Latitude/Longitude columns - checking data...")
         
-        # Show what's actually in the coordinate columns
-        st.write("DEBUG - Sample Latitude values:", df_for_maps["Latitude"].head(10).tolist())
-        st.write("DEBUG - Sample Longitude values:", df_for_maps["Longitude"].head(10).tolist())
-        st.write("DEBUG - Latitude data type:", df_for_maps["Latitude"].dtype)
-        st.write("DEBUG - Longitude data type:", df_for_maps["Longitude"].dtype)
-        
-        # Check if there are other coordinate columns that might have real data
-        st.write("DEBUG - All columns in dataframe:", list(df_for_maps.columns))
-        
-        # Look for other potential coordinate columns
-        coord_candidates = []
-        for col in df_for_maps.columns:
-            col_lower = col.lower()
-            if any(coord in col_lower for coord in ['lat', 'lon', 'x', 'y', 'coord', 'easting', 'northing']):
-                coord_candidates.append(col)
-                # Show sample values from potential coordinate columns
-                sample_vals = df_for_maps[col].head(5).tolist()
-                st.write(f"DEBUG - {col} sample values: {sample_vals}")
-        
-        st.write("DEBUG - Potential coordinate columns found:", coord_candidates)
-        
-        # Check if we have Distance_f and Track_deg_ which might be GPS coordinates
-        if "Distance_f" in df_for_maps.columns and "Track_deg_" in df_for_maps.columns:
-            st.write("DEBUG - Distance_f sample values:", df_for_maps["Distance_f"].head(5).tolist())
-            st.write("DEBUG - Track_deg_ sample values:", df_for_maps["Track_deg_"].head(5).tolist())
-            st.info("🔍 Found Distance_f and Track_deg_ columns - these might be GPS coordinates!")
-        
-        # Check if geometry column has any non-empty values
-        if "geometry" in df_for_maps.columns:
-            st.write("DEBUG - Geometry column exists")
-            # Try to extract coordinates from geometry using different methods
-            try:
-                # Method 1: Try to get bounds from geometry
-                bounds = df_for_maps.geometry.bounds
-                st.write("DEBUG - Geometry bounds:", bounds.head())
-                
-                # Method 2: Try to get centroid
-                centroids = df_for_maps.geometry.centroid
-                st.write("DEBUG - Geometry centroids sample:", centroids.head())
-                
-                # Method 3: Check if geometry has coordinates
-                geom_coords = df_for_maps.geometry.apply(lambda x: list(x.coords) if hasattr(x, 'coords') else None)
-                st.write("DEBUG - Geometry coordinates sample:", geom_coords.head())
-                
-            except Exception as e:
-                st.write(f"DEBUG - Geometry extraction error: {e}")
+        # Coordinate extraction debugging removed for cleaner interface
         
         # Ensure coordinates are numeric
         df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
@@ -1399,12 +1346,9 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             st.info(f"✅ Field size: {(valid_coords['Latitude'].max() - valid_coords['Latitude'].min())*111:.1f}km x {(valid_coords['Longitude'].max() - valid_coords['Longitude'].min())*111:.1f}km")
         else:
             st.warning("⚠️ Latitude/Longitude columns exist but contain no valid data")
-            st.write("DEBUG - Latitude null count:", df_for_maps["Latitude"].isnull().sum())
-            st.write("DEBUG - Longitude null count:", df_for_maps["Longitude"].isnull().sum())
             
             # Coordinates are missing - try to use zone map coordinates
             st.error("❌ No valid coordinates found in Latitude/Longitude columns")
-            st.info("🔍 This means the coordinate extraction from your shapefile failed")
             
             # Check if we have zone map coordinates to use
             zone_gdf = st.session_state.get("zone_gdf")
@@ -1422,7 +1366,6 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
                     
                     # Get zone map bounds to understand field extent
                     bounds = zone_gdf.total_bounds
-                    st.info(f"📍 Zone map bounds: {bounds}")
                     
                     # Create a grid of points within the zone map bounds
                     import numpy as np
@@ -1445,7 +1388,6 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
                     df_for_maps["Longitude"] = lons
                     
                     st.success(f"✅ Generated {n_points:,} coordinates within your field bounds")
-                    st.info(f"📍 Field center: {lats.mean():.6f}, {lons.mean():.6f}")
                     
                 except Exception as e:
                     st.error(f"❌ Failed to extract coordinates from zone map: {e}")
