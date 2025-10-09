@@ -1324,7 +1324,14 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     
     # Force use of existing coordinate columns if they exist
     if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-        st.info("✅ Found existing Latitude/Longitude columns - using real coordinate data")
+        st.info("✅ Found existing Latitude/Longitude columns - checking data...")
+        
+        # Show what's actually in the coordinate columns
+        st.write("DEBUG - Sample Latitude values:", df_for_maps["Latitude"].head(10).tolist())
+        st.write("DEBUG - Sample Longitude values:", df_for_maps["Longitude"].head(10).tolist())
+        st.write("DEBUG - Latitude data type:", df_for_maps["Latitude"].dtype)
+        st.write("DEBUG - Longitude data type:", df_for_maps["Longitude"].dtype)
+        
         # Ensure coordinates are numeric
         df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
         df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
@@ -1335,6 +1342,10 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             st.info(f"✅ Found {len(valid_coords)} valid coordinate points")
             st.info(f"✅ Field location: {valid_coords['Latitude'].mean():.6f}, {valid_coords['Longitude'].mean():.6f}")
             st.info(f"✅ Field size: {(valid_coords['Latitude'].max() - valid_coords['Latitude'].min())*111:.1f}km x {(valid_coords['Longitude'].max() - valid_coords['Longitude'].min())*111:.1f}km")
+        else:
+            st.warning("⚠️ Latitude/Longitude columns exist but contain no valid data")
+            st.write("DEBUG - Latitude null count:", df_for_maps["Latitude"].isnull().sum())
+            st.write("DEBUG - Longitude null count:", df_for_maps["Longitude"].isnull().sum())
     
     # Detect and normalize yield column
     yield_candidates = [
