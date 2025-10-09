@@ -1253,151 +1253,109 @@ for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
 bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
-
 # =========================================================
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     df_for_maps = ydf.copy()
+
     # =========================================================
-    # 🔧 PATCH — REBUILD LAT/LON FROM GEOMETRY (if missing)
+    # ✅ DIRECT COORDINATE EXTRACTION FROM GEOMETRY (UNIVERSAL)
     # =========================================================
-    if (
-        ("Latitude" not in df_for_maps.columns)
-        or ("Longitude" not in df_for_maps.columns)
-    ) and ("_yield_gdf_raw" in st.session_state):
+    if "geometry" in ydf.columns:
+        try:
+            df_for_maps["Longitude"] = ydf.geometry.x
+            df_for_maps["Latitude"]  = ydf.geometry.y
+            st.info("✅ Coordinates extracted directly from shapefile geometry.")
+        except Exception as e:
+            st.warning(f"Coordinate extraction failed: {e}")
 
-        gtmp = st.session_state["_yield_gdf_raw"]
-        if isinstance(gtmp, gpd.GeoDataFrame) and not gtmp.empty:
-            try:
-                reps = gtmp.geometry.representative_point()
-                df_for_maps["Longitude"] = reps.x.astype(float)
-                df_for_maps["Latitude"] = reps.y.astype(float)
-                st.info("✅ Coordinates rebuilt from shapefile geometry.")
-            except Exception as e:
-                st.warning(f"Coordinate rebuild failed: {e}")
+    # =========================================================
+    # ✅ CSV / GEOJSON FALLBACK (for non-shapefile uploads)
+    # =========================================================
+    elif {"longitude", "latitude"}.issubset(set(ydf.columns)):
+        df_for_maps["Longitude"] = pd.to_numeric(ydf["longitude"], errors="coerce")
+        df_for_maps["Latitude"]  = pd.to_numeric(ydf["latitude"], errors="coerce")
+        st.info("✅ Coordinates extracted from CSV/GeoJSON columns.")
 
+    else:
+        st.warning("⚠️ No coordinate source found; map rendering may be skipped.")
+        df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
 
-    # ✅ Normalize all column names to lowercase (safer)
+    # =========================================================
+    # ✅ Normalize column names + detect yield column
+    # =========================================================
     df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
-    # ✅ Detect latitude/longitude columns dynamically
-    lat_col = next((c for c in df_for_maps.columns if c.startswith("lat")), None)
-    lon_col = next((c for c in df_for_maps.columns if c.startswith(("lon", "long"))), None)
-
-    # ✅ Fallbacks for other naming patterns
-    if not lat_col and "latitude" in df_for_maps.columns:
-        lat_col = "latitude"
-    if not lon_col and "longitude" in df_for_maps.columns:
-        lon_col = "longitude"
-
-    # ✅ Validate coordinate presence
-    if not lat_col or not lon_col:
-        st.error(f"No coordinate columns found in yield data — detected columns: {list(df_for_maps.columns)}")
-        df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-    else:
-        df_for_maps.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
+    # detect yield column dynamically
+    yield_col = next((c for c in df_for_maps.columns if "yld" in c or "yield" in c), None)
+    if yield_col and yield_col != "yield":
+        df_for_maps.rename(columns={yield_col: "yield"}, inplace=True)
 
 else:
     # ✅ Create placeholder if yield_df missing or empty
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-# =========================================================
-# SAFE TYPE COERCION (REPLACES 4-LINE SANITIZE BLOCK)
-# =========================================================
-if not isinstance(df_for_maps, pd.DataFrame):
-    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-
-# Re-normalize column names to lowercase/underscored
-df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
 # =========================================================
-# IF GEOMETRY EXISTS BUT NO LAT/LON COLUMNS, EXTRACT THEM
+# SAFE TYPE COERCION + VALIDATION
 # =========================================================
-if "geometry" in df_for_maps.columns and (
-    "latitude" not in df_for_maps.columns or "longitude" not in df_for_maps.columns
-):
-    try:
-        # Use shapely centroids if geometry column is valid
-        gtmp = gpd.GeoDataFrame(df_for_maps, geometry="geometry", crs="EPSG:4326")
-        if gtmp.geom_type.astype(str).str.contains("Point", case=False).any():
-            df_for_maps["longitude"] = gtmp.geometry.x
-            df_for_maps["latitude"]  = gtmp.geometry.y
-        else:
-            reps = gtmp.geometry.representative_point()
-            df_for_maps["longitude"] = reps.x
-            df_for_maps["latitude"]  = reps.y
-    except Exception:
-        pass  # Non-fatal; downstream fallback will still create columns
-
-
-# Guarantee required columns exist
 for col in ["latitude", "longitude", "yield"]:
     if col not in df_for_maps.columns:
         df_for_maps[col] = np.nan
+    df_for_maps[col] = pd.to_numeric(df_for_maps[col], errors="coerce")
 
-# Safely coerce each to numeric
-for col in ["latitude", "longitude", "yield"]:
-    try:
-        df_for_maps[col] = pd.to_numeric(df_for_maps[col], errors="coerce")
-    except Exception:
-        df_for_maps[col] = np.nan
-
-# Rename consistently for downstream functions
 df_for_maps.rename(
     columns={"latitude": "Latitude", "longitude": "Longitude", "yield": "Yield"},
     inplace=True,
 )
 df_for_maps["Yield"].fillna(0, inplace=True)
+
 # =========================================================
 # SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
 # =========================================================
 valid_mask = (
-    df_for_maps["Latitude"].notna() &
-    df_for_maps["Longitude"].notna() &
-    df_for_maps["Latitude"].between(-90, 90) &
-    df_for_maps["Longitude"].between(-180, 180)
+    df_for_maps["Latitude"].between(-90, 90)
+    & df_for_maps["Longitude"].between(-180, 180)
+    & df_for_maps["Latitude"].notna()
+    & df_for_maps["Longitude"].notna()
 )
 
-if valid_mask.any():
-    df_valid = df_for_maps.loc[valid_mask].copy()
-else:
+df_valid = df_for_maps.loc[valid_mask].copy()
+if df_valid.empty:
     st.warning("No valid coordinates detected — using full dataset for continuity.")
     df_valid = df_for_maps.copy()
 
-# Use df_valid for heatmap drawing; keep df_for_maps intact for summaries
-
-# --- DEBUG DIAGNOSTIC ---
+# =========================================================
+# DEBUG + MAP SAFEGUARD
+# =========================================================
 st.write("DEBUG · df_for_maps columns:", list(df_for_maps.columns))
 st.write("DEBUG · Head of df_for_maps:")
 st.dataframe(df_for_maps.head(10))
 
-if df_for_maps.empty:
+if df_valid.empty:
     st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
 else:
-    # Clip extreme yield outliers (5–95%)
     try:
-        if df_for_maps["Yield"].dropna().size > 0:
-            low, high = np.nanpercentile(df_for_maps["Yield"], [5, 95])
+        # Clip extreme yield outliers (5–95%)
+        if df_valid["Yield"].dropna().size > 0:
+            low, high = np.nanpercentile(df_valid["Yield"], [5, 95])
             if np.isfinite(low) and np.isfinite(high) and low < high:
-                df_for_maps["Yield"] = df_for_maps["Yield"].clip(lower=low, upper=high)
-    except Exception:
-        pass
+                df_valid["Yield"] = df_valid["Yield"].clip(lower=low, upper=high)
 
-    # Normalize extremely high values (e.g., metric conversion)
-    try:
-        if df_for_maps["Yield"].max() > 400:
-            df_for_maps["Yield"] = df_for_maps["Yield"] / 15.93
-    except Exception:
-        pass
+        # Normalize metric conversions
+        if df_valid["Yield"].max() > 400:
+            df_valid["Yield"] = df_valid["Yield"] / 15.93
 
-    # Compute bounds directly from sanitized data
-    south, west, north, east = (
-        float(df_for_maps["Latitude"].min()),
-        float(df_for_maps["Longitude"].min()),
-        float(df_for_maps["Latitude"].max()),
-        float(df_for_maps["Longitude"].max()),
-    )
-    bounds = (south, west, north, east)
+        south, west, north, east = (
+            float(df_valid["Latitude"].min()),
+            float(df_valid["Longitude"].min()),
+            float(df_valid["Latitude"].max()),
+            float(df_valid["Longitude"].max()),
+        )
+        bounds = (south, west, north, east)
+    except Exception as e:
+        st.warning(f"Map bounds computation failed: {e}")
+
 
     # =========================================================
     # SAFE PROFIT METRICS
