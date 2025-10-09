@@ -511,7 +511,9 @@ def render_uploaders():
                                             coord_cols = []
                                             for col in gdf.columns:
                                                 col_lower = col.lower()
-                                                if any(coord in col_lower for coord in ['lat', 'lon', 'x', 'y', 'longitude', 'latitude']):
+                                                # More specific coordinate detection - exclude yield columns
+                                                if (any(coord in col_lower for coord in ['latitude', 'longitude', 'lat', 'lon', 'x_coord', 'y_coord', 'easting', 'northing']) 
+                                                    and not any(yield_word in col_lower for yield_word in ['yld', 'yield', 'mass', 'vol', 'flw'])):
                                                     coord_cols.append(col)
                                             
                                             if len(coord_cols) >= 2:
@@ -530,10 +532,53 @@ def render_uploaders():
                                                     messages.append(f"{yf.name}: empty geometries — skipped.")
                                                     continue
                                             else:
-                                                st.error(f"Cannot repair empty geometries in {yf.name}")
-                                                st.info(f"Available columns: {list(gdf.columns)}")
-                                                messages.append(f"{yf.name}: empty geometries — skipped.")
-                                                continue
+                                                # Method 4: Try to convert GPS distance/angle to coordinates
+                                                st.info("No coordinate columns found. Checking for GPS distance/angle data...")
+                                                if 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
+                                                    st.info("Found GPS distance/angle columns. Attempting coordinate conversion...")
+                                                    try:
+                                                        # Use a reference point (approximate field center from zones)
+                                                        ref_lat = 38.8075  # From zone center
+                                                        ref_lon = -87.5390  # From zone center
+                                                        
+                                                        # Convert GPS distance/angle to lat/lon
+                                                        import math
+                                                        from shapely.geometry import Point
+                                                        
+                                                        # Convert feet to degrees (approximate)
+                                                        feet_to_degrees = 1.0 / 364000  # Rough conversion
+                                                        
+                                                        # Calculate coordinates
+                                                        distances = gdf['Distance_f'].values
+                                                        angles = gdf['Track_deg_'].values
+                                                        
+                                                        # Convert to radians
+                                                        angles_rad = np.radians(angles)
+                                                        
+                                                        # Calculate offsets
+                                                        dx = distances * np.sin(angles_rad) * feet_to_degrees
+                                                        dy = distances * np.cos(angles_rad) * feet_to_degrees
+                                                        
+                                                        # Calculate final coordinates
+                                                        lons = ref_lon + dx
+                                                        lats = ref_lat + dy
+                                                        
+                                                        # Create point geometries
+                                                        gdf.geometry = [Point(lon, lat) for lon, lat in zip(lons, lats)]
+                                                        st.info(f"✅ Created geometries from GPS distance/angle data (ref: {ref_lat:.4f}, {ref_lon:.4f})")
+                                                        
+                                                    except Exception as gps_error:
+                                                        st.error(f"GPS conversion failed: {gps_error}")
+                                                        st.warning("Found GPS distance/angle columns but cannot convert to coordinates.")
+                                                        st.error("❌ GPS distance/angle data requires conversion to lat/lon coordinates.")
+                                                        st.info("Please provide a shapefile with actual latitude/longitude coordinates.")
+                                                        messages.append(f"{yf.name}: GPS distance/angle data cannot be converted — skipped.")
+                                                        continue
+                                                else:
+                                                    st.error(f"Cannot repair empty geometries in {yf.name}")
+                                                    st.info(f"Available columns: {list(gdf.columns)}")
+                                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                                    continue
                                 except Exception as repair_error:
                                     st.error(f"Geometry repair failed: {repair_error}")
                                     messages.append(f"{yf.name}: geometry repair failed — skipped.")
