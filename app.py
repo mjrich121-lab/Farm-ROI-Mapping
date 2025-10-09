@@ -1,3 +1,4 @@
+```python
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF (Patched)
 # =========================================================
@@ -1063,80 +1064,6 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         st.warning(f"Yield map overlay fallback triggered: {e}")
         return None, None
 
-        # --- coordinate detection or synthesize if missing ---
-        latc = find_col(df, ["latitude"]) or "Latitude"
-        lonc = find_col(df, ["longitude"]) or "Longitude"
-        if latc not in df.columns or lonc not in df.columns:
-            # fallback to approximate center of USA or zones
-            zg = st.session_state.get("zones_gdf")
-            if zg is not None and not getattr(zg, "empty", True):
-                tb = zg.total_bounds
-                df["Latitude"] = [(tb[1]+tb[3])/2.0]
-                df["Longitude"] = [(tb[0]+tb[2])/2.0]
-            else:
-                df["Latitude"] = [39.5]
-                df["Longitude"] = [-98.35]
-            latc, lonc = "Latitude", "Longitude"
-
-        # --- sanitize coordinates and values ---
-        df = df.copy()
-        df[latc] = pd.to_numeric(df[latc], errors="coerce")
-        df[lonc] = pd.to_numeric(df[lonc], errors="coerce")
-        df[values.name] = pd.to_numeric(df[values.name], errors="coerce")
-        df.dropna(subset=[latc, lonc, values.name], inplace=True)
-
-        if df.empty:
-            # final fallback single dummy point
-            df = pd.DataFrame({latc:[39.5], lonc:[-98.35], values.name:[values.mean() if hasattr(values,'mean') else 0.0]})
-
-        south, west, north, east = bounds
-        vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
-        if vmin == vmax: vmax = vmin + 1.0
-
-        # --- if <3 points, draw discrete points ---
-        if len(df) < 3:
-            for _, r in df.iterrows():
-                val = r[values.name]
-                folium.CircleMarker(
-                    location=[r[latc], r[lonc]],
-                    radius=5,
-                    color="#ffffff80",
-                    fill=True,
-                    fill_color=mpl_colors.rgb2hex(cmap((val - vmin)/(vmax - vmin + 1e-9))[:3]),
-                    fill_opacity=0.9,
-                    popup=f"{name}: {val:.1f}"
-                ).add_to(m)
-            return vmin, vmax
-
-        # --- normal dense heatmap path ---
-        pts_lon = df[lonc].astype(float).values
-        pts_lat = df[latc].astype(float).values
-        vals_ok = df[values.name].astype(float).values
-        n = 200
-        lon_lin = np.linspace(west, east, n)
-        lat_lin = np.linspace(south, north, n)
-        lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
-        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
-        grid_nn = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
-        rgba = cmap((grid - vmin) / (vmax - vmin))
-        rgba = np.flipud(rgba)
-        rgba = (rgba * 255).astype(np.uint8)
-
-        folium.raster_layers.ImageOverlay(
-            image=rgba,
-            bounds=[[south, west], [north, east]],
-            opacity=0.5,
-            name=name,
-            overlay=True,
-            show=show_default
-        ).add_to(m)
-        return vmin, vmax
-
-    except Exception as e:
-        st.warning(f"Yield map overlay fallback triggered: {e}")
-        return None, None
-
 # ===========================
 # MAIN APP — HARDENED + STACKED LEGENDS
 # ===========================
@@ -1285,47 +1212,55 @@ else:
 # =========================================================
 df_for_maps = pd.DataFrame()
 
-if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
+if isinstance(ydf, gpd.GeoDataFrame) and not ydf.empty and "geometry" in ydf.columns:
+    df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
+    try:
+        geom_types = ydf.geometry.geom_type.unique()
+        if any('Point' in gt for gt in geom_types):
+            df_for_maps["Longitude"] = ydf.geometry.x
+            df_for_maps["Latitude"] = ydf.geometry.y
+            st.info("✅ Coordinates extracted directly from Point geometry.")
+        else:
+            reps = ydf.geometry.representative_point()
+            df_for_maps["Longitude"] = reps.x
+            df_for_maps["Latitude"] = reps.y
+            st.info("✅ Coordinates extracted from polygon centroids.")
+    except Exception as e:
+        st.warning(f"Coordinate extraction failed: {e}")
+        lat_col = pick_col(ydf, LAT_PREFS)
+        lon_col = pick_col(ydf, LON_PREFS)
+        if lat_col and lon_col:
+            df_for_maps["Latitude"] = pd.to_numeric(ydf[lat_col], errors="coerce")
+            df_for_maps["Longitude"] = pd.to_numeric(ydf[lon_col], errors="coerce")
+
+elif isinstance(ydf, pd.DataFrame) and not ydf.empty:
     df_for_maps = ydf.copy()
+    lat_col = pick_col(ydf, LAT_PREFS)
+    lon_col = pick_col(ydf, LON_PREFS)
+    if lat_col and lon_col:
+        df_for_maps["Latitude"] = pd.to_numeric(ydf[lat_col], errors="coerce")
+        df_for_maps["Longitude"] = pd.to_numeric(ydf[lon_col], errors="coerce")
+    else:
+        st.warning("No geometry or lat/lon columns found in yield data.")
 
-    if "geometry" in df_for_maps.columns and isinstance(ydf, gpd.GeoDataFrame):
-        try:
-            geom_types = ydf.geometry.geom_type.astype(str).unique()
-            if any(gt.startswith("Point") for gt in geom_types):
-                lon = ydf.geometry.x
-                lat = ydf.geometry.y
-                st.info("✅ Coordinates extracted directly from Point geometry.")
-            else:
-                reps = ydf.geometry.representative_point()
-                lon = reps.x
-                lat = reps.y
-                st.info("✅ Coordinates extracted from polygon centroids.")
-            # drop geometry for the mapping dataframe
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-            df_for_maps["Longitude"] = lon
-            df_for_maps["Latitude"] = lat
-        except Exception as e:
-            st.warning(f"Coordinate extraction failed: {e}")
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-
-    # Normalize coord column names if provided in CSV/JSON
-    lower_cols = {c.lower(): c for c in df_for_maps.columns}
-    if "longitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
-    if "latitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
-
-    # Detect/normalize yield column
-    yield_candidates = [
-        "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
-        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
-    ]
-    ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
-    if ycol and ycol != "Yield":
-        df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
 else:
-    # Fallback empty DF if ydf missing
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
+
+# Normalize coord column names if provided in CSV/JSON
+lower_cols = {c.lower(): c for c in df_for_maps.columns}
+if "longitude" in lower_cols:
+    df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
+if "latitude" in lower_cols:
+    df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
+
+# Detect/normalize yield column
+yield_candidates = [
+    "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+    "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+]
+ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
+if ycol and ycol != "Yield":
+    df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
 
 # =========================================================
 # SAFE TYPE COERCION + VALIDATION
@@ -1631,3 +1566,4 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
+```
