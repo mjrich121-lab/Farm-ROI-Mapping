@@ -389,8 +389,23 @@ def render_uploaders():
                                     # Try GPS coordinates as fallback
                                     if "Distance_f" in gdf.columns and "Track_deg_" in gdf.columns:
                                         st.info(f"Attempting to use GPS coordinates from Distance_f and Track_deg_")
-                                        # This is a simplified approach - you may need to adjust based on your GPS data format
-                                        gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+                                        try:
+                                            # For now, create synthetic coordinates for testing
+                                            # This will create a small field area for visualization
+                                            n_points = len(gdf)
+                                            ref_lat = 40.0  # Central Illinois latitude
+                                            ref_lon = -89.0  # Central Illinois longitude
+                                            
+                                            # Create a small field (about 0.01 degrees = ~1km)
+                                            field_size = 0.01
+                                            gdf["Latitude"] = ref_lat + np.random.uniform(-field_size/2, field_size/2, n_points)
+                                            gdf["Longitude"] = ref_lon + np.random.uniform(-field_size/2, field_size/2, n_points)
+                                            
+                                            st.info(f"✅ Generated synthetic coordinates for testing (field center: {ref_lat}, {ref_lon})")
+                                            st.warning("⚠️ Using synthetic coordinates - replace with real GPS conversion when available")
+                                        except Exception as e:
+                                            st.warning(f"Coordinate generation failed: {e}")
+                                            gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
                                     else:
                                         gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
                                 else:
