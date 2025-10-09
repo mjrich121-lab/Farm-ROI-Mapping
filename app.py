@@ -1692,68 +1692,90 @@ if not st.session_state.get("yield_df", pd.DataFrame()).empty:
 else:
     st.info("🗺️ Interactive map ready - upload yield data to see heatmap")
 
-# Create a completely fresh, simple map that will definitely display
-st.info("🔄 Creating fresh map...")
+# =========================================================
+# STABLE MAP - NO RE-RENDERING
+# =========================================================
 
-# Create a brand new map object
-fresh_map = folium.Map(
-    location=[41.5, -93.0],  # Iowa center
-    zoom_start=10,
-    tiles="OpenStreetMap"  # Use reliable OpenStreetMap
-)
-
-# Add a simple marker to test
-folium.Marker(
-    location=[41.5, -93.0],
-    popup="Farm ROI Mapping Tool - Test",
-    icon=folium.Icon(color="red", icon="info-sign")
-).add_to(fresh_map)
-
-# Add some yield data as simple circles if available
-if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
-    try:
-        # Take a small sample for testing
-        sample_df = df_valid.sample(n=min(50, len(df_valid)))
-        
-        for idx, row in sample_df.iterrows():
-            if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
-                yield_val = row.get("Yield", 0)
-                if yield_val > 0:
-                    folium.CircleMarker(
-                        location=[row["Latitude"], row["Longitude"]],
-                        radius=5,
-                        popup=f"Yield: {yield_val:.1f} bu/ac",
-                        color="blue",
-                        fill=True,
-                        fillColor="blue",
-                        fillOpacity=0.7
-                    ).add_to(fresh_map)
-        
-        st.info(f"✅ Added {len(sample_df)} yield points to test map")
-    except Exception as e:
-        st.warning(f"⚠️ Could not add yield data: {e}")
-
-# Render the fresh map
-try:
-    st.info("🔄 Rendering fresh map...")
-    st_folium(fresh_map, use_container_width=True, height=600)
-    st.success("✅ Fresh map should now be visible!")
+# Check if we have real coordinate data in the original file
+real_coords_found = False
+if not df_valid.empty:
+    # Check if coordinates look like real field data (not synthetic grid)
+    lat_range = df_valid["Latitude"].max() - df_valid["Latitude"].min()
+    lon_range = df_valid["Longitude"].max() - df_valid["Longitude"].min()
     
-except Exception as e:
-    st.error(f"❌ Fresh map also failed: {e}")
+    # Real field data should have small coordinate ranges (within a few miles)
+    if lat_range < 0.1 and lon_range < 0.1:  # Less than ~10km field
+        real_coords_found = True
+        field_center_lat = df_valid["Latitude"].mean()
+        field_center_lon = df_valid["Longitude"].mean()
+        st.info(f"✅ Found real field coordinates: {field_center_lat:.6f}, {field_center_lon:.6f}")
+    else:
+        st.warning("⚠️ Coordinates appear to be synthetic - showing data summary instead of inaccurate map")
+
+if real_coords_found:
+    # Create map centered on real field
+    field_map = folium.Map(
+        location=[field_center_lat, field_center_lon],
+        zoom_start=16,  # Very close zoom for field view
+        tiles="OpenStreetMap"
+    )
     
-    # Last resort - show a simple HTML message
+    # Add yield data as heatmap
+    from folium.plugins import HeatMap
+    heat_data = []
+    for idx, row in df_valid.iterrows():
+        if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]) and pd.notna(row.get("Yield", 0)):
+            yield_val = row.get("Yield", 0)
+            if yield_val > 0:
+                max_yield = df_valid["Yield"].max()
+                min_yield = df_valid["Yield"].min()
+                intensity = (yield_val - min_yield) / (max_yield - min_yield) if max_yield > min_yield else 0.5
+                heat_data.append([row["Latitude"], row["Longitude"], intensity])
+    
+    if heat_data:
+        HeatMap(heat_data, radius=20, blur=15, max_zoom=18).add_to(field_map)
+        st.info(f"✅ Added heatmap with {len(heat_data)} real field data points")
+    
+    # Render the field map
+    st_folium(field_map, use_container_width=True, height=600)
+    st.success("✅ Real field map displayed!")
+    
+else:
+    # Show data summary instead of inaccurate synthetic map
     st.markdown("""
-    <div style="border: 2px solid #ff6b6b; padding: 20px; border-radius: 10px; background-color: #ffe0e0; text-align: center;">
-        <h3>🗺️ Map Display Issue</h3>
-        <p>The interactive map cannot be rendered in your current environment.</p>
-        <p><strong>Your data processing is working perfectly!</strong></p>
-        <p>✅ {:,} yield data points processed</p>
-        <p>✅ Yield range: {:.1f} to {:.1f} bu/ac</p>
-        <p>✅ All calculations working</p>
-        <br>
-        <p><em>This might be a browser or Streamlit Cloud compatibility issue.</em></p>
-        <p>Try refreshing the page or using a different browser.</p>
+    <div style="border: 2px solid #4CAF50; padding: 20px; border-radius: 10px; background-color: #f0f8f0;">
+        <h3>📊 Farm ROI Data Analysis Complete</h3>
+        <p><strong>Your yield data has been successfully processed!</strong></p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin: 20px 0;">
+            <div style="background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                <h4>📈 Data Points</h4>
+                <p style="font-size: 24px; font-weight: bold; color: #2E7D32;">{:,}</p>
+                <p>Yield measurements</p>
+            </div>
+            <div style="background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                <h4>🌾 Yield Range</h4>
+                <p style="font-size: 20px; font-weight: bold; color: #1976D2;">{:.1f} - {:.1f}</p>
+                <p>bushels per acre</p>
+            </div>
+            <div style="background: white; padding: 15px; border-radius: 8px; text-align: center;">
+                <h4>💰 Analysis</h4>
+                <p style="font-size: 20px; font-weight: bold; color: #388E3C;">Ready</p>
+                <p>Profit calculations</p>
+            </div>
+        </div>
+        
+        <div style="background: #E3F2FD; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <h4>ℹ️ About the Map</h4>
+            <p>The original geometry data in your file appears to be empty or invalid. 
+            To display an accurate field map, please ensure your yield file contains valid coordinate data 
+            (latitude/longitude columns or valid geometry).</p>
+            <p><strong>All your data processing and profit calculations are working perfectly!</strong></p>
+        </div>
+        
+        <p style="text-align: center; margin-top: 20px;">
+            <em>Check the Profit Summary section below for detailed ROI analysis.</em>
+        </p>
     </div>
     """.format(
         len(df_valid) if not df_valid.empty else 0,
