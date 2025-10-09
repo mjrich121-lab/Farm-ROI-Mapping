@@ -1259,6 +1259,22 @@ sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn
 # =========================================================
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     df_for_maps = ydf.copy()
+# =========================================================
+# 🔧 PATCH — REBUILD LAT/LON FROM GEOMETRY (if missing)
+# =========================================================
+if (
+    ("Latitude" not in df_for_maps.columns or "Longitude" not in df_for_maps.columns)
+    and "_yield_gdf_raw" in st.session_state
+):
+    gtmp = st.session_state["_yield_gdf_raw"]
+    if isinstance(gtmp, gpd.GeoDataFrame) and not gtmp.empty:
+        try:
+            reps = gtmp.geometry.representative_point()
+            df_for_maps["Longitude"] = reps.x.astype(float)
+            df_for_maps["Latitude"] = reps.y.astype(float)
+            st.info("✅ Coordinates rebuilt from shapefile geometry.")
+        except Exception as e:
+            st.warning(f"Coordinate rebuild failed: {e}")
 
     # ✅ Normalize all column names to lowercase (safer)
     df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
@@ -1282,7 +1298,7 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
 
 else:
     # ✅ Create placeholder if yield_df missing or empty
-    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"]
 # =========================================================
 # SAFE TYPE COERCION (REPLACES 4-LINE SANITIZE BLOCK)
 # =========================================================
