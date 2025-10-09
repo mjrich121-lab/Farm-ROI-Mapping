@@ -1700,25 +1700,42 @@ else:
 # =========================================================
 
 # Use the real coordinate data from your original file
-real_coords_found = True  # Always use the coordinates since you have real data
+real_coords_found = False
 if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
-    field_center_lat = df_valid["Latitude"].mean()
-    field_center_lon = df_valid["Longitude"].mean()
-    lat_range = df_valid["Latitude"].max() - df_valid["Latitude"].min()
-    lon_range = df_valid["Longitude"].max() - df_valid["Longitude"].min()
+    # Check if we have valid (non-NaN) coordinates
+    valid_lat = df_valid["Latitude"].dropna()
+    valid_lon = df_valid["Longitude"].dropna()
     
-    st.info(f"✅ Using real field coordinates: {field_center_lat:.6f}, {field_center_lon:.6f}")
-    st.info(f"✅ Field size: {lat_range:.4f}° x {lon_range:.4f}° (approximately {lat_range*111:.1f}km x {lon_range*111:.1f}km)")
-    
-    # Determine appropriate zoom level based on field size
-    if lat_range < 0.01:  # Very small field
-        zoom_level = 18
-    elif lat_range < 0.05:  # Small field
-        zoom_level = 16
-    elif lat_range < 0.1:  # Medium field
-        zoom_level = 14
-    else:  # Large field
-        zoom_level = 12
+    if not valid_lat.empty and not valid_lon.empty:
+        field_center_lat = valid_lat.mean()
+        field_center_lon = valid_lon.mean()
+        lat_range = valid_lat.max() - valid_lat.min()
+        lon_range = valid_lon.max() - valid_lon.min()
+        
+        # Validate coordinates are reasonable
+        if (field_center_lat is not None and field_center_lon is not None and 
+            not pd.isna(field_center_lat) and not pd.isna(field_center_lon) and
+            -90 <= field_center_lat <= 90 and -180 <= field_center_lon <= 180):
+            
+            real_coords_found = True
+            st.info(f"✅ Using real field coordinates: {field_center_lat:.6f}, {field_center_lon:.6f}")
+            st.info(f"✅ Field size: {lat_range:.4f}° x {lon_range:.4f}° (approximately {lat_range*111:.1f}km x {lon_range*111:.1f}km)")
+            
+            # Determine appropriate zoom level based on field size
+            if lat_range < 0.01:  # Very small field
+                zoom_level = 18
+            elif lat_range < 0.05:  # Small field
+                zoom_level = 16
+            elif lat_range < 0.1:  # Medium field
+                zoom_level = 14
+            else:  # Large field
+                zoom_level = 12
+        else:
+            st.error("❌ Invalid coordinate values detected")
+    else:
+        st.error("❌ No valid coordinates found in Latitude/Longitude columns")
+else:
+    st.error("❌ No Latitude/Longitude columns found")
 
 if real_coords_found:
     # Create satellite map centered on real field
@@ -1834,7 +1851,7 @@ if real_coords_found:
     st.success("✅ Complete field map with all overlays displayed!")
     
 else:
-    # Show data summary instead of inaccurate synthetic map
+    # Show data summary and coordinate debugging info
     st.markdown("""
     <div style="border: 2px solid #4CAF50; padding: 20px; border-radius: 10px; background-color: #f0f8f0;">
         <h3>📊 Farm ROI Data Analysis Complete</h3>
@@ -1858,16 +1875,25 @@ else:
             </div>
         </div>
         
-        <div style="background: #E3F2FD; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <h4>ℹ️ About the Map</h4>
-            <p>The original geometry data in your file appears to be empty or invalid. 
-            To display an accurate field map, please ensure your yield file contains valid coordinate data 
-            (latitude/longitude columns or valid geometry).</p>
-            <p><strong>All your data processing and profit calculations are working perfectly!</strong></p>
+        <div style="background: #FFF3E0; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <h4>🔍 Coordinate Data Issue</h4>
+            <p>The coordinate data in your file appears to be invalid or missing. This could be due to:</p>
+            <ul>
+                <li>Empty or corrupted geometry data</li>
+                <li>Invalid coordinate values (NaN)</li>
+                <li>Coordinate system issues</li>
+                <li>File format problems</li>
+            </ul>
+            <p><strong>To fix the map display:</strong></p>
+            <ol>
+                <li>Ensure your yield file has valid Latitude/Longitude columns</li>
+                <li>Check that coordinates are in decimal degrees (e.g., 40.123456, -87.654321)</li>
+                <li>Verify the coordinates are for your Illinois field location</li>
+            </ol>
         </div>
         
         <p style="text-align: center; margin-top: 20px;">
-            <em>Check the Profit Summary section below for detailed ROI analysis.</em>
+            <em>All your data processing and profit calculations are working perfectly!</em>
         </p>
     </div>
     """.format(
