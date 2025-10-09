@@ -1290,25 +1290,14 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
                         st.error(f"❌ Alternative coordinate extraction also failed: {e2}")
             else:
                 st.error("❌ All geometries are empty - cannot extract coordinates")
-                # Create synthetic coordinates as last resort
-                st.warning("🔄 Creating synthetic coordinates for mapping...")
-                n_points = len(df_for_maps)
-                # Create a grid of points in a reasonable agricultural area (example: Iowa)
-                lat_min, lat_max = 40.0, 43.0  # Iowa latitude range
-                lon_min, lon_max = -96.0, -90.0  # Iowa longitude range
-                
-                # Create a grid pattern
-                grid_size = int(np.sqrt(n_points)) + 1
-                lat_grid = np.linspace(lat_min, lat_max, grid_size)
-                lon_grid = np.linspace(lon_min, lon_max, grid_size)
-                
-                lats, lons = np.meshgrid(lat_grid, lon_grid)
-                lats = lats.flatten()[:n_points]
-                lons = lons.flatten()[:n_points]
-                
-                df_for_maps["Latitude"] = lats
-                df_for_maps["Longitude"] = lons
-                st.info(f"✅ Created {n_points} synthetic coordinate points for mapping")
+                # Check if we already have coordinate columns from the original file
+                if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+                    st.info("✅ Using existing Latitude/Longitude columns from your file")
+                    # Don't create synthetic coordinates - use the real ones
+                else:
+                    st.warning("🔄 No coordinate columns found - cannot create map")
+                    df_for_maps["Latitude"] = np.nan
+                    df_for_maps["Longitude"] = np.nan
             
             # Remove geometry column for mapping AFTER extracting coordinates
             df_for_maps = df_for_maps.drop(columns="geometry", errors="ignore")
@@ -1332,6 +1321,20 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             col_mapping[col] = "Latitude"
     
     df_for_maps = df_for_maps.rename(columns=col_mapping)
+    
+    # Force use of existing coordinate columns if they exist
+    if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        st.info("✅ Found existing Latitude/Longitude columns - using real coordinate data")
+        # Ensure coordinates are numeric
+        df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
+        df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
+        
+        # Show coordinate info
+        valid_coords = df_for_maps.dropna(subset=["Latitude", "Longitude"])
+        if not valid_coords.empty:
+            st.info(f"✅ Found {len(valid_coords)} valid coordinate points")
+            st.info(f"✅ Field location: {valid_coords['Latitude'].mean():.6f}, {valid_coords['Longitude'].mean():.6f}")
+            st.info(f"✅ Field size: {(valid_coords['Latitude'].max() - valid_coords['Latitude'].min())*111:.1f}km x {(valid_coords['Longitude'].max() - valid_coords['Longitude'].min())*111:.1f}km")
     
     # Detect and normalize yield column
     yield_candidates = [
@@ -2035,4 +2038,3 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
-
