@@ -1206,6 +1206,7 @@ if isinstance(ydf, gpd.GeoDataFrame):
 else:
     st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
 
+```python
 # =========================================================
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
@@ -1279,7 +1280,7 @@ df_valid = df_for_maps.loc[valid_mask].copy()
 if df_valid.empty:
     st.warning("No valid coordinates detected — using full dataset for continuity.")
     df_valid = df_for_maps.copy()
-
+```
 # =========================================================
 # DEBUG + MAP SAFEGUARD
 # =========================================================
