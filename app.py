@@ -486,39 +486,39 @@ def render_uploaders():
 
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
+                            if frames:
+                    combo = pd.concat(frames, ignore_index=True)
 
-            if frames:
-                combo = pd.concat(frames, ignore_index=True)
-  # =========================================================
-# ✅ PATCH: PRESERVE GEOMETRY FOR YIELD MAP RENDERING
-# =========================================================
-gdf_full = st.session_state.get("_yield_gdf_raw")
+                    # =========================================================
+                    # ✅ PATCH: PRESERVE GEOMETRY FOR YIELD MAP RENDERING
+                    # =========================================================
+                    gdf_full = st.session_state.get("_yield_gdf_raw")
 
-if gdf_full is not None and not getattr(gdf_full, "empty", True):
-    # =========================================================
-    # ✅ ENSURE WGS84 CRS AND EXTRACT REPRESENTATIVE POINTS
-    # =========================================================
-    # Force to lat/lon if not already
-    if gdf_full.crs is not None and gdf_full.crs.to_epsg() != 4326:
-        gdf_full = gdf_full.to_crs(epsg=4326)
+                    if gdf_full is not None and not getattr(gdf_full, "empty", True):
+                        # =========================================================
+                        # ✅ ENSURE WGS84 CRS AND EXTRACT REPRESENTATIVE POINTS
+                        # =========================================================
+                        if gdf_full.crs is not None and gdf_full.crs.to_epsg() != 4326:
+                            gdf_full = gdf_full.to_crs(epsg=4326)
 
-    # Extract representative points from polygons or lines
-    try:
-        reps = gdf_full.geometry.representative_point()
-        gdf_full["Latitude"] = reps.y
-        gdf_full["Longitude"] = reps.x
-        st.info("✅ Coordinates extracted from geometry (centroids or representative points).")
-    except Exception as e:
-        st.warning(f"Coordinate extraction failed: {e}")
+                        try:
+                            reps = gdf_full.geometry.representative_point()
+                            gdf_full["Latitude"] = reps.y
+                            gdf_full["Longitude"] = reps.x
+                            st.info("✅ Coordinates extracted from geometry (centroids or representative points).")
+                        except Exception as e:
+                            st.warning(f"Coordinate extraction failed: {e}")
 
-    # Save to session for mapping
-    st.session_state["yield_df"] = gdf_full.copy()
-    st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
-else:
-    st.session_state["yield_df"] = combo.copy()
-    st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
+                        st.session_state["yield_df"] = gdf_full.copy()
+                        st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
+                    else:
+                        st.session_state["yield_df"] = combo.copy()
+                        st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
 
-st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+                    st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+                else:
+                    st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+         
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
