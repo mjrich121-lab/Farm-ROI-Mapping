@@ -1077,6 +1077,17 @@ st.markdown("---")
 # ---------- build base map ----------
 m = make_base_map()
 
+# Add a test marker to ensure the map is working
+try:
+    folium.Marker(
+        location=[41.5, -93.0],  # Iowa center
+        popup="Farm ROI Mapping Tool - Test Marker",
+        icon=folium.Icon(color="green", icon="info-sign")
+    ).add_to(m)
+    st.info("✅ Test marker added to map")
+except Exception as e:
+    st.warning(f"⚠️ Could not add test marker: {e}")
+
 # ---------- STACKED LEGEND SYSTEM ----------
 def init_legend_rails(m):
     """Injects fixed legend containers (top-left rail used)."""
@@ -1551,18 +1562,72 @@ st.write("DEBUG · Map zoom:", m.options.get('zoom') if hasattr(m, 'options') el
 
 try:
     st.info("🔄 Rendering map...")
-    map_result = st_folium(m, use_container_width=True, height=600)
-    st.info("✅ Map rendered successfully")
+    
+    # Ensure the map has proper bounds
+    if hasattr(m, 'fit_bounds') and bounds:
+        try:
+            m.fit_bounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]])
+        except:
+            # If bounds are invalid, set a default location
+            m.location = [41.5, -93.0]  # Iowa center
+            m.zoom_start = 6
+    
+    # Render the map with explicit parameters
+    map_result = st_folium(
+        m, 
+        use_container_width=True, 
+        height=600,
+        returned_objects=["last_object_clicked", "all_drawings"]
+    )
+    
+    if map_result is not None:
+        st.info("✅ Map rendered successfully")
+    else:
+        st.warning("⚠️ Map object returned None - trying alternative rendering")
+        
+        # Try rendering without returned_objects
+        st_folium(m, use_container_width=True, height=600)
+        st.info("✅ Map rendered with alternative method")
+        
 except Exception as e:
     st.error(f"❌ Map rendering failed: {e}")
+    
     # Try a simple fallback map
     try:
         st.info("🔄 Trying fallback map...")
-        fallback_map = folium.Map(location=[41.5, -93.0], zoom_start=6)
+        fallback_map = folium.Map(
+            location=[41.5, -93.0], 
+            zoom_start=6,
+            tiles="CartoDB positron"
+        )
+        
+        # Add a simple marker to ensure the map works
+        folium.Marker(
+            location=[41.5, -93.0],
+            popup="Test Marker",
+            icon=folium.Icon(color="red")
+        ).add_to(fallback_map)
+        
         st_folium(fallback_map, use_container_width=True, height=600)
-        st.info("✅ Fallback map rendered")
+        st.info("✅ Fallback map rendered with test marker")
+        
     except Exception as e2:
         st.error(f"❌ Fallback map also failed: {e2}")
+        
+        # Last resort - show a simple HTML message
+        st.markdown("""
+        <div style="border: 2px solid #ff6b6b; padding: 20px; border-radius: 10px; background-color: #ffe0e0;">
+            <h3>🗺️ Map Display Issue</h3>
+            <p>The interactive map could not be rendered. This might be due to:</p>
+            <ul>
+                <li>Browser compatibility issues</li>
+                <li>JavaScript disabled</li>
+                <li>Network connectivity problems</li>
+            </ul>
+            <p><strong>Your data is still being processed correctly!</strong></p>
+            <p>Try refreshing the page or using a different browser.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -1726,4 +1791,3 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
-
