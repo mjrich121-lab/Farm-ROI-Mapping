@@ -437,62 +437,15 @@ def render_uploaders():
                             except Exception as e:
                                 st.warning(f"CRS conversion failed for {yf.name}: {e}")
 
-                        # ✅ Extract coordinates from geometry
+                        # ✅ Extract coordinates from geometry (original working method)
                         try:
-                            # Check geometry types
-                            geom_types = gdf.geometry.geom_type.value_counts()
-                            st.info(f"🔍 Geometry types found: {geom_types.to_dict()}")
-                            
-                            # Extract coordinates based on geometry type
-                            if gdf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
-                                # Point geometries - extract x,y directly
-                                gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"] = gdf.geometry.y
-                                st.success("✅ Extracted coordinates from Point geometries")
-                            else:
-                                # Polygon/other geometries - try multiple extraction methods
-                                st.info("🔍 Trying multiple coordinate extraction methods...")
-                                
-                                # Method 1: Try centroid
-                                try:
-                                    centroids = gdf.geometry.centroid
-                                    gdf["Longitude"] = centroids.x
-                                    gdf["Latitude"] = centroids.y
-                                    st.info("✅ Method 1: Centroid extraction attempted")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Method 1 failed: {e}")
-                                
-                                # Method 2: Try representative point
-                                try:
-                                    reps = gdf.geometry.representative_point()
-                                    gdf["Longitude"] = reps.x
-                                    gdf["Latitude"] = reps.y
-                                    st.info("✅ Method 2: Representative point extraction attempted")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Method 2 failed: {e}")
-                                
-                                # Method 3: Try bounds center
-                                try:
-                                    bounds = gdf.geometry.bounds
-                                    gdf["Longitude"] = (bounds['minx'] + bounds['maxx']) / 2
-                                    gdf["Latitude"] = (bounds['miny'] + bounds['maxy']) / 2
-                                    st.info("✅ Method 3: Bounds center extraction attempted")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Method 3 failed: {e}")
-                            
-                            # Validate coordinates
-                            valid_coords = gdf.dropna(subset=['Longitude', 'Latitude'])
-                            if not valid_coords.empty:
-                                st.success(f"✅ Successfully extracted {len(valid_coords):,} valid coordinate pairs")
-                                st.info(f"📍 Field location: {valid_coords['Latitude'].mean():.6f}, {valid_coords['Longitude'].mean():.6f}")
-                                st.info(f"📏 Field size: {(valid_coords['Latitude'].max() - valid_coords['Latitude'].min())*111:.1f}km x {(valid_coords['Longitude'].max() - valid_coords['Longitude'].min())*111:.1f}km")
-                            else:
-                                st.error("❌ All coordinate extraction methods failed")
-                                st.info("🔍 This suggests the polygon geometries are empty or corrupted")
-                                gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
-                                
+                            # Use the original working coordinate extraction
+                            reps = gdf.geometry.representative_point()
+                            gdf["Longitude"] = reps.x
+                            gdf["Latitude"] = reps.y
+                            st.success("✅ Extracted coordinates from geometry")
                         except Exception as e:
-                            st.error(f"❌ Coordinate extraction failed: {e}")
+                            st.warning(f"Coordinate extraction failed: {e}")
                             gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
