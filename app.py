@@ -94,7 +94,7 @@ def pick_col(df: pd.DataFrame, preferred: list[str]) -> Optional[str]:
     for key in preferred:
         if key in norm_map:
             return norm_map[key]
-    # then fuzzy contains “yield” / “yld”
+    # then fuzzy contains "yield" / "yld"
     for k, orig in norm_map.items():
         if "yield" in k or re.search(r"\byld\b", k):
             return orig
@@ -1311,7 +1311,7 @@ df_valid = df_for_maps.loc[valid_mask].copy()
 if df_valid.empty:
     st.warning("No valid coordinates detected — using full dataset for continuity.")
     df_valid = df_for_maps.copy()
-```
+
 # =========================================================
 # DEBUG + MAP SAFEGUARD
 # =========================================================
