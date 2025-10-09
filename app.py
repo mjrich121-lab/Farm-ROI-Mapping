@@ -1,3 +1,4 @@
+
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF (Patched)
 # =========================================================
@@ -1301,15 +1302,22 @@ for col in ["Latitude", "Longitude", "Yield"]:
 # =========================================================
 # SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
 # =========================================================
-valid_mask = (
-    df_for_maps["Latitude"].between(-90, 90) &
-    df_for_maps["Longitude"].between(-180, 180) &
-    df_for_maps["Latitude"].notna() &
-    df_for_maps["Longitude"].notna()
-)
-df_valid = df_for_maps.loc[valid_mask].copy()
-if df_valid.empty:
-    st.warning("No valid coordinates detected — using full dataset for continuity.")
+# Only validate coordinates if we have coordinate columns
+if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+    valid_mask = (
+        df_for_maps["Latitude"].between(-90, 90) &
+        df_for_maps["Longitude"].between(-180, 180) &
+        df_for_maps["Latitude"].notna() &
+        df_for_maps["Longitude"].notna()
+    )
+    df_valid = df_for_maps.loc[valid_mask].copy()
+    if df_valid.empty and not df_for_maps.empty:
+        st.warning("No valid coordinates detected — using full dataset for continuity.")
+        df_valid = df_for_maps.copy()
+    elif df_valid.empty:
+        df_valid = df_for_maps.copy()
+else:
+    # No coordinate columns available
     df_valid = df_for_maps.copy()
 
 # =========================================================
@@ -1320,7 +1328,9 @@ st.write("DEBUG · Head of df_for_maps:")
 st.dataframe(df_for_maps.head(10))
 
 if df_valid.empty:
-    st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
+    st.warning("No yield data uploaded — map will display without heatmaps.")
+    # Create a default map view even without data
+    bounds = (25.0, -125.0, 49.0, -66.0)  # Default USA bounds
 else:
     try:
         # Clip extreme yield outliers (5–95%)
@@ -1424,7 +1434,17 @@ try:
 except Exception as e:
     st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
 
+# =========================================================
+# ALWAYS DISPLAY THE MAP (EVEN WITH NO DATA)
+# =========================================================
+# Show helpful message if no data is uploaded
+if not st.session_state.get("yield_df", pd.DataFrame()).empty:
+    st.info("🗺️ Interactive map with yield data and overlays")
+else:
+    st.info("🗺️ Interactive map ready - upload yield data, zones, or prescription maps to see overlays")
+
 st_folium(m, use_container_width=True, height=600)
+
 
 # =========================================================
 # 9. PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
