@@ -1180,38 +1180,60 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         else:
             df_for_maps = pd.DataFrame(ydf.copy())
 
-        # Extract coordinates from geometry if it's a GeoDataFrame - USE WORKING METHOD
-        if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
-            try:
-                # Debug geometry first
-                st.write(f"DEBUG: Geometry column exists: {'geometry' in ydf.columns}")
-                st.write(f"DEBUG: Geometry CRS: {ydf.crs}")
-                st.write(f"DEBUG: Geometry types: {ydf.geometry.geom_type.value_counts()}")
-                st.write(f"DEBUG: Empty geometries: {ydf.geometry.is_empty.sum()}")
-                st.write(f"DEBUG: Sample geometry: {ydf.geometry.iloc[0]}")
-                
-                # Use the working method from backup code
-                reps = ydf.geometry.representative_point()
-                st.write(f"DEBUG: Representative points sample: {reps.iloc[0]}")
-                st.write(f"DEBUG: Reps.x sample: {reps.x.iloc[0]}")
-                st.write(f"DEBUG: Reps.y sample: {reps.y.iloc[0]}")
-                
-                df_for_maps["Longitude"] = reps.x
-                df_for_maps["Latitude"] = reps.y
-                st.info("✅ Coordinates extracted using representative_point method.")
-            except Exception as e:
-                st.warning(f"Coordinate extraction failed: {e}")
-                # Try alternative methods
+        # Check for existing coordinate columns first (like in backup code)
+        st.write(f"DEBUG: All columns in ydf: {list(ydf.columns)}")
+        
+        # Look for existing coordinate columns
+        lat_cols = [c for c in ydf.columns if c.lower() in ['latitude', 'lat', 'y', 'ycoord', 'northing']]
+        lon_cols = [c for c in ydf.columns if c.lower() in ['longitude', 'lon', 'long', 'x', 'xcoord', 'easting']]
+        
+        st.write(f"DEBUG: Found lat columns: {lat_cols}")
+        st.write(f"DEBUG: Found lon columns: {lon_cols}")
+        
+        if lat_cols and lon_cols:
+            # Use existing coordinate columns
+            lat_col = lat_cols[0]
+            lon_col = lon_cols[0]
+            st.write(f"DEBUG: Using existing coordinates: {lat_col}, {lon_col}")
+            st.write(f"DEBUG: Sample lat values: {ydf[lat_col].head()}")
+            st.write(f"DEBUG: Sample lon values: {ydf[lon_col].head()}")
+            
+            df_for_maps["Latitude"] = ydf[lat_col]
+            df_for_maps["Longitude"] = ydf[lon_col]
+            st.info(f"✅ Using existing coordinate columns: {lat_col}, {lon_col}")
+        else:
+            # Extract coordinates from geometry if it's a GeoDataFrame - USE WORKING METHOD
+            if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
                 try:
-                    if hasattr(ydf.geometry, 'centroid'):
-                        centroids = ydf.geometry.centroid
-                        df_for_maps["Longitude"] = centroids.x
-                        df_for_maps["Latitude"] = centroids.y
-                        st.info("✅ Coordinates extracted using centroid method.")
-                    else:
-                        st.error("No geometry methods available for coordinate extraction.")
-                except Exception as e2:
-                    st.error(f"All coordinate extraction methods failed: {e2}")
+                    # Debug geometry first
+                    st.write(f"DEBUG: Geometry column exists: {'geometry' in ydf.columns}")
+                    st.write(f"DEBUG: Geometry CRS: {ydf.crs}")
+                    st.write(f"DEBUG: Geometry types: {ydf.geometry.geom_type.value_counts()}")
+                    st.write(f"DEBUG: Empty geometries: {ydf.geometry.is_empty.sum()}")
+                    st.write(f"DEBUG: Sample geometry: {ydf.geometry.iloc[0]}")
+                    
+                    # Use the working method from backup code
+                    reps = ydf.geometry.representative_point()
+                    st.write(f"DEBUG: Representative points sample: {reps.iloc[0]}")
+                    st.write(f"DEBUG: Reps.x sample: {reps.x.iloc[0]}")
+                    st.write(f"DEBUG: Reps.y sample: {reps.y.iloc[0]}")
+                    
+                    df_for_maps["Longitude"] = reps.x
+                    df_for_maps["Latitude"] = reps.y
+                    st.info("✅ Coordinates extracted using representative_point method.")
+                except Exception as e:
+                    st.warning(f"Coordinate extraction failed: {e}")
+                    # Try alternative methods
+                    try:
+                        if hasattr(ydf.geometry, 'centroid'):
+                            centroids = ydf.geometry.centroid
+                            df_for_maps["Longitude"] = centroids.x
+                            df_for_maps["Latitude"] = centroids.y
+                            st.info("✅ Coordinates extracted using centroid method.")
+                        else:
+                            st.error("No geometry methods available for coordinate extraction.")
+                    except Exception as e2:
+                        st.error(f"All coordinate extraction methods failed: {e2}")
 
         # Normalize coord column names if provided in CSV/JSON
         lower_cols = {c.lower(): c for c in df_for_maps.columns}
