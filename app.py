@@ -2,6 +2,7 @@
 # Farm Profit Mapping Tool V4 — WORKING LOGIC + COMPACT LAYOUT
 # =========================================================
 import os
+import io
 import zipfile
 import tempfile
 from typing import Optional
@@ -392,7 +393,8 @@ def render_uploaders():
 
             YIELD_PREFS = [
                 "yld_vol_dr", "yld_mass_dr", "dry_yield", "dry_yld", "yield",
-                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield", "yld_bu_per_ac"
+                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield", "yld_bu_per_ac",
+                "crop_flw_m", "yld_mass_w", "yld_vol_we"
             ]
 
             for yf in yield_files:
@@ -400,24 +402,81 @@ def render_uploaders():
                     name = yf.name.lower()
                     df, gdf = None, None
 
-                    # --- CSV ---
-                    if name.endswith(".csv"):
-                        df = safe_read_csv(yf)
-                        if df is not None:
-                            df.columns = [c.strip() for c in df.columns]
-                            # Convert CSV to GeoDataFrame using real GPS coordinates
-                            gdf = df_to_gdf(df)
-                            if gdf is not None:
-                                st.session_state["_yield_gdf_raw"] = gdf
-                                df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                            else:
-                                messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                    # --- CSV or CSV in ZIP ---
+                    if name.endswith(".csv") or (name.endswith(".zip") and "csv" in name.lower()):
+                        df = None
+                        
+                        # Handle CSV in ZIP
+                        if name.endswith(".zip"):
+                            try:
+                                with tempfile.TemporaryDirectory() as tmpdir:
+                                    zpath = os.path.join(tmpdir, "temp.zip")
+                                    with open(zpath, "wb") as f:
+                                        f.write(yf.getbuffer())
+                                    
+                                    with zipfile.ZipFile(zpath, "r") as z:
+                                        # Find CSV file in zip
+                                        csv_files = [f for f in z.namelist() if f.lower().endswith('.csv')]
+                                        if csv_files:
+                                            csv_content = z.read(csv_files[0])
+                                            df = pd.read_csv(io.BytesIO(csv_content))
+                                            st.info(f"✅ Found CSV file '{csv_files[0]}' in ZIP")
+                                        else:
+                                            st.error(f"No CSV file found in ZIP: {yf.name}")
+                                            messages.append(f"{yf.name}: no CSV file found in ZIP — skipped.")
+                                            continue
+                            except Exception as e:
+                                st.error(f"Error reading CSV from ZIP: {e}")
+                                messages.append(f"{yf.name}: ZIP read error — skipped.")
                                 continue
+                        else:
+                            # Handle direct CSV
+                            df = safe_read_csv(yf)
+                        
+                        if df is not None and not df.empty:
+                            df.columns = [c.strip() for c in df.columns]
+                            
+                            # Check if geometry column exists (for CSV with POINT data)
+                            if "geometry" in df.columns:
+                                try:
+                                    # Convert POINT strings to actual geometry
+                                    from shapely import wkt
+                                    df["geometry"] = df["geometry"].apply(lambda x: wkt.loads(x) if isinstance(x, str) else x)
+                                    gdf = gpd.GeoDataFrame(df, crs="EPSG:4326")
+                                    
+                                    # Extract coordinates from geometry
+                                    reps = gdf.geometry.representative_point()
+                                    gdf["Longitude"] = reps.x
+                                    gdf["Latitude"] = reps.y
+                                    st.info(f"✅ Extracted coordinates from geometry column in {yf.name}")
+                                    
+                                    st.session_state["_yield_gdf_raw"] = gdf
+                                    df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                    
+                                except Exception as e:
+                                    st.warning(f"Could not parse geometry column: {e}")
+                                    # Fallback to regular lat/lon detection
+                                    gdf = df_to_gdf(df)
+                                    if gdf is not None:
+                                        st.session_state["_yield_gdf_raw"] = gdf
+                                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                    else:
+                                        messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                                        continue
+                            else:
+                                # No geometry column, try regular lat/lon detection
+                                gdf = df_to_gdf(df)
+                                if gdf is not None:
+                                    st.session_state["_yield_gdf_raw"] = gdf
+                                    df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                else:
+                                    messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                                    continue
                         else:
                             messages.append(f"{yf.name}: could not read CSV — skipped.")
                             continue
 
-                    # --- SHP/ZIP/GEOJSON ---
+                    # --- SHP/GEOJSON ---
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
