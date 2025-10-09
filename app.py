@@ -1298,7 +1298,7 @@ if (
 
 else:
     # ✅ Create placeholder if yield_df missing or empty
-    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"]
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 # =========================================================
 # SAFE TYPE COERCION (REPLACES 4-LINE SANITIZE BLOCK)
 # =========================================================
