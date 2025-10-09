@@ -1,4 +1,3 @@
-
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF (Patched)
 # =========================================================
@@ -1304,20 +1303,29 @@ for col in ["Latitude", "Longitude", "Yield"]:
 # =========================================================
 # Only validate coordinates if we have coordinate columns
 if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-    valid_mask = (
-        df_for_maps["Latitude"].between(-90, 90) &
-        df_for_maps["Longitude"].between(-180, 180) &
-        df_for_maps["Latitude"].notna() &
-        df_for_maps["Longitude"].notna()
-    )
-    df_valid = df_for_maps.loc[valid_mask].copy()
-    if df_valid.empty and not df_for_maps.empty:
-        st.warning("No valid coordinates detected — using full dataset for continuity.")
-        df_valid = df_for_maps.copy()
-    elif df_valid.empty:
+    # Check if we have any non-null coordinates first
+    has_coords = df_for_maps["Latitude"].notna().any() and df_for_maps["Longitude"].notna().any()
+    
+    if has_coords:
+        valid_mask = (
+            df_for_maps["Latitude"].between(-90, 90) &
+            df_for_maps["Longitude"].between(-180, 180) &
+            df_for_maps["Latitude"].notna() &
+            df_for_maps["Longitude"].notna()
+        )
+        df_valid = df_for_maps.loc[valid_mask].copy()
+        
+        if df_valid.empty and not df_for_maps.empty:
+            st.warning("Coordinates found but outside valid range — using full dataset.")
+            df_valid = df_for_maps.copy()
+        elif not df_valid.empty:
+            st.info(f"✅ Found {len(df_valid)} valid coordinate points for mapping")
+    else:
+        st.warning("No coordinate data found in Latitude/Longitude columns.")
         df_valid = df_for_maps.copy()
 else:
     # No coordinate columns available
+    st.warning("No Latitude/Longitude columns found.")
     df_valid = df_for_maps.copy()
 
 # =========================================================
@@ -1326,6 +1334,15 @@ else:
 st.write("DEBUG · df_for_maps columns:", list(df_for_maps.columns))
 st.write("DEBUG · Head of df_for_maps:")
 st.dataframe(df_for_maps.head(10))
+
+# Debug coordinate information
+if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+    st.write("DEBUG · Coordinate info:")
+    st.write(f"- Latitude range: {df_for_maps['Latitude'].min():.6f} to {df_for_maps['Latitude'].max():.6f}")
+    st.write(f"- Longitude range: {df_for_maps['Longitude'].min():.6f} to {df_for_maps['Longitude'].max():.6f}")
+    st.write(f"- Non-null Latitude count: {df_for_maps['Latitude'].notna().sum()}")
+    st.write(f"- Non-null Longitude count: {df_for_maps['Longitude'].notna().sum()}")
+    st.write(f"- Valid coordinate pairs: {((df_for_maps['Latitude'].between(-90, 90)) & (df_for_maps['Longitude'].between(-180, 180)) & df_for_maps['Latitude'].notna() & df_for_maps['Longitude'].notna()).sum()}")
 
 if df_valid.empty:
     st.warning("No yield data uploaded — map will display without heatmaps.")
