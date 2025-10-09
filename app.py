@@ -1,32 +1,57 @@
 # =========================================================
-# Farm Profit Mapping Tool V4
+# Farm Profit Mapping Tool V4 — WORKING LOGIC + COMPACT LAYOUT
 # =========================================================
-import streamlit as st
+import os
+import zipfile
+import tempfile
+from typing import Optional
+
+import numpy as np
 import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+
+from scipy.interpolate import griddata
+import streamlit as st
 import folium
 from streamlit_folium import st_folium
-import numpy as np
-from scipy.interpolate import griddata
-import geopandas as gpd
-import zipfile
-import os
-import matplotlib.pyplot as plt
-import shutil
+from branca.element import MacroElement, Template
+from matplotlib import colors as mpl_colors
 
-st.set_page_config(page_title="Farm ROI Tool V3", layout="wide")
-st.title("Farm Profit Mapping Tool V3")
+# Clear caches
+st.cache_data.clear()
+st.cache_resource.clear()
 
-# --- Initialize session state defaults once here ---
-if "fert_products" not in st.session_state:
-    st.session_state["fert_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "seed_products" not in st.session_state:
-    st.session_state["seed_products"] = pd.DataFrame(columns=["product","Acres","CostTotal","CostPerAcre"])
-if "zones_gdf" not in st.session_state:
-    st.session_state["zones_gdf"] = None
-if "yield_df" not in st.session_state:
-    st.session_state["yield_df"] = None
-if "fixed_products" not in st.session_state:
-    st.session_state["fixed_products"] = pd.DataFrame(columns=["Type","Product","Rate","CostPerUnit","$/ac"])
+st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
+st.title("Farm Profit Mapping Tool V4")
+
+# ===========================
+# BOOTSTRAP DEFAULTS
+# ===========================
+def _bootstrap_defaults():
+    """Ensure all keys exist so nothing crashes."""
+    for k in ["chem", "ins", "insect", "fert", "seed", "rent", "mach", "labor", "col", "fuel", "int", "truck"]:
+        st.session_state.setdefault(k, 0.0)
+    st.session_state.setdefault("corn_yield", 200.0)
+    st.session_state.setdefault("corn_price", 5.0)
+    st.session_state.setdefault("bean_yield", 60.0)
+    st.session_state.setdefault("bean_price", 12.0)
+    st.session_state.setdefault("sell_price", st.session_state["corn_price"])
+    st.session_state.setdefault("target_yield", 200.0)
+    st.session_state.setdefault("fixed_products", pd.DataFrame(
+        {"Type": ["Seed", "Fertilizer"], "Product": ["", ""], "Rate": [0.0, 0.0],
+         "CostPerUnit": [0.0, 0.0], "$/ac": [0.0, 0.0]}
+    ))
+    st.session_state.setdefault("yield_df", pd.DataFrame())
+    st.session_state.setdefault("fert_layers_store", {})
+    st.session_state.setdefault("seed_layers_store", {})
+    st.session_state.setdefault("fert_gdfs", {})
+    st.session_state.setdefault("seed_gdf", None)
+    st.session_state.setdefault("zones_gdf", None)
+    st.session_state.setdefault("expenses_dict", {})
+    st.session_state.setdefault("base_expenses_per_acre", 0.0)
+
+_bootstrap_defaults()
 
 # =========================================================
 # STYLING
