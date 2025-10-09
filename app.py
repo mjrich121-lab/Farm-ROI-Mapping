@@ -1231,6 +1231,10 @@ df_for_maps["Yield"].fillna(0, inplace=True)
 # =========================================================
 try:
     if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        # Convert to numeric first
+        df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
+        df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
+        
         valid_mask = (
             df_for_maps["Latitude"].between(-90, 90)
             & df_for_maps["Longitude"].between(-180, 180)
@@ -1262,12 +1266,13 @@ else:
         if df_valid["Yield"].max() > 400:
             df_valid["Yield"] = df_valid["Yield"] / 15.93
 
-        south, west, north, east = (
-            float(df_valid["Latitude"].min()),
-            float(df_valid["Longitude"].min()),
-            float(df_valid["Latitude"].max()),
-            float(df_valid["Longitude"].max()),
-        )
+        if "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+            south = float(df_valid["Latitude"].min())
+            west = float(df_valid["Longitude"].min())
+            north = float(df_valid["Latitude"].max())
+            east = float(df_valid["Longitude"].max())
+        else:
+            south, west, north, east = 25.0, -125.0, 49.0, -66.0  # fallback USA
         bounds = (south, west, north, east)
     except Exception as e:
         st.warning(f"Map bounds computation failed: {e}")
@@ -1290,13 +1295,18 @@ else:
         fx = st.session_state.get("fixed_products", pd.DataFrame())
         fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
 
-        df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
-        df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
-            base_expenses_per_acre + fert_var + seed_var
-        )
-        df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (
-            base_expenses_per_acre + fixed_costs
-        )
+        if "Yield" in df_for_maps.columns:
+            df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
+            df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
+                base_expenses_per_acre + fert_var + seed_var
+            )
+            df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (
+                base_expenses_per_acre + fixed_costs
+            )
+        else:
+            df_for_maps["Revenue_per_acre"] = 0.0
+            df_for_maps["NetProfit_Variable"] = 0.0
+            df_for_maps["NetProfit_Fixed"] = 0.0
     except Exception as e:
         st.warning(f"Profit calculation fallback triggered: {e}")
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
