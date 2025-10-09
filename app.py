@@ -1283,50 +1283,49 @@ else:
 # =========================================================
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
-if isinstance(ydf, pd.DataFrame) and not ydf.empty:
-    # ✅ Preserve geometry if it exists
-    if "geometry" in ydf.columns:
-    try:
-        # =========================================================
-        # ✅ UNIVERSAL COORDINATE EXTRACTION — POINTS OR POLYGONS
-        # =========================================================
-        geom_type = ydf.geometry.geom_type.unique()
-        if any(gt.startswith("Point") for gt in geom_type):
-            # Direct point geometries
-            df_for_maps["Longitude"] = ydf.geometry.x
-            df_for_maps["Latitude"]  = ydf.geometry.y
-            st.info("✅ Coordinates extracted directly from Point geometry.")
-        else:
-            # Polygon, MultiPolygon, or LineString → use centroids
-            centroids = ydf.geometry.representative_point()
-            df_for_maps["Longitude"] = centroids.x
-            df_for_maps["Latitude"]  = centroids.y
-            st.info("✅ Coordinates extracted from polygon centroids.")
-    except Exception as e:
-        st.warning(f"Coordinate extraction failed: {e}")
+df_for_maps = pd.DataFrame()
 
+if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
+    df_for_maps = ydf.copy()
 
-        # ✅ Fallback for CSV/GeoJSON with lat/lon columns
-        if {"longitude", "latitude"}.issubset(set(ydf.columns)):
-            df_for_maps["Longitude"] = pd.to_numeric(ydf["longitude"], errors="coerce")
-            df_for_maps["Latitude"] = pd.to_numeric(ydf["latitude"], errors="coerce")
-            st.info("✅ Coordinates extracted from CSV or JSON columns.")
-        else:
-            st.warning("⚠️ No geometry or coordinate columns found — map may not render.")
-            df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
+    if "geometry" in df_for_maps.columns and isinstance(ydf, gpd.GeoDataFrame):
+        try:
+            geom_types = ydf.geometry.geom_type.astype(str).unique()
+            if any(gt.startswith("Point") for gt in geom_types):
+                lon = ydf.geometry.x
+                lat = ydf.geometry.y
+                st.info("✅ Coordinates extracted directly from Point geometry.")
+            else:
+                reps = ydf.geometry.representative_point()
+                lon = reps.x
+                lat = reps.y
+                st.info("✅ Coordinates extracted from polygon centroids.")
+            # drop geometry for the mapping dataframe
+            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
+            df_for_maps["Longitude"] = lon
+            df_for_maps["Latitude"] = lat
+        except Exception as e:
+            st.warning(f"Coordinate extraction failed: {e}")
+            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
 
-    # Normalize columns
-    df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
+    # Normalize coord column names if provided in CSV/JSON
+    lower_cols = {c.lower(): c for c in df_for_maps.columns}
+    if "longitude" in lower_cols:
+        df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
+    if "latitude" in lower_cols:
+        df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
 
-    # Detect yield column
-    yield_col = next((c for c in df_for_maps.columns if "yld" in c or "yield" in c), None)
-    if yield_col and yield_col != "yield":
-        df_for_maps.rename(columns={yield_col: "yield"}, inplace=True)
-
+    # Detect/normalize yield column
+    yield_candidates = [
+        "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+    ]
+    ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
+    if ycol and ycol != "Yield":
+        df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
 else:
-    # ✅ Fallback empty DF if ydf missing
+    # Fallback empty DF if ydf missing
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-
 
 # =========================================================
 # SAFE TYPE COERCION + VALIDATION
