@@ -419,6 +419,11 @@ def render_uploaders():
                             continue
 
                         st.write(f"DEBUG — Columns in {yf.name}:", list(gdf.columns))
+                        st.write(f"DEBUG — Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
+                        st.write(f"DEBUG — CRS: {gdf.crs}")
+                        st.write(f"DEBUG — Total bounds: {gdf.total_bounds}")
+                        st.write(f"DEBUG — Sample geometry: {gdf.geometry.iloc[0] if len(gdf) > 0 else 'No geometries'}")
+                        
                         if "Yld_Vol_Dr" in gdf.columns:
                             st.write("DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
                             st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
@@ -1411,41 +1416,18 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             st.write("DEBUG - Latitude null count:", df_for_maps["Latitude"].isnull().sum())
             st.write("DEBUG - Longitude null count:", df_for_maps["Longitude"].isnull().sum())
             
-            # Since coordinates are missing, create a representative Illinois field map
-            st.info("🔧 Creating representative Illinois field map with your real yield data...")
+            # Coordinates are missing - need to extract from original shapefile
+            st.error("❌ No valid coordinates found in Latitude/Longitude columns")
+            st.info("🔍 This means the coordinate extraction from your shapefile failed")
+            st.info("📋 To fix this, we need to:")
+            st.info("1. Check if your shapefile has valid geometry")
+            st.info("2. Verify the coordinate system (CRS)")
+            st.info("3. Extract coordinates from the geometry column")
+            st.info("4. Use your actual field location")
             
-            # Illinois field coordinates (representative 40-acre field)
-            illinois_field_lat = 40.123456  # Representative Illinois latitude
-            illinois_field_lon = -87.654321  # Representative Illinois longitude
-            
-            # Create a grid of points representing your field
-            import numpy as np
-            
-            # Generate a realistic field grid based on your data
-            n_points = len(df_for_maps)
-            field_size_lat = 0.01  # ~1.1 km
-            field_size_lon = 0.01  # ~1.1 km
-            
-            # Create realistic field coordinates
-            np.random.seed(42)  # For consistent results
-            lats = np.random.uniform(
-                illinois_field_lat - field_size_lat/2, 
-                illinois_field_lat + field_size_lat/2, 
-                n_points
-            )
-            lons = np.random.uniform(
-                illinois_field_lon - field_size_lon/2, 
-                illinois_field_lon + field_size_lon/2, 
-                n_points
-            )
-            
-            # Add the generated coordinates to your dataframe
-            df_for_maps["Latitude"] = lats
-            df_for_maps["Longitude"] = lons
-            
-            st.success(f"✅ Created representative Illinois field map with {n_points:,} points")
-            st.info(f"📍 Field location: {illinois_field_lat:.6f}, {illinois_field_lon:.6f}")
-            st.info(f"📏 Field size: ~{field_size_lat*111:.1f}km x {field_size_lon*111:.1f}km (~40 acres)")
+            # Don't create synthetic coordinates - show error instead
+            st.warning("⚠️ Cannot create map without real coordinates from your field")
+            st.info("💡 Please check your original shapefile to ensure it contains valid geometry data")
     
     # Detect and normalize yield column
     yield_candidates = [
