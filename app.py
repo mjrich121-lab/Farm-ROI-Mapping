@@ -412,6 +412,7 @@ def render_uploaders():
                         df.columns = [c.strip() for c in df.columns]
 
                     # --- SHP/ZIP/GEOJSON ---
+                                       # --- SHP/ZIP/GEOJSON ---
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
@@ -423,16 +424,21 @@ def render_uploaders():
                             st.write("DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
                             st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
 
-                        # ✅ Directly compute centroid coordinates (no loss later)
-                        gdf["Longitude"] = gdf.geometry.centroid.x
-                        gdf["Latitude"] = gdf.geometry.centroid.y
+                        # ✅ Preserve geometry for later heatmap building
+                        gdf_keep = gdf.copy()
 
+                        # ✅ Compute centroids now so we always have coords
+                        try:
+                            reps = gdf.geometry.representative_point()
+                            gdf["Longitude"] = reps.x
+                            gdf["Latitude"] = reps.y
+                        except Exception:
+                            gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+
+                        # ✅ Flatten for table work, keep geometry for map rendering
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        df.columns = [c.strip() for c in df.columns]
+                        st.session_state["_yield_gdf_raw"] = gdf_keep
 
-                    if df is None or df.empty:
-                        messages.append(f"{yf.name}: no data after read — skipped.")
-                        continue
 
                     # --- find yield column ---
                     yield_col = None
