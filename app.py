@@ -785,6 +785,7 @@ def render_input_sections():
 
 # ===========================
 # Map helpers / overlays
+# ===========================
 def make_base_map():
     """Absolute fallback-proof map — never fails, even with no internet."""
     try:
