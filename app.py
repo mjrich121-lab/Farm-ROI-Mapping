@@ -490,20 +490,20 @@ def render_uploaders():
             if frames:
                 combo = pd.concat(frames, ignore_index=True)
              
-    # =========================================================
-    # ✅ PATCH: PRESERVE GEOMETRY FOR YIELD MAP RENDERING
-    # =========================================================
-    gdf_full = st.session_state.get("_yield_gdf_raw")
-    if gdf_full is not None and not getattr(gdf_full, "empty", True):
-        st.session_state["yield_df"] = gdf_full.copy()
-        st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
-    else:
-        st.session_state["yield_df"] = combo.copy()
-        st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
-
-    st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
-else:
-    st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+                # =========================================================
+                # ✅ PATCH: PRESERVE GEOMETRY FOR YIELD MAP RENDERING
+                # =========================================================
+                gdf_full = st.session_state.get("_yield_gdf_raw")
+                if gdf_full is not None and not getattr(gdf_full, "empty", True):
+                    st.session_state["yield_df"] = gdf_full.copy()
+                    st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
+                else:
+                    st.session_state["yield_df"] = combo.copy()
+                    st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
+            
+                st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+            else:
+                st.error("❌ No valid yield data found.\n" + "\n".join(messages))
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
