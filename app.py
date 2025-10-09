@@ -342,12 +342,21 @@ def render_uploaders():
                 st.info(f"✅ Loaded zones: {len(zones_gdf)} features")
                 st.info(f"Zone columns: {list(zones_gdf.columns)}")
                 
-                zone_col = next((c for c in ["Zone", "zone", "ZONE", "Name", "name"]
+                # Look for zone ID column first
+                zone_col = next((c for c in ["Zone_ID", "zone_id", "ZONE_ID", "Zone", "zone", "ZONE", "Name", "name"]
                                  if c in zones_gdf.columns), None)
                 if not zone_col:
                     zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
                     zone_col = "Zone"
-                zones_gdf["Zone"] = zones_gdf[zone_col]
+                
+                # Group by zone ID to combine features with same zone
+                if zone_col in zones_gdf.columns:
+                    st.info(f"Grouping {len(zones_gdf)} features by {zone_col}")
+                    zones_gdf = zones_gdf.dissolve(by=zone_col, aggfunc='first')
+                    zones_gdf["Zone"] = zones_gdf.index
+                    st.info(f"✅ Grouped into {len(zones_gdf)} zones")
+                else:
+                    zones_gdf["Zone"] = zones_gdf[zone_col]
                 
                 st.info(f"Zone values: {sorted(zones_gdf['Zone'].unique())}")
 
@@ -459,6 +468,12 @@ def render_uploaders():
                         if gdf is None or gdf.empty:
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
+                        
+                        # Debug: show what's in the shapefile
+                        st.info(f"✅ Loaded yield shapefile: {len(gdf)} features")
+                        st.info(f"Yield columns: {list(gdf.columns)}")
+                        st.info(f"Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
+                        st.info(f"Empty geometries: {gdf.geometry.is_empty.sum()}")
 
                         # ✅ Ensure WGS84 CRS
                         if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
@@ -471,11 +486,57 @@ def render_uploaders():
                         try:
                             if gdf.geometry.is_empty.all():
                                 st.warning(f"All geometries are empty in {yf.name}")
-                                # Try to repair geometries
-                                gdf.geometry = gdf.geometry.buffer(0)
-                                if gdf.geometry.is_empty.all():
-                                    st.error(f"Cannot extract coordinates from empty geometries in {yf.name}")
-                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                st.info("Attempting to repair geometries...")
+                                
+                                # Try multiple repair methods
+                                try:
+                                    # Method 1: Buffer repair
+                                    gdf.geometry = gdf.geometry.buffer(0)
+                                    if not gdf.geometry.is_empty.all():
+                                        st.info("✅ Repaired geometries using buffer method")
+                                    else:
+                                        # Method 2: Try to reconstruct from bounds if available
+                                        if hasattr(gdf, 'bounds') and not gdf.bounds.isnull().all().all():
+                                            st.info("Attempting to reconstruct geometries from bounds...")
+                                            # This is a fallback - create point geometries from bounds center
+                                            bounds = gdf.bounds
+                                            centers_lon = (bounds['minx'] + bounds['maxx']) / 2
+                                            centers_lat = (bounds['miny'] + bounds['maxy']) / 2
+                                            from shapely.geometry import Point
+                                            gdf.geometry = [Point(lon, lat) for lon, lat in zip(centers_lon, centers_lat)]
+                                            st.info("✅ Created point geometries from bounds")
+                                        else:
+                                            # Method 3: Check if there are coordinate columns in the attribute data
+                                            st.info("Checking for coordinate columns in attribute data...")
+                                            coord_cols = []
+                                            for col in gdf.columns:
+                                                col_lower = col.lower()
+                                                if any(coord in col_lower for coord in ['lat', 'lon', 'x', 'y', 'longitude', 'latitude']):
+                                                    coord_cols.append(col)
+                                            
+                                            if len(coord_cols) >= 2:
+                                                st.info(f"Found coordinate columns: {coord_cols}")
+                                                try:
+                                                    # Use the first two coordinate columns found
+                                                    lat_col = coord_cols[0] if 'lat' in coord_cols[0].lower() else coord_cols[1]
+                                                    lon_col = coord_cols[1] if 'lon' in coord_cols[1].lower() else coord_cols[0]
+                                                    
+                                                    # Create point geometries from coordinate columns
+                                                    from shapely.geometry import Point
+                                                    gdf.geometry = [Point(lon, lat) for lon, lat in zip(gdf[lon_col], gdf[lat_col])]
+                                                    st.info(f"✅ Created geometries from coordinate columns: {lat_col}, {lon_col}")
+                                                except Exception as coord_error:
+                                                    st.error(f"Failed to create geometries from coordinates: {coord_error}")
+                                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                                    continue
+                                            else:
+                                                st.error(f"Cannot repair empty geometries in {yf.name}")
+                                                st.info(f"Available columns: {list(gdf.columns)}")
+                                                messages.append(f"{yf.name}: empty geometries — skipped.")
+                                                continue
+                                except Exception as repair_error:
+                                    st.error(f"Geometry repair failed: {repair_error}")
+                                    messages.append(f"{yf.name}: geometry repair failed — skipped.")
                                     continue
                             
                             # Extract coordinates using representative points
