@@ -383,7 +383,7 @@ def render_uploaders():
                 st.error("Could not read zone file.")
         else:
             st.caption("No zone file uploaded.")
-          # ------------------------- YIELD -------------------------
+            # ------------------------- YIELD -------------------------
     with u2:
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
@@ -392,13 +392,13 @@ def render_uploaders():
         )
 
         st.session_state["yield_df"] = pd.DataFrame()
+
         if yield_files:
             frames, messages = [], []
 
             YIELD_PREFS = [
                 "yld_vol_dr", "yld_mass_dr", "dry_yield", "dry_yld", "yield",
-                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield",
-                "yld_bu_per_ac"
+                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield", "yld_bu_per_ac"
             ]
 
             for yf in yield_files:
@@ -412,7 +412,6 @@ def render_uploaders():
                         df.columns = [c.strip() for c in df.columns]
 
                     # --- SHP/ZIP/GEOJSON ---
-                                       # --- SHP/ZIP/GEOJSON ---
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
@@ -424,53 +423,54 @@ def render_uploaders():
                             st.write("DEBUG — First 10 rows of Yld_Vol_Dr (if exists):")
                             st.dataframe(gdf[["Yld_Vol_Dr"]].head(10))
 
-                        # ✅ Preserve geometry for later heatmap building
                         gdf_keep = gdf.copy()
 
-                        # ✅ Compute centroids now so we always have coords
+                        # ✅ Ensure WGS84 CRS
+                        if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
+                            try:
+                                gdf = gdf.to_crs(epsg=4326)
+                            except Exception as e:
+                                st.warning(f"CRS conversion failed for {yf.name}: {e}")
+
+                        # ✅ Representative points
                         try:
                             reps = gdf.geometry.representative_point()
                             gdf["Longitude"] = reps.x
                             gdf["Latitude"] = reps.y
-                        except Exception:
+                        except Exception as e:
+                            st.warning(f"Coordinate extraction failed: {e}")
                             gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
 
-                        # ✅ Flatten for table work, keep geometry for map rendering
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
                         st.session_state["_yield_gdf_raw"] = gdf_keep
 
-
-                    # --- find yield column ---
-                    yield_col = None
-                    for c in df.columns:
-                        cname = c.strip().lower().replace(" ", "_")
-                        if cname in YIELD_PREFS:
-                            yield_col = c
-                            break
+                    # --- Detect yield column ---
+                    yield_col = next(
+                        (c for c in df.columns if c.strip().lower().replace(" ", "_") in YIELD_PREFS),
+                        None
+                    )
                     if not yield_col:
                         messages.append(f"{yf.name}: no recognized yield column — skipped.")
                         continue
 
-                    # --- use geometry coords if numeric coords are missing ---
+                    # --- Fill coords if missing ---
                     if "Latitude" not in df.columns or "Longitude" not in df.columns:
                         if gdf is not None and not gdf.empty:
-                            gdf["Longitude"] = gdf.geometry.centroid.x
-                            gdf["Latitude"] = gdf.geometry.centroid.y
-                            df["Longitude"] = gdf["Longitude"].values
-                            df["Latitude"] = gdf["Latitude"].values
+                            reps = gdf.geometry.representative_point()
+                            df["Longitude"] = reps.x
+                            df["Latitude"] = reps.y
 
+                    # --- Clean numeric + filter ---
                     df["Yield"] = pd.to_numeric(df[yield_col], errors="coerce").fillna(0)
                     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
                     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
 
-                    # ✅ remove impossible coordinates only if they exist
                     if df["Latitude"].notna().any() and df["Longitude"].notna().any():
                         df = df[
                             (df["Latitude"].between(-90, 90))
                             & (df["Longitude"].between(-180, 180))
                         ]
 
-                    # remove yield outliers
                     if len(df) > 10:
                         p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
                         df = df[df["Yield"].between(p5, p95)]
@@ -480,45 +480,40 @@ def render_uploaders():
                         continue
 
                     frames.append(df[["Yield", "Latitude", "Longitude"]])
-                    messages.append(
-                        f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points."
-                    )
+                    messages.append(f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points.")
 
                 except Exception as e:
                     messages.append(f"{yf.name}: {e}")
-                            if frames:
-                    combo = pd.concat(frames, ignore_index=True)
 
-                    # =========================================================
-                    # ✅ PATCH: PRESERVE GEOMETRY FOR YIELD MAP RENDERING
-                    # =========================================================
-                    gdf_full = st.session_state.get("_yield_gdf_raw")
+            # =========================================================
+            # ✅ Preserve geometry + ensure CRS = WGS84
+            # =========================================================
+            if frames:
+                combo = pd.concat(frames, ignore_index=True)
+                gdf_full = st.session_state.get("_yield_gdf_raw")
 
-                    if gdf_full is not None and not getattr(gdf_full, "empty", True):
-                        # =========================================================
-                        # ✅ ENSURE WGS84 CRS AND EXTRACT REPRESENTATIVE POINTS
-                        # =========================================================
+                if gdf_full is not None and not getattr(gdf_full, "empty", True):
+                    try:
                         if gdf_full.crs is not None and gdf_full.crs.to_epsg() != 4326:
                             gdf_full = gdf_full.to_crs(epsg=4326)
 
-                        try:
-                            reps = gdf_full.geometry.representative_point()
-                            gdf_full["Latitude"] = reps.y
-                            gdf_full["Longitude"] = reps.x
-                            st.info("✅ Coordinates extracted from geometry (centroids or representative points).")
-                        except Exception as e:
-                            st.warning(f"Coordinate extraction failed: {e}")
+                        reps = gdf_full.geometry.representative_point()
+                        gdf_full["Latitude"] = reps.y
+                        gdf_full["Longitude"] = reps.x
 
-                        st.session_state["yield_df"] = gdf_full.copy()
-                        st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
-                    else:
-                        st.session_state["yield_df"] = combo.copy()
-                        st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
+                    except Exception as e:
+                        st.warning(f"Coordinate extraction failed: {e}")
 
-                    st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+                    st.session_state["yield_df"] = gdf_full.copy()
                 else:
-                    st.error("❌ No valid yield data found.\n" + "\n".join(messages))
-         
+                    st.session_state["yield_df"] = combo.copy()
+
+                st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+            else:
+                st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+        else:
+            st.caption("No yield files uploaded.")
+
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
