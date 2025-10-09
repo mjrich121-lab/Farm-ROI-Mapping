@@ -1277,13 +1277,33 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
 else:
     # ✅ Create placeholder if yield_df missing or empty
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
+# =========================================================
+# SAFE TYPE COERCION (REPLACES 4-LINE SANITIZE BLOCK)
+# =========================================================
+if not isinstance(df_for_maps, pd.DataFrame):
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
-# =========================================================
-# SANITIZE & PREP FOR HEATMAPS
-# =========================================================
-df_for_maps["Yield"] = pd.to_numeric(df_for_maps.get("Yield", 0), errors="coerce").fillna(0)
-df_for_maps["Latitude"] = pd.to_numeric(df_for_maps.get("Latitude", 0), errors="coerce")
-df_for_maps["Longitude"] = pd.to_numeric(df_for_maps.get("Longitude", 0), errors="coerce")
+# Re-normalize column names to lowercase/underscored
+df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
+
+# Guarantee required columns exist
+for col in ["latitude", "longitude", "yield"]:
+    if col not in df_for_maps.columns:
+        df_for_maps[col] = np.nan
+
+# Safely coerce each to numeric
+for col in ["latitude", "longitude", "yield"]:
+    try:
+        df_for_maps[col] = pd.to_numeric(df_for_maps[col], errors="coerce")
+    except Exception:
+        df_for_maps[col] = np.nan
+
+# Rename consistently for downstream functions
+df_for_maps.rename(
+    columns={"latitude": "Latitude", "longitude": "Longitude", "yield": "Yield"},
+    inplace=True,
+)
+df_for_maps["Yield"].fillna(0, inplace=True)
 df_for_maps.dropna(subset=["Latitude", "Longitude"], inplace=True)
 
 if df_for_maps.empty:
