@@ -34,12 +34,16 @@ if "fixed_products" not in st.session_state:
 st.markdown(
     """
     <style>
-    .block-container { max-width: 100% !important; ... }
-    ...
+    .block-container { max-width: 100% !important; }
+    .main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .stSelectbox > div > div { background-color: #f0f2f6; }
+    .stNumberInput > div > div > input { background-color: #f0f2f6; }
+    .stFileUploader > div > div { background-color: #f0f2f6; }
     </style>
     """,
     unsafe_allow_html=True
 )
+
 # =========================================================
 # HELPER FUNCTION: Load Shapefiles or GeoJSON
 # =========================================================
@@ -73,6 +77,7 @@ def auto_zoom_map(m, df=None, gdf=None):
         bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
     return m
+
 # =========================================================
 # 1. ZONE MAP UPLOAD
 # =========================================================
@@ -173,6 +178,7 @@ if zone_file is not None:
 
     except Exception as e:
         st.error(f"❌ Error processing zone map: {e}")
+
 # =========================================================
 # 2. YIELD MAP UPLOAD
 # =========================================================
@@ -487,6 +493,7 @@ with st.expander("Fixed Rate Inputs (Seed & Fertilizer)", expanded=False):
     st.session_state["fixed_products"] = (
         fixed_entries.copy().reset_index(drop=True)
     )
+
 # =========================================================
 # 4C. VARIABLE RATE INPUTS (Summary Tables)
 # =========================================================
@@ -522,6 +529,7 @@ with st.expander("Variable Rate Inputs (Seed & Fertilizer)", expanded=False):
 
     if (fert_df is None or fert_df.empty) and (seed_df is None or seed_df.empty):
         st.info("No variable rate prescription maps uploaded yet.")
+
 # =========================================================
 # 4D. OPTIONAL: Compare Crop Profitability Before Mapping
 # =========================================================
@@ -554,6 +562,7 @@ with st.expander("Enter Corn & Soybean Price/Yield Assumptions", expanded=False)
         value=st.session_state.get("bean_price", 12.0),
         step=0.1
     )
+
 # --- Preview chart with same highlighting as Section 9 ---
 preview_df = pd.DataFrame({
     "Crop": ["Corn", "Soybeans"],
@@ -592,6 +601,7 @@ st.dataframe(
     use_container_width=True,
     hide_index=True
 )
+
 # =========================================================
 # 5. BASE MAP (rebuild clean each run but persist data state)
 # =========================================================
@@ -640,6 +650,7 @@ def make_base_map():
 # Always start with a fresh map each run
 m = make_base_map()
 st.session_state["layer_control_added"] = False
+
 # =========================================================
 # 6. MAP DISPLAY (Zones overlay + legend; adds to base map)
 # =========================================================
@@ -697,6 +708,7 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             )
         legend_parts.append("</div>")
         m.get_root().html.add_child(folium.Element("".join(legend_parts)))
+
 # =========================================================
 # 7. YIELD + PROFIT (Variable + Fixed overlays + legend)
 # =========================================================
