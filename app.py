@@ -1,4 +1,3 @@
-```python
 # =========================================================
 # Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF (Patched)
 # =========================================================
@@ -1566,4 +1565,3 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
-```
