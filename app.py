@@ -1253,6 +1253,13 @@ for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
 bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
+
+st.write("DEBUG · type of ydf:", type(ydf))
+if isinstance(ydf, gpd.GeoDataFrame):
+    st.write("✅ ydf is a GeoDataFrame with geometry column")
+else:
+    st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
+
 # =========================================================
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
