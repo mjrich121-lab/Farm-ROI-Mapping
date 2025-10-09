@@ -1585,6 +1585,9 @@ else:
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     if ymin is not None:
         add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
+        st.info(f"✅ Yield heatmap added: {ymin:.1f} - {ymax:.1f} bu/ac")
+    else:
+        st.warning("❌ Yield heatmap failed to render")
 
     vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
     if vmin is not None:
@@ -1600,6 +1603,9 @@ try:
     m.fit_bounds([[south, west], [north, east]])
 except Exception as e:
     st.warning(f"Auto-zoom fallback failed: {e}")
+
+# Add layer control to make layers toggleable
+folium.LayerControl().add_to(m)
 
 st_folium(m, use_container_width=True, height=600, key="stable_map")
 
