@@ -17,6 +17,7 @@ import folium
 from streamlit_folium import st_folium
 from branca.element import MacroElement, Template
 from matplotlib import colors as mpl_colors
+from shapely.geometry import Point
 
 # Clear caches
 st.cache_data.clear()
@@ -80,6 +81,49 @@ def find_col(df: pd.DataFrame, names) -> Optional[str]:
         if key in norm:
             return norm[key]
     return None
+
+def df_to_gdf(df: pd.DataFrame, lat_col: str = None, lon_col: str = None, crs: str = "EPSG:4326") -> Optional[gpd.GeoDataFrame]:
+    """Convert DataFrame to GeoDataFrame with robust lat/lon detection."""
+    if df is None or df.empty:
+        return None
+
+    if lat_col is None or lon_col is None:
+        # Common candidates for lat/lon columns
+        candidates = {"lat": ["lat", "latitude", "y"], "lon": ["lon", "longitude", "long", "x"]}
+        found_lat, found_lon = None, None
+        for c in df.columns:
+            cl = c.lower()
+            if any(k == cl or cl.startswith(k) for k in candidates["lat"]):
+                found_lat = c
+            if any(k == cl or cl.startswith(k) for k in candidates["lon"]):
+                found_lon = c
+        lat_col = found_lat
+        lon_col = found_lon
+
+    if lat_col is None or lon_col is None:
+        st.warning("Latitude/Longitude columns not found — returning None.")
+        return None
+
+    try:
+        gdf = gpd.GeoDataFrame(df.copy(), geometry=[Point(xy) for xy in zip(df[lon_col].astype(float), df[lat_col].astype(float))], crs=crs)
+        return gdf
+    except Exception as e:
+        st.error(f"Failed to convert to GeoDataFrame: {e}")
+        return None
+
+def safe_read_csv(uploaded_file) -> Optional[pd.DataFrame]:
+    """Safely read CSV file with encoding fallback."""
+    try:
+        if uploaded_file is None:
+            return None
+        return pd.read_csv(uploaded_file)
+    except Exception:
+        try:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, encoding="latin1")
+        except Exception:
+            st.error("Failed to parse CSV. Ensure it's a valid comma-separated file.")
+            return None
 
 # =========================================================
 # HARDENED load_vector_file (recursive + best shapefile select)
@@ -358,8 +402,20 @@ def render_uploaders():
 
                     # --- CSV ---
                     if name.endswith(".csv"):
-                        df = pd.read_csv(yf)
-                        df.columns = [c.strip() for c in df.columns]
+                        df = safe_read_csv(yf)
+                        if df is not None:
+                            df.columns = [c.strip() for c in df.columns]
+                            # Convert CSV to GeoDataFrame using real GPS coordinates
+                            gdf = df_to_gdf(df)
+                            if gdf is not None:
+                                st.session_state["_yield_gdf_raw"] = gdf
+                                df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                            else:
+                                messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                                continue
+                        else:
+                            messages.append(f"{yf.name}: could not read CSV — skipped.")
+                            continue
 
                     # --- SHP/ZIP/GEOJSON ---
                     else:
@@ -368,8 +424,6 @@ def render_uploaders():
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
 
-                        gdf_keep = gdf.copy()
-
                         # ✅ Ensure WGS84 CRS
                         if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
                             try:
@@ -377,53 +431,30 @@ def render_uploaders():
                             except Exception as e:
                                 st.warning(f"CRS conversion failed for {yf.name}: {e}")
 
-                        # ✅ Representative points - FIXED VERSION
+                        # ✅ Extract coordinates from geometry
                         try:
-                            # Check if geometries are empty first
                             if gdf.geometry.is_empty.all():
                                 st.warning(f"All geometries are empty in {yf.name}")
                                 # Try to repair geometries
                                 gdf.geometry = gdf.geometry.buffer(0)
                                 if gdf.geometry.is_empty.all():
                                     st.error(f"Cannot extract coordinates from empty geometries in {yf.name}")
-                                    # Try GPS coordinates as fallback
-                                    if "Distance_f" in gdf.columns and "Track_deg_" in gdf.columns:
-                                        st.info(f"Attempting to use GPS coordinates from Distance_f and Track_deg_")
-                                        try:
-                                            # For now, create synthetic coordinates for testing
-                                            # This will create a small field area for visualization
-                                            n_points = len(gdf)
-                                            ref_lat = 40.0  # Central Illinois latitude
-                                            ref_lon = -89.0  # Central Illinois longitude
-                                            
-                                            # Create a small field (about 0.01 degrees = ~1km)
-                                            field_size = 0.01
-                                            gdf["Latitude"] = ref_lat + np.random.uniform(-field_size/2, field_size/2, n_points)
-                                            gdf["Longitude"] = ref_lon + np.random.uniform(-field_size/2, field_size/2, n_points)
-                                            
-                                            st.info(f"✅ Generated synthetic coordinates for testing (field center: {ref_lat}, {ref_lon})")
-                                            st.warning("⚠️ Using synthetic coordinates - replace with real GPS conversion when available")
-                                        except Exception as e:
-                                            st.warning(f"Coordinate generation failed: {e}")
-                                            gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
-                                    else:
-                                        gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
-                                else:
-                                    reps = gdf.geometry.representative_point()
-                                    gdf["Longitude"] = reps.x
-                                    gdf["Latitude"] = reps.y
-                                    st.info(f"✅ Repaired geometries and extracted coordinates from {yf.name}")
-                            else:
-                                reps = gdf.geometry.representative_point()
-                                gdf["Longitude"] = reps.x
-                                gdf["Latitude"] = reps.y
-                                st.info(f"✅ Extracted coordinates from {yf.name}")
+                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                    continue
+                            
+                            # Extract coordinates using representative points
+                            reps = gdf.geometry.representative_point()
+                            gdf["Longitude"] = reps.x
+                            gdf["Latitude"] = reps.y
+                            st.info(f"✅ Extracted coordinates from {yf.name}")
+                            
                         except Exception as e:
                             st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
-                            gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+                            messages.append(f"{yf.name}: coordinate extraction failed — skipped.")
+                            continue
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        # IMPORTANT: Save the gdf with coordinates to session state
+                        # Save the gdf with coordinates to session state
                         st.session_state["_yield_gdf_raw"] = gdf
 
                     # --- Detect yield column ---
@@ -1101,17 +1132,38 @@ init_legend_rails(m)
 
 # ---------- WORKING ZONE LOGIC WITH AUTO-ZOOM ----------
 zones_gdf = st.session_state.get("zones_gdf")
-if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+yield_gdf = st.session_state.get("_yield_gdf_raw")
+
+# Calculate map center and zoom based on available data
+map_center = [39.8283, -98.5795]  # US center fallback
+map_zoom = 5
+
+if yield_gdf is not None and not getattr(yield_gdf, "empty", True):
     try:
-        # Calculate map center and zoom based on zones BEFORE creating map
+        # Use yield data bounds for map center and zoom
+        bounds = yield_gdf.total_bounds
+        map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+        map_zoom = 15
+        st.info(f"✅ Map centered on yield data: {map_center[0]:.4f}, {map_center[1]:.4f}")
+    except Exception as e:
+        st.warning(f"Could not calculate yield bounds: {e}")
+
+elif zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+    try:
+        # Fallback to zones if no yield data
         bounds = zones_gdf.total_bounds
         map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         map_zoom = 15
-        
-        # Update the map with proper center and zoom
-        m.location = map_center
-        m.zoom_start = map_zoom
-        
+        st.info(f"✅ Map centered on zones: {map_center[0]:.4f}, {map_center[1]:.4f}")
+    except Exception as e:
+        st.warning(f"Could not calculate zone bounds: {e}")
+
+# Update the map with proper center and zoom
+m.location = map_center
+m.zoom_start = map_zoom
+
+if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+    try:
         zones_gdf = zones_gdf.copy()
         try:
             zones_gdf["geometry"] = zones_gdf.geometry.buffer(0)
@@ -1205,65 +1257,23 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         if isinstance(ydf, gpd.GeoDataFrame):
             # Keep all columns including Latitude/Longitude that were just created
             df_for_maps = pd.DataFrame(ydf.drop(columns="geometry", errors="ignore"))
-            st.write(f"DEBUG: After conversion, df_for_maps has columns: {list(df_for_maps.columns)}")
-            st.write(f"DEBUG: Latitude values after conversion: {df_for_maps['Latitude'].head() if 'Latitude' in df_for_maps.columns else 'No Latitude column'}")
         else:
             df_for_maps = pd.DataFrame(ydf.copy())
 
-        # Check for existing coordinate columns first (like in backup code)
-        st.write(f"DEBUG: All columns in ydf: {list(ydf.columns)}")
-        
-        # Look for existing coordinate columns
-        lat_cols = [c for c in ydf.columns if c.lower() in ['latitude', 'lat', 'y', 'ycoord', 'northing']]
-        lon_cols = [c for c in ydf.columns if c.lower() in ['longitude', 'lon', 'long', 'x', 'xcoord', 'easting']]
-        
-        st.write(f"DEBUG: Found lat columns: {lat_cols}")
-        st.write(f"DEBUG: Found lon columns: {lon_cols}")
-        
-        if lat_cols and lon_cols:
-            # Use existing coordinate columns
-            lat_col = lat_cols[0]
-            lon_col = lon_cols[0]
-            st.write(f"DEBUG: Using existing coordinates: {lat_col}, {lon_col}")
-            st.write(f"DEBUG: Sample lat values: {ydf[lat_col].head()}")
-            st.write(f"DEBUG: Sample lon values: {ydf[lon_col].head()}")
-            
-            df_for_maps["Latitude"] = ydf[lat_col]
-            df_for_maps["Longitude"] = ydf[lon_col]
-            st.info(f"✅ Using existing coordinate columns: {lat_col}, {lon_col}")
+        # Use existing coordinate columns if available
+        if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+            # Coordinates already exist, use them
+            pass
         else:
-            # Extract coordinates from geometry if it's a GeoDataFrame - USE WORKING METHOD
+            # Extract coordinates from geometry if needed
             if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
                 try:
-                    # Debug geometry first
-                    st.write(f"DEBUG: Geometry column exists: {'geometry' in ydf.columns}")
-                    st.write(f"DEBUG: Geometry CRS: {ydf.crs}")
-                    st.write(f"DEBUG: Geometry types: {ydf.geometry.geom_type.value_counts()}")
-                    st.write(f"DEBUG: Empty geometries: {ydf.geometry.is_empty.sum()}")
-                    st.write(f"DEBUG: Sample geometry: {ydf.geometry.iloc[0]}")
-                    
-                    # Use the working method from backup code
                     reps = ydf.geometry.representative_point()
-                    st.write(f"DEBUG: Representative points sample: {reps.iloc[0]}")
-                    st.write(f"DEBUG: Reps.x sample: {reps.x.iloc[0]}")
-                    st.write(f"DEBUG: Reps.y sample: {reps.y.iloc[0]}")
-                    
                     df_for_maps["Longitude"] = reps.x
                     df_for_maps["Latitude"] = reps.y
-                    st.info("✅ Coordinates extracted using representative_point method.")
                 except Exception as e:
                     st.warning(f"Coordinate extraction failed: {e}")
-                    # Try alternative methods
-                    try:
-                        if hasattr(ydf.geometry, 'centroid'):
-                            centroids = ydf.geometry.centroid
-                            df_for_maps["Longitude"] = centroids.x
-                            df_for_maps["Latitude"] = centroids.y
-                            st.info("✅ Coordinates extracted using centroid method.")
-                        else:
-                            st.error("No geometry methods available for coordinate extraction.")
-                    except Exception as e2:
-                        st.error(f"All coordinate extraction methods failed: {e2}")
+                    df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
 
         # Normalize coord column names if provided in CSV/JSON
         lower_cols = {c.lower(): c for c in df_for_maps.columns}
@@ -1306,13 +1316,6 @@ else:
 # =========================================================
 try:
     if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-        # Debug: Show what we have
-        st.write(f"DEBUG: df_for_maps shape: {df_for_maps.shape}")
-        st.write(f"DEBUG: Latitude range: {df_for_maps['Latitude'].min()} to {df_for_maps['Latitude'].max()}")
-        st.write(f"DEBUG: Longitude range: {df_for_maps['Longitude'].min()} to {df_for_maps['Longitude'].max()}")
-        st.write(f"DEBUG: Latitude non-null count: {df_for_maps['Latitude'].notna().sum()}")
-        st.write(f"DEBUG: Longitude non-null count: {df_for_maps['Longitude'].notna().sum()}")
-        
         # Ensure columns are Series (not DataFrame)
         lat_series = df_for_maps["Latitude"]
         lon_series = df_for_maps["Longitude"]
@@ -1439,7 +1442,7 @@ try:
 except Exception as e:
     st.warning(f"Auto-zoom fallback failed: {e}")
 
-st_folium(m, use_container_width=True, height=600)
+st_folium(m, use_container_width=True, height=600, key="stable_map")
 
 # =========================================================
 # PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
