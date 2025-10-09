@@ -647,13 +647,13 @@ def make_base_map():
 
     return m
 
-# Always start with a fresh map each run
-m = make_base_map()
-st.session_state["layer_control_added"] = False
-
 # =========================================================
 # 6. MAP DISPLAY (Zones overlay + legend; adds to base map)
 # =========================================================
+# Determine map center and zoom based on zones first
+map_center = [39.5, -98.35]  # Default center
+map_zoom = 5  # Default zoom
+
 if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
     zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
 
@@ -667,10 +667,61 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             else:
                 zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
 
-        # Center map on zone bounds
+        # Calculate map center and zoom from zone bounds
         zb = zones_gdf.total_bounds  # [minx, miny, maxx, maxy]
-        m.location = [(zb[1] + zb[3]) / 2, (zb[0] + zb[2]) / 2]
-        m.zoom_start = 15
+        map_center = [(zb[1] + zb[3]) / 2, (zb[0] + zb[2]) / 2]
+        map_zoom = 15
+
+# Create map with proper center and zoom
+def make_base_map():
+    m = folium.Map(
+        location=map_center,
+        zoom_start=map_zoom,
+        min_zoom=2,
+        tiles=None,
+        scrollWheelZoom=False,
+        prefer_canvas=True
+    )
+
+    # Add locked base layers (satellite + labels)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", overlay=False, control=False
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", overlay=True, control=False
+    ).add_to(m)
+
+    # ✅ Click-to-enable scroll wheel (disable again on mouseout)
+    template = Template("""
+        {% macro script(this, kwargs) %}
+        var map = {{this._parent.get_name()}};
+        map.scrollWheelZoom.disable();
+        map.on('click', function() {
+            map.scrollWheelZoom.enable();
+        });
+        map.on('mouseout', function() {
+            map.scrollWheelZoom.disable();
+        });
+        {% endmacro %}
+    """)
+    macro = MacroElement()
+    macro._template = template
+    m.get_root().add_child(macro)
+
+    return m
+
+# Always start with a fresh map each run
+m = make_base_map()
+st.session_state["layer_control_added"] = False
+
+# Add zones to the map
+if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None:
+    zones_gdf = st.session_state["zones_gdf"].to_crs(epsg=4326)
+
+    if not zones_gdf.empty:
 
         # Color palette
         palette = ["#FF0000","#FF8C00","#FFFF00","#32CD32","#006400",
@@ -685,8 +736,9 @@ if "zones_gdf" in st.session_state and st.session_state["zones_gdf"] is not None
             style_function=lambda feature: {
                 "fillColor": color_map.get(str(feature["properties"].get("Zone","")), "#808080"),
                 "color": "black",
-                "weight": 1,
-                "fillOpacity": 0.08,
+                "weight": 2,
+                "fillOpacity": 0.15,
+                "opacity": 0.8,
             },
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone","Calculated Acres","Override Acres"] if c in zones_gdf.columns]
