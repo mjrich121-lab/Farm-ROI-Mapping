@@ -1256,15 +1256,14 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
     # ✅ Handle multiple naming patterns
-    lat_col = None
-    lon_col = None
+    lat_col, lon_col = None, None
     for c in df_for_maps.columns:
         if c.startswith("lat"):
             lat_col = c
         elif c.startswith("lon") or c.startswith("long"):
             lon_col = c
 
-    # ✅ If still missing, check for centroid columns created earlier
+    # ✅ Fallback if no match found
     if not lat_col and "latitude" in df_for_maps.columns:
         lat_col = "latitude"
     if not lon_col and "longitude" in df_for_maps.columns:
@@ -1272,10 +1271,12 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
 
     if not lat_col or not lon_col:
         st.error(f"No coordinate columns found in yield data — detected columns: {list(df_for_maps.columns)}")
-        df_for_maps = pd.DataFrame(columns=["latitude", "longitude", "yield"])
+        df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
     else:
         df_for_maps.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
+
 else:
+    # ✅ Create an empty placeholder if yield_df is missing or empty
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
     # Make sure required columns exist
