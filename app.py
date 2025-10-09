@@ -1229,19 +1229,23 @@ df_for_maps["Yield"].fillna(0, inplace=True)
 # =========================================================
 # SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
 # =========================================================
-if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-    valid_mask = (
-        df_for_maps["Latitude"].between(-90, 90)
-        & df_for_maps["Longitude"].between(-180, 180)
-        & df_for_maps["Latitude"].notna()
-        & df_for_maps["Longitude"].notna()
-    )
-    df_valid = df_for_maps.loc[valid_mask].copy()
-    if df_valid.empty:
-        st.warning("No valid coordinates detected — using full dataset for continuity.")
+try:
+    if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        valid_mask = (
+            df_for_maps["Latitude"].between(-90, 90)
+            & df_for_maps["Longitude"].between(-180, 180)
+            & df_for_maps["Latitude"].notna()
+            & df_for_maps["Longitude"].notna()
+        )
+        df_valid = df_for_maps.loc[valid_mask].copy()
+        if df_valid.empty:
+            st.warning("No valid coordinates detected — using full dataset for continuity.")
+            df_valid = df_for_maps.copy()
+    else:
+        st.warning("No Latitude/Longitude columns found — skipping coordinate validation.")
         df_valid = df_for_maps.copy()
-else:
-    st.warning("No Latitude/Longitude columns found — skipping coordinate validation.")
+except Exception as e:
+    st.warning(f"Coordinate validation failed: {e}")
     df_valid = df_for_maps.copy()
 
 if df_valid.empty:
