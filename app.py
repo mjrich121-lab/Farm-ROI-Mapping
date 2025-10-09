@@ -1347,6 +1347,32 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         
         st.write("DEBUG - Potential coordinate columns found:", coord_candidates)
         
+        # Check if we have Distance_f and Track_deg_ which might be GPS coordinates
+        if "Distance_f" in df_for_maps.columns and "Track_deg_" in df_for_maps.columns:
+            st.write("DEBUG - Distance_f sample values:", df_for_maps["Distance_f"].head(5).tolist())
+            st.write("DEBUG - Track_deg_ sample values:", df_for_maps["Track_deg_"].head(5).tolist())
+            st.info("🔍 Found Distance_f and Track_deg_ columns - these might be GPS coordinates!")
+        
+        # Check if geometry column has any non-empty values
+        if "geometry" in df_for_maps.columns:
+            st.write("DEBUG - Geometry column exists")
+            # Try to extract coordinates from geometry using different methods
+            try:
+                # Method 1: Try to get bounds from geometry
+                bounds = df_for_maps.geometry.bounds
+                st.write("DEBUG - Geometry bounds:", bounds.head())
+                
+                # Method 2: Try to get centroid
+                centroids = df_for_maps.geometry.centroid
+                st.write("DEBUG - Geometry centroids sample:", centroids.head())
+                
+                # Method 3: Check if geometry has coordinates
+                geom_coords = df_for_maps.geometry.apply(lambda x: list(x.coords) if hasattr(x, 'coords') else None)
+                st.write("DEBUG - Geometry coordinates sample:", geom_coords.head())
+                
+            except Exception as e:
+                st.write(f"DEBUG - Geometry extraction error: {e}")
+        
         # Ensure coordinates are numeric
         df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
         df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
