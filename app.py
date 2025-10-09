@@ -1180,22 +1180,27 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         else:
             df_for_maps = pd.DataFrame(ydf.copy())
 
-        # Extract coordinates from geometry if it's a GeoDataFrame
+        # Extract coordinates from geometry if it's a GeoDataFrame - USE WORKING METHOD
         if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
             try:
-                geom_types = ydf.geometry.geom_type.astype(str).unique()
-                if any(gt.startswith("Point") for gt in geom_types):
-                    lon = ydf.geometry.x
-                    lat = ydf.geometry.y
-                else:
-                    reps = ydf.geometry.representative_point()
-                    lon = reps.x
-                    lat = reps.y
-                
-                df_for_maps["Longitude"] = lon
-                df_for_maps["Latitude"] = lat
+                # Use the working method from backup code
+                reps = ydf.geometry.representative_point()
+                df_for_maps["Longitude"] = reps.x
+                df_for_maps["Latitude"] = reps.y
+                st.info("✅ Coordinates extracted using representative_point method.")
             except Exception as e:
                 st.warning(f"Coordinate extraction failed: {e}")
+                # Try alternative methods
+                try:
+                    if hasattr(ydf.geometry, 'centroid'):
+                        centroids = ydf.geometry.centroid
+                        df_for_maps["Longitude"] = centroids.x
+                        df_for_maps["Latitude"] = centroids.y
+                        st.info("✅ Coordinates extracted using centroid method.")
+                    else:
+                        st.error("No geometry methods available for coordinate extraction.")
+                except Exception as e2:
+                    st.error(f"All coordinate extraction methods failed: {e2}")
 
         # Normalize coord column names if provided in CSV/JSON
         lower_cols = {c.lower(): c for c in df_for_maps.columns}
