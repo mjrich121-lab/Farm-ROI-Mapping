@@ -1332,6 +1332,21 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         st.write("DEBUG - Latitude data type:", df_for_maps["Latitude"].dtype)
         st.write("DEBUG - Longitude data type:", df_for_maps["Longitude"].dtype)
         
+        # Check if there are other coordinate columns that might have real data
+        st.write("DEBUG - All columns in dataframe:", list(df_for_maps.columns))
+        
+        # Look for other potential coordinate columns
+        coord_candidates = []
+        for col in df_for_maps.columns:
+            col_lower = col.lower()
+            if any(coord in col_lower for coord in ['lat', 'lon', 'x', 'y', 'coord', 'easting', 'northing']):
+                coord_candidates.append(col)
+                # Show sample values from potential coordinate columns
+                sample_vals = df_for_maps[col].head(5).tolist()
+                st.write(f"DEBUG - {col} sample values: {sample_vals}")
+        
+        st.write("DEBUG - Potential coordinate columns found:", coord_candidates)
+        
         # Ensure coordinates are numeric
         df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
         df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
