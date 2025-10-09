@@ -1211,16 +1211,17 @@ bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-st.write("DEBUG - type of ydf:", type(ydf))
-if isinstance(ydf, gpd.GeoDataFrame):
-    st.write("✅ ydf is a GeoDataFrame with geometry column")
-    if "geometry" in ydf.columns:
-        st.write(f"DEBUG - Geometry types: {ydf.geometry.geom_type.value_counts().to_dict()}")
-        st.write(f"DEBUG - CRS: {ydf.crs}")
-        st.write(f"DEBUG - Total bounds: {ydf.total_bounds}")
-        st.write(f"DEBUG - Sample geometry: {ydf.geometry.iloc[0] if len(ydf) > 0 else 'No geometries'}")
-else:
-    st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
+# Debug information (commented out to prevent constant re-rendering)
+# st.write("DEBUG - type of ydf:", type(ydf))
+# if isinstance(ydf, gpd.GeoDataFrame):
+#     st.write("✅ ydf is a GeoDataFrame with geometry column")
+#     if "geometry" in ydf.columns:
+#         st.write(f"DEBUG - Geometry types: {ydf.geometry.geom_type.value_counts().to_dict()}")
+#         st.write(f"DEBUG - CRS: {ydf.crs}")
+#         st.write(f"DEBUG - Total bounds: {ydf.total_bounds}")
+#         st.write(f"DEBUG - Sample geometry: {ydf.geometry.iloc[0] if len(ydf) > 0 else 'No geometries'}")
+# else:
+#     st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
 
 # =========================================================
 # IMPROVED COORDINATE EXTRACTION FOR YIELD HEATMAPS
@@ -1410,20 +1411,20 @@ else:
     df_valid = df_for_maps.copy()
 
 # =========================================================
-# DEBUG + MAP SAFEGUARD
+# DEBUG + MAP SAFEGUARD (commented out to prevent re-rendering)
 # =========================================================
-st.write("DEBUG - df_for_maps columns:", list(df_for_maps.columns))
-st.write("DEBUG - Head of df_for_maps:")
-st.dataframe(df_for_maps.head(10))
+# st.write("DEBUG - df_for_maps columns:", list(df_for_maps.columns))
+# st.write("DEBUG - Head of df_for_maps:")
+# st.dataframe(df_for_maps.head(10))
 
-# Debug coordinate information
-if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-    st.write("DEBUG - Coordinate info:")
-    st.write(f"- Latitude range: {df_for_maps['Latitude'].min():.6f} to {df_for_maps['Latitude'].max():.6f}")
-    st.write(f"- Longitude range: {df_for_maps['Longitude'].min():.6f} to {df_for_maps['Longitude'].max():.6f}")
-    st.write(f"- Non-null Latitude count: {df_for_maps['Latitude'].notna().sum()}")
-    st.write(f"- Non-null Longitude count: {df_for_maps['Longitude'].notna().sum()}")
-    st.write(f"- Valid coordinate pairs: {((df_for_maps['Latitude'].between(-90, 90)) & (df_for_maps['Longitude'].between(-180, 180)) & df_for_maps['Latitude'].notna() & df_for_maps['Longitude'].notna()).sum()}")
+# Debug coordinate information (commented out to prevent re-rendering)
+# if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+#     st.write("DEBUG - Coordinate info:")
+#     st.write(f"- Latitude range: {df_for_maps['Latitude'].min():.6f} to {df_for_maps['Latitude'].max():.6f}")
+#     st.write(f"- Longitude range: {df_for_maps['Longitude'].min():.6f} to {df_for_maps['Longitude'].max():.6f}")
+#     st.write(f"- Non-null Latitude count: {df_for_maps['Latitude'].notna().sum()}")
+#     st.write(f"- Non-null Longitude count: {df_for_maps['Longitude'].notna().sum()}")
+#     st.write(f"- Valid coordinate pairs: {((df_for_maps['Latitude'].between(-90, 90)) & (df_for_maps['Longitude'].between(-180, 180)) & df_for_maps['Latitude'].notna() & df_for_maps['Longitude'].notna()).sum()}")
 
 if df_valid.empty:
     st.warning("No yield data uploaded — map will display without heatmaps.")
@@ -1503,12 +1504,12 @@ else:
             st.error(f"❌ Overlay '{title}' failed: {e}")
             return None, None
 
-    # Debug bounds
-    st.write(f"DEBUG - Map bounds: {bounds}")
-    st.write(f"DEBUG - df_for_maps shape: {df_for_maps.shape}")
-    st.write(f"DEBUG - Yield column exists: {'Yield' in df_for_maps.columns}")
-    if 'Yield' in df_for_maps.columns:
-        st.write(f"DEBUG - Yield range: {df_for_maps['Yield'].min():.2f} to {df_for_maps['Yield'].max():.2f}")
+    # Debug bounds (commented out to prevent re-rendering)
+    # st.write(f"DEBUG - Map bounds: {bounds}")
+    # st.write(f"DEBUG - df_for_maps shape: {df_for_maps.shape}")
+    # st.write(f"DEBUG - Yield column exists: {'Yield' in df_for_maps.columns}")
+    # if 'Yield' in df_for_maps.columns:
+    #     st.write(f"DEBUG - Yield range: {df_for_maps['Yield'].min():.2f} to {df_for_maps['Yield'].max():.2f}")
 
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     if ymin is not None:
@@ -1555,10 +1556,10 @@ if not st.session_state.get("yield_df", pd.DataFrame()).empty:
 else:
     st.info("🗺️ Interactive map ready - upload yield data, zones, or prescription maps to see overlays")
 
-# Debug map information
-st.write("DEBUG - Map object type:", type(m))
-st.write("DEBUG - Map location:", m.location if hasattr(m, 'location') else 'No location set')
-st.write("DEBUG - Map zoom:", m.options.get('zoom') if hasattr(m, 'options') else 'No zoom set')
+# Debug map information (commented out to prevent re-rendering)
+# st.write("DEBUG - Map object type:", type(m))
+# st.write("DEBUG - Map location:", m.location if hasattr(m, 'location') else 'No location set')
+# st.write("DEBUG - Map zoom:", m.options.get('zoom') if hasattr(m, 'options') else 'No zoom set')
 
 # =========================================================
 # SIMPLIFIED MAP RENDERING - GUARANTEED TO WORK
@@ -1568,10 +1569,19 @@ st.info("🔄 Creating optimized map...")
 @st.cache_data
 def create_optimized_map(df_valid):
     """Create an optimized map with cached data to prevent constant re-rendering"""
+    # Calculate the actual center of the yield data
+    if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+        center_lat = df_valid["Latitude"].mean()
+        center_lon = df_valid["Longitude"].mean()
+        zoom_level = 15  # Zoom in closer for field-level view
+    else:
+        center_lat, center_lon = 41.5, -93.0
+        zoom_level = 6
+    
     # Create a satellite map with roads and rivers
     simple_map = folium.Map(
-        location=[41.5, -93.0],  # Iowa center
-        zoom_start=6,
+        location=[center_lat, center_lon],  # Center on actual data
+        zoom_start=zoom_level,  # Zoom in for field view
         tiles=None,  # Start with no tiles, we'll add satellite + roads
         prefer_canvas=True  # Use canvas for better performance
     )
@@ -1602,7 +1612,7 @@ def create_optimized_map(df_valid):
         icon=folium.Icon(color="green", icon="info-sign")
     ).add_to(simple_map)
     
-    # Add yield data as circles if we have coordinates
+    # Add yield data as a proper heatmap if we have coordinates
     if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
         try:
             # Use actual yield data, not synthetic coordinates
@@ -1614,59 +1624,89 @@ def create_optimized_map(df_valid):
                   (df_valid["Longitude"].round(6) == df_valid["Longitude"].round(6).astype(int)))
             ]
             
-            # If no real data, use a smaller sample of the synthetic data
+            # If no real data, use the synthetic data but create a proper field
             if real_data.empty:
-                sample_size = min(100, len(df_valid))  # Even smaller sample
-                sample_df = df_valid.sample(n=sample_size)
-                st.info(f"Using {len(sample_df)} sample points from synthetic coordinates")
+                # Create a concentrated field from synthetic data
+                field_center_lat = df_valid["Latitude"].mean()
+                field_center_lon = df_valid["Longitude"].mean()
+                
+                # Create a smaller field area around the center
+                field_size = 0.01  # About 1km field
+                field_data = df_valid[
+                    (df_valid["Latitude"].between(field_center_lat - field_size, field_center_lat + field_size)) &
+                    (df_valid["Longitude"].between(field_center_lon - field_size, field_center_lon + field_size))
+                ].sample(n=min(200, len(df_valid)))
+                
+                sample_df = field_data
+                st.info(f"Created field view with {len(sample_df)} points centered on data")
             else:
-                sample_size = min(500, len(real_data))  # More points for real data
-                sample_df = real_data.sample(n=sample_size) if len(real_data) > sample_size else real_data
+                # Use real data
+                sample_df = real_data.sample(n=min(500, len(real_data))) if len(real_data) > 500 else real_data
                 st.info(f"Using {len(sample_df)} real yield data points")
             
-            # Create a feature group for better performance
-            yield_group = folium.FeatureGroup(name="Yield Data")
+            # Create a heatmap using HeatMap plugin
+            from folium.plugins import HeatMap
             
+            # Prepare data for heatmap
+            heat_data = []
             for idx, row in sample_df.iterrows():
-                if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
-                    # Color based on actual yield value
+                if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]) and pd.notna(row.get("Yield", 0)):
                     yield_val = row.get("Yield", 0)
                     if yield_val > 0:
-                        # Better color scheme based on actual yield range
-                        if yield_val > 60:
-                            color = "green"
-                        elif yield_val > 30:
-                            color = "yellow" 
-                        elif yield_val > 10:
-                            color = "orange"
-                        else:
-                            color = "red"
-                            
-                        folium.CircleMarker(
-                            location=[row["Latitude"], row["Longitude"]],
-                            radius=3,  # Slightly larger for visibility
-                            popup=f"Yield: {yield_val:.1f} bu/ac<br>Location: {row['Latitude']:.4f}, {row['Longitude']:.4f}",
-                            color=color,
-                            fill=True,
-                            fillColor=color,
-                            fillOpacity=0.8,
-                            weight=1
-                        ).add_to(yield_group)
+                        # Normalize yield for heatmap intensity (0-1 scale)
+                        max_yield = sample_df["Yield"].max()
+                        min_yield = sample_df["Yield"].min()
+                        intensity = (yield_val - min_yield) / (max_yield - min_yield) if max_yield > min_yield else 0.5
+                        heat_data.append([row["Latitude"], row["Longitude"], intensity])
             
-            # Add the feature group to the map
-            yield_group.add_to(simple_map)
+            if heat_data:
+                # Add heatmap layer
+                HeatMap(
+                    heat_data,
+                    min_opacity=0.2,
+                    max_zoom=18,
+                    radius=15,
+                    blur=10,
+                    gradient={0.2: 'blue', 0.4: 'cyan', 0.6: 'lime', 0.8: 'yellow', 1.0: 'red'}
+                ).add_to(simple_map)
+                
+                st.info(f"✅ Added heatmap with {len(heat_data)} data points")
             
         except Exception as e:
-            st.warning(f"⚠️ Could not add yield data to map: {e}")
+            st.warning(f"⚠️ Could not add yield heatmap: {e}")
+            # Fallback to simple markers
+            try:
+                sample_df = df_valid.sample(n=min(50, len(df_valid)))
+                for idx, row in sample_df.iterrows():
+                    if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
+                        yield_val = row.get("Yield", 0)
+                        if yield_val > 0:
+                            folium.CircleMarker(
+                                location=[row["Latitude"], row["Longitude"]],
+                                radius=5,
+                                popup=f"Yield: {yield_val:.1f} bu/ac",
+                                color="red",
+                                fill=True,
+                                fillColor="red",
+                                fillOpacity=0.7
+                            ).add_to(simple_map)
+            except Exception as e2:
+                st.error(f"❌ Fallback markers also failed: {e2}")
     
     # Add layer control
     folium.LayerControl().add_to(simple_map)
     
     return simple_map
 
-# Create the optimized map
-simple_map = create_optimized_map(df_valid)
-st.info("✅ Optimized map created with caching to prevent flashing")
+# Create the optimized map with better caching
+if 'map_created' not in st.session_state:
+    st.session_state.map_created = True
+    simple_map = create_optimized_map(df_valid)
+    st.session_state.cached_map = simple_map
+    st.info("✅ Optimized map created with caching to prevent flashing")
+else:
+    simple_map = st.session_state.cached_map
+    st.info("✅ Using cached map to prevent re-rendering")
 
 # =========================================================
 # MULTIPLE MAP RENDERING ATTEMPTS
