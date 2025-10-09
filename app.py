@@ -1248,27 +1248,26 @@ bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
 sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
-# --- Defensive conversion ---
+# =========================================================
+# DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
+# =========================================================
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
     df_for_maps = ydf.copy()
 
     # ✅ Normalize all column names to lowercase (safer)
     df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
-    # ✅ Handle multiple naming patterns
-    lat_col, lon_col = None, None
-    for c in df_for_maps.columns:
-        if c.startswith("lat"):
-            lat_col = c
-        elif c.startswith("lon") or c.startswith("long"):
-            lon_col = c
+    # ✅ Detect latitude/longitude columns dynamically
+    lat_col = next((c for c in df_for_maps.columns if c.startswith("lat")), None)
+    lon_col = next((c for c in df_for_maps.columns if c.startswith(("lon", "long"))), None)
 
-    # ✅ Fallback if no match found
+    # ✅ Fallbacks for other naming patterns
     if not lat_col and "latitude" in df_for_maps.columns:
         lat_col = "latitude"
     if not lon_col and "longitude" in df_for_maps.columns:
         lon_col = "longitude"
 
+    # ✅ Validate coordinate presence
     if not lat_col or not lon_col:
         st.error(f"No coordinate columns found in yield data — detected columns: {list(df_for_maps.columns)}")
         df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
@@ -1276,32 +1275,21 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
         df_for_maps.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
 
 else:
-    # ✅ Create an empty placeholder if yield_df is missing or empty
+    # ✅ Create placeholder if yield_df missing or empty
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
-
-    # Make sure required columns exist
-    lat_col = next((c for c in df_for_maps.columns if "Lat" in c), None)
-    lon_col = next((c for c in df_for_maps.columns if "Lon" in c), None)
-    if not lat_col or not lon_col:
-        st.error("No coordinate columns found in yield data — map skipped.")
-        df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-    else:
-        df_for_maps.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
-else:
-    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-
-# --- Guarantee numeric + cleaned ---
+# =========================================================
+# SANITIZE & PREP FOR HEATMAPS
+# =========================================================
 df_for_maps["Yield"] = pd.to_numeric(df_for_maps.get("Yield", 0), errors="coerce").fillna(0)
 df_for_maps["Latitude"] = pd.to_numeric(df_for_maps.get("Latitude", 0), errors="coerce")
 df_for_maps["Longitude"] = pd.to_numeric(df_for_maps.get("Longitude", 0), errors="coerce")
 df_for_maps.dropna(subset=["Latitude", "Longitude"], inplace=True)
 
-# --- Skip early if still empty ---
 if df_for_maps.empty:
     st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
 else:
-    # Clip extreme values (5–95%)
+    # Clip extreme yield outliers (5–95%)
     try:
         if df_for_maps["Yield"].dropna().size > 0:
             low, high = np.nanpercentile(df_for_maps["Yield"], [5, 95])
@@ -1310,14 +1298,14 @@ else:
     except Exception:
         pass
 
-    # Basic conversion check (prevent 10,000 bu/ac)
+    # Normalize extremely high values (e.g., metric conversion)
     try:
         if df_for_maps["Yield"].max() > 400:
             df_for_maps["Yield"] = df_for_maps["Yield"] / 15.93
     except Exception:
         pass
 
-    # Compute map bounds
+    # Compute bounds directly from sanitized data
     south, west, north, east = (
         float(df_for_maps["Latitude"].min()),
         float(df_for_maps["Longitude"].min()),
@@ -1326,13 +1314,17 @@ else:
     )
     bounds = (south, west, north, east)
 
-    # Compute profit metrics safely
+    # =========================================================
+    # SAFE PROFIT METRICS
+    # =========================================================
     try:
         base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
+
         fert_var = seed_var = 0.0
         for d in st.session_state.get("fert_layers_store", {}).values():
             if isinstance(d, pd.DataFrame) and not d.empty:
                 fert_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
+
         for d in st.session_state.get("seed_layers_store", {}).values():
             if isinstance(d, pd.DataFrame) and not d.empty:
                 seed_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
@@ -1341,14 +1333,20 @@ else:
         fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
 
         df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
-        df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fert_var + seed_var)
-        df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (base_expenses_per_acre + fixed_costs)
+        df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
+            base_expenses_per_acre + fert_var + seed_var
+        )
+        df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (
+            base_expenses_per_acre + fixed_costs
+        )
     except Exception as e:
-        st.warning(f"Profit calc fallback: {e}")
+        st.warning(f"Profit calculation fallback triggered: {e}")
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
             df_for_maps[c] = 0.0
 
-    # --- Render heatmaps ---
+    # =========================================================
+    # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
+    # =========================================================
     def safe_overlay(colname, title, cmap, show_default):
         if colname not in df_for_maps.columns or df_for_maps.empty:
             return None, None
@@ -1372,31 +1370,9 @@ else:
     if fmin is not None:
         add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
-# ---------- Heatmap overlays + legends (decoupled) ----------
-def safe_overlay(colname, title, cmap, show_default):
-    if colname not in df_for_maps.columns or df_for_maps.empty:
-        return None, None
-    try:
-        return add_heatmap_overlay(
-            m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
-        )
-    except Exception as e:
-        st.warning(f"Overlay '{title}' failed: {e}")
-        return None, None
-
-ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
-if ymin is not None:
-    add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
-
-vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-if vmin is not None:
-    add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
-
-fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-if fmin is not None:
-    add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
-
-# ---------- Top zone outlines + final fit ----------
+# =========================================================
+# FINAL ZONE OUTLINES + AUTO ZOOM
+# =========================================================
 try:
     zones_gdf = st.session_state.get("zones_gdf")
     if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
@@ -1412,7 +1388,7 @@ try:
             tooltip=None
         ).add_to(m)
 
-    # final fit using all available layers
+    # Final fit using all active layers
     south, west, north, east = compute_bounds_for_heatmaps()
     m.fit_bounds([[south, west], [north, east]])
 except Exception as e:
