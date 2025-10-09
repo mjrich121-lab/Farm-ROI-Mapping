@@ -1210,9 +1210,12 @@ df_for_maps = pd.DataFrame()
 
 if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     try:
-        # Convert to regular DataFrame first
+        # Convert to regular DataFrame first - PRESERVE COORDINATES
         if isinstance(ydf, gpd.GeoDataFrame):
+            # Keep all columns including Latitude/Longitude that were just created
             df_for_maps = pd.DataFrame(ydf.drop(columns="geometry", errors="ignore"))
+            st.write(f"DEBUG: After conversion, df_for_maps has columns: {list(df_for_maps.columns)}")
+            st.write(f"DEBUG: Latitude values after conversion: {df_for_maps['Latitude'].head() if 'Latitude' in df_for_maps.columns else 'No Latitude column'}")
         else:
             df_for_maps = pd.DataFrame(ydf.copy())
 
