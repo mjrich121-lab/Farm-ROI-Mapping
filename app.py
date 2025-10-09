@@ -1325,6 +1325,10 @@ df_for_maps.rename(
 )
 df_for_maps["Yield"].fillna(0, inplace=True)
 df_for_maps.dropna(subset=["Latitude", "Longitude"], inplace=True)
+# --- DEBUG DIAGNOSTIC ---
+st.write("DEBUG · df_for_maps columns:", list(df_for_maps.columns))
+st.write("DEBUG · Head of df_for_maps:")
+st.dataframe(df_for_maps.head(10))
 
 if df_for_maps.empty:
     st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
