@@ -1476,14 +1476,28 @@ else:
     # =========================================================
     def safe_overlay(colname, title, cmap, show_default):
         if colname not in df_for_maps.columns or df_for_maps.empty:
+            st.warning(f"⚠️ Column '{colname}' not found or dataframe empty")
             return None, None
         try:
-            return add_heatmap_overlay(
+            st.info(f"🔄 Rendering {title} overlay...")
+            result = add_heatmap_overlay(
                 m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
             )
+            if result[0] is not None:
+                st.info(f"✅ {title} overlay rendered successfully")
+            else:
+                st.warning(f"⚠️ {title} overlay returned no data")
+            return result
         except Exception as e:
-            st.warning(f"Overlay '{title}' failed: {e}")
+            st.error(f"❌ Overlay '{title}' failed: {e}")
             return None, None
+
+    # Debug bounds
+    st.write(f"DEBUG · Map bounds: {bounds}")
+    st.write(f"DEBUG · df_for_maps shape: {df_for_maps.shape}")
+    st.write(f"DEBUG · Yield column exists: {'Yield' in df_for_maps.columns}")
+    if 'Yield' in df_for_maps.columns:
+        st.write(f"DEBUG · Yield range: {df_for_maps['Yield'].min():.2f} to {df_for_maps['Yield'].max():.2f}")
 
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     if ymin is not None:
@@ -1530,7 +1544,25 @@ if not st.session_state.get("yield_df", pd.DataFrame()).empty:
 else:
     st.info("🗺️ Interactive map ready - upload yield data, zones, or prescription maps to see overlays")
 
-st_folium(m, use_container_width=True, height=600)
+# Debug map information
+st.write("DEBUG · Map object type:", type(m))
+st.write("DEBUG · Map location:", m.location if hasattr(m, 'location') else 'No location set')
+st.write("DEBUG · Map zoom:", m.options.get('zoom') if hasattr(m, 'options') else 'No zoom set')
+
+try:
+    st.info("🔄 Rendering map...")
+    map_result = st_folium(m, use_container_width=True, height=600)
+    st.info("✅ Map rendered successfully")
+except Exception as e:
+    st.error(f"❌ Map rendering failed: {e}")
+    # Try a simple fallback map
+    try:
+        st.info("🔄 Trying fallback map...")
+        fallback_map = folium.Map(location=[41.5, -93.0], zoom_start=6)
+        st_folium(fallback_map, use_container_width=True, height=600)
+        st.info("✅ Fallback map rendered")
+    except Exception as e2:
+        st.error(f"❌ Fallback map also failed: {e2}")
 
 
 # =========================================================
@@ -1694,3 +1726,4 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
+
