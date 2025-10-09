@@ -1173,75 +1173,92 @@ sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn
 df_for_maps = pd.DataFrame()
 
 if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
-    df_for_maps = ydf.copy()
+    try:
+        # Convert to regular DataFrame first
+        if isinstance(ydf, gpd.GeoDataFrame):
+            df_for_maps = pd.DataFrame(ydf.drop(columns="geometry", errors="ignore"))
+        else:
+            df_for_maps = pd.DataFrame(ydf.copy())
 
-    if "geometry" in df_for_maps.columns and isinstance(ydf, gpd.GeoDataFrame):
-        try:
-            geom_types = ydf.geometry.geom_type.astype(str).unique()
-            if any(gt.startswith("Point") for gt in geom_types):
-                lon = ydf.geometry.x
-                lat = ydf.geometry.y
-            else:
-                reps = ydf.geometry.representative_point()
-                lon = reps.x
-                lat = reps.y
-            # drop geometry for the mapping dataframe
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-            df_for_maps["Longitude"] = lon
-            df_for_maps["Latitude"] = lat
-        except Exception as e:
-            st.warning(f"Coordinate extraction failed: {e}")
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
+        # Extract coordinates from geometry if it's a GeoDataFrame
+        if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
+            try:
+                geom_types = ydf.geometry.geom_type.astype(str).unique()
+                if any(gt.startswith("Point") for gt in geom_types):
+                    lon = ydf.geometry.x
+                    lat = ydf.geometry.y
+                else:
+                    reps = ydf.geometry.representative_point()
+                    lon = reps.x
+                    lat = reps.y
+                
+                df_for_maps["Longitude"] = lon
+                df_for_maps["Latitude"] = lat
+            except Exception as e:
+                st.warning(f"Coordinate extraction failed: {e}")
 
-    # Normalize coord column names if provided in CSV/JSON
-    lower_cols = {c.lower(): c for c in df_for_maps.columns}
-    if "longitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
-    if "latitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
+        # Normalize coord column names if provided in CSV/JSON
+        lower_cols = {c.lower(): c for c in df_for_maps.columns}
+        if "longitude" in lower_cols and "Longitude" not in df_for_maps.columns:
+            df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
+        if "latitude" in lower_cols and "Latitude" not in df_for_maps.columns:
+            df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
 
-    # Detect/normalize yield column
-    yield_candidates = [
-        "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
-        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
-    ]
-    ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
-    if ycol and ycol != "Yield":
-        df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
+        # Detect/normalize yield column
+        yield_candidates = [
+            "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+            "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+        ]
+        ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
+        if ycol and ycol != "Yield":
+            df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
+
+        # Ensure we have the required columns
+        if "Latitude" not in df_for_maps.columns:
+            df_for_maps["Latitude"] = np.nan
+        if "Longitude" not in df_for_maps.columns:
+            df_for_maps["Longitude"] = np.nan
+        if "Yield" not in df_for_maps.columns:
+            df_for_maps["Yield"] = 0.0
+
+        # Convert to numeric
+        df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
+        df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
+        df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0)
+
+    except Exception as e:
+        st.warning(f"Data conversion failed: {e}")
+        df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 else:
     # Fallback empty DF if ydf missing
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-
-# =========================================================
-# SAFE TYPE COERCION + VALIDATION
-# =========================================================
-for col in ["latitude", "longitude", "yield"]:
-    if col not in df_for_maps.columns:
-        df_for_maps[col] = np.nan
-    df_for_maps[col] = pd.to_numeric(df_for_maps[col], errors="coerce")
-
-df_for_maps.rename(
-    columns={"latitude": "Latitude", "longitude": "Longitude", "yield": "Yield"},
-    inplace=True,
-)
-df_for_maps["Yield"].fillna(0, inplace=True)
 
 # =========================================================
 # SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
 # =========================================================
 try:
     if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
-        # Convert to numeric first
-        df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
-        df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
+        # Ensure columns are Series (not DataFrame)
+        lat_series = df_for_maps["Latitude"]
+        lon_series = df_for_maps["Longitude"]
         
-        valid_mask = (
-            df_for_maps["Latitude"].between(-90, 90)
-            & df_for_maps["Longitude"].between(-180, 180)
-            & df_for_maps["Latitude"].notna()
-            & df_for_maps["Longitude"].notna()
-        )
-        df_valid = df_for_maps.loc[valid_mask].copy()
+        # Check if they are Series
+        if hasattr(lat_series, 'between') and hasattr(lon_series, 'between'):
+            valid_mask = (
+                lat_series.between(-90, 90)
+                & lon_series.between(-180, 180)
+                & lat_series.notna()
+                & lon_series.notna()
+            )
+            df_valid = df_for_maps.loc[valid_mask].copy()
+        else:
+            # Fallback: filter manually
+            df_valid = df_for_maps[
+                (df_for_maps["Latitude"] >= -90) & (df_for_maps["Latitude"] <= 90) &
+                (df_for_maps["Longitude"] >= -180) & (df_for_maps["Longitude"] <= 180) &
+                df_for_maps["Latitude"].notna() & df_for_maps["Longitude"].notna()
+            ].copy()
+        
         if df_valid.empty:
             st.warning("No valid coordinates detected — using full dataset for continuity.")
             df_valid = df_for_maps.copy()
