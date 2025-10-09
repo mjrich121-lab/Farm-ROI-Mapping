@@ -532,7 +532,8 @@ def render_uploaders():
 # ===========================
 def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
     st.caption(label)
-    return st.number_input(key, min_value=0.0, value=float(st.session_state.get(key, default)),
+    current_value = st.session_state.get(key, default)
+    return st.number_input(key, min_value=0.0, value=float(current_value),
                            step=step, label_visibility="collapsed")
 
 def render_fixed_inputs_and_strip():
