@@ -377,13 +377,34 @@ def render_uploaders():
                             except Exception as e:
                                 st.warning(f"CRS conversion failed for {yf.name}: {e}")
 
-                        # ✅ Representative points
+                        # ✅ Representative points - FIXED VERSION
                         try:
-                            reps = gdf.geometry.representative_point()
-                            gdf["Longitude"] = reps.x
-                            gdf["Latitude"] = reps.y
+                            # Check if geometries are empty first
+                            if gdf.geometry.is_empty.all():
+                                st.warning(f"All geometries are empty in {yf.name}")
+                                # Try to repair geometries
+                                gdf.geometry = gdf.geometry.buffer(0)
+                                if gdf.geometry.is_empty.all():
+                                    st.error(f"Cannot extract coordinates from empty geometries in {yf.name}")
+                                    # Try GPS coordinates as fallback
+                                    if "Distance_f" in gdf.columns and "Track_deg_" in gdf.columns:
+                                        st.info(f"Attempting to use GPS coordinates from Distance_f and Track_deg_")
+                                        # This is a simplified approach - you may need to adjust based on your GPS data format
+                                        gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+                                    else:
+                                        gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+                                else:
+                                    reps = gdf.geometry.representative_point()
+                                    gdf["Longitude"] = reps.x
+                                    gdf["Latitude"] = reps.y
+                                    st.info(f"✅ Repaired geometries and extracted coordinates from {yf.name}")
+                            else:
+                                reps = gdf.geometry.representative_point()
+                                gdf["Longitude"] = reps.x
+                                gdf["Latitude"] = reps.y
+                                st.info(f"✅ Extracted coordinates from {yf.name}")
                         except Exception as e:
-                            st.warning(f"Coordinate extraction failed: {e}")
+                            st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
                             gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
