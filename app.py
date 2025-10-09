@@ -1203,6 +1203,11 @@ sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn
 st.write("DEBUG · type of ydf:", type(ydf))
 if isinstance(ydf, gpd.GeoDataFrame):
     st.write("✅ ydf is a GeoDataFrame with geometry column")
+    if "geometry" in ydf.columns:
+        st.write(f"DEBUG · Geometry types: {ydf.geometry.geom_type.value_counts().to_dict()}")
+        st.write(f"DEBUG · CRS: {ydf.crs}")
+        st.write(f"DEBUG · Total bounds: {ydf.total_bounds}")
+        st.write(f"DEBUG · Sample geometry: {ydf.geometry.iloc[0] if len(ydf) > 0 else 'No geometries'}")
 else:
     st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
 
@@ -1217,7 +1222,7 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     # Check if we have a GeoDataFrame with geometry
     if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
         try:
-            # Extract coordinates from geometry
+            # Extract coordinates from geometry BEFORE dropping the geometry column
             if ydf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
                 # Point geometries - extract x,y directly
                 df_for_maps["Longitude"] = ydf.geometry.x
@@ -1230,7 +1235,22 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
                 df_for_maps["Latitude"] = reps.y
                 st.info("✅ Coordinates extracted from polygon centroids")
             
-            # Remove geometry column for mapping
+            # Debug: Check if coordinates were actually extracted
+            if df_for_maps["Longitude"].notna().any() and df_for_maps["Latitude"].notna().any():
+                st.info(f"✅ Successfully extracted {df_for_maps['Longitude'].notna().sum()} coordinate pairs")
+            else:
+                st.warning("⚠️ Coordinate extraction resulted in all NaN values")
+                # Try alternative extraction method
+                try:
+                    # Try using centroid for all geometries
+                    centroids = ydf.geometry.centroid
+                    df_for_maps["Longitude"] = centroids.x
+                    df_for_maps["Latitude"] = centroids.y
+                    st.info("✅ Retried coordinate extraction using centroids")
+                except Exception as e2:
+                    st.error(f"❌ Alternative coordinate extraction also failed: {e2}")
+            
+            # Remove geometry column for mapping AFTER extracting coordinates
             df_for_maps = df_for_maps.drop(columns="geometry", errors="ignore")
             
         except Exception as e:
@@ -1239,6 +1259,8 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             coord_cols = [c for c in ydf.columns if any(coord in c.lower() for coord in ['lat', 'lon', 'x', 'y'])]
             if coord_cols:
                 st.info(f"Using existing coordinate columns: {coord_cols}")
+            else:
+                st.error("❌ No coordinate columns found and geometry extraction failed")
     
     # Normalize coordinate column names (case-insensitive)
     col_mapping = {}
