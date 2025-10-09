@@ -1238,6 +1238,13 @@ else:
 # =========================================================
 try:
     if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        # Debug: Show what we have
+        st.write(f"DEBUG: df_for_maps shape: {df_for_maps.shape}")
+        st.write(f"DEBUG: Latitude range: {df_for_maps['Latitude'].min()} to {df_for_maps['Latitude'].max()}")
+        st.write(f"DEBUG: Longitude range: {df_for_maps['Longitude'].min()} to {df_for_maps['Longitude'].max()}")
+        st.write(f"DEBUG: Latitude non-null count: {df_for_maps['Latitude'].notna().sum()}")
+        st.write(f"DEBUG: Longitude non-null count: {df_for_maps['Longitude'].notna().sum()}")
+        
         # Ensure columns are Series (not DataFrame)
         lat_series = df_for_maps["Latitude"]
         lon_series = df_for_maps["Longitude"]
@@ -1258,6 +1265,8 @@ try:
                 (df_for_maps["Longitude"] >= -180) & (df_for_maps["Longitude"] <= 180) &
                 df_for_maps["Latitude"].notna() & df_for_maps["Longitude"].notna()
             ].copy()
+        
+        st.write(f"DEBUG: Valid rows after filtering: {len(df_valid)}")
         
         if df_valid.empty:
             st.warning("No valid coordinates detected — using full dataset for continuity.")
