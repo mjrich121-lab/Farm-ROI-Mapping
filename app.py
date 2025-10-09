@@ -504,6 +504,27 @@ def render_uploaders():
                 st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
             else:
                 st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+                # =========================================================
+                # ✅ ENSURE WGS84 CRS AND EXTRACT REPRESENTATIVE POINTS
+                # =========================================================
+                if gdf_full is not None and not gdf_full.empty:
+                    # Force to lat/lon if not already
+                    if gdf_full.crs is not None and gdf_full.crs.to_epsg() != 4326:
+                        gdf_full = gdf_full.to_crs(epsg=4326)
+                
+                    # Extract representative points from polygons or lines
+                    try:
+                        reps = gdf_full.geometry.representative_point()
+                        gdf_full["Latitude"] = reps.y
+                        gdf_full["Longitude"] = reps.x
+                        st.info("✅ Coordinates extracted from geometry (centroids or representative points).")
+                    except Exception as e:
+                        st.warning(f"Coordinate extraction failed: {e}")
+                            st.session_state["yield_df"] = gdf_full.copy()
+                            st.info("✅ Geometry preserved — yield_df stored as GeoDataFrame for mapping.")
+                        else:
+                            st.session_state["yield_df"] = combo.copy()
+                            st.warning("⚠️ No geometry found — using flattened DataFrame for continuity.")
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
