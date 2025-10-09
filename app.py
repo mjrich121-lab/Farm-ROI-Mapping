@@ -1279,6 +1279,7 @@ else:
     # ✅ Create an empty placeholder if yield_df is missing or empty
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
+
     # Make sure required columns exist
     lat_col = next((c for c in df_for_maps.columns if "Lat" in c), None)
     lon_col = next((c for c in df_for_maps.columns if "Lon" in c), None)
