@@ -1563,47 +1563,66 @@ st.write("DEBUG · Map zoom:", m.options.get('zoom') if hasattr(m, 'options') el
 # =========================================================
 # SIMPLIFIED MAP RENDERING - GUARANTEED TO WORK
 # =========================================================
-st.info("🔄 Creating simplified map...")
+st.info("🔄 Creating optimized map...")
 
-# Create a completely fresh, simple map
-simple_map = folium.Map(
-    location=[41.5, -93.0],  # Iowa center
-    zoom_start=6,
-    tiles="OpenStreetMap"  # Use OpenStreetMap as it's most reliable
-)
+@st.cache_data
+def create_optimized_map(df_valid):
+    """Create an optimized map with cached data to prevent constant re-rendering"""
+    # Create a completely fresh, simple map
+    simple_map = folium.Map(
+        location=[41.5, -93.0],  # Iowa center
+        zoom_start=6,
+        tiles="OpenStreetMap",  # Use OpenStreetMap as it's most reliable
+        prefer_canvas=True  # Use canvas for better performance
+    )
+    
+    # Add a test marker
+    folium.Marker(
+        location=[41.5, -93.0],
+        popup="Farm ROI Mapping Tool",
+        icon=folium.Icon(color="green", icon="info-sign")
+    ).add_to(simple_map)
+    
+    # Add yield data as circles if we have coordinates
+    if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+        try:
+            # Sample fewer points to improve performance and reduce flashing
+            sample_size = min(200, len(df_valid))  # Reduced from 1000 to 200
+            sample_df = df_valid.sample(n=sample_size) if len(df_valid) > sample_size else df_valid
+            
+            # Create a feature group for better performance
+            yield_group = folium.FeatureGroup(name="Yield Data")
+            
+            for idx, row in sample_df.iterrows():
+                if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
+                    # Color based on yield value
+                    yield_val = row.get("Yield", 0)
+                    if yield_val > 0:
+                        color = "green" if yield_val > 100 else "yellow" if yield_val > 50 else "red"
+                        folium.CircleMarker(
+                            location=[row["Latitude"], row["Longitude"]],
+                            radius=2,  # Smaller radius
+                            popup=f"Yield: {yield_val:.1f} bu/ac",
+                            color=color,
+                            fill=True,
+                            fillColor=color,
+                            fillOpacity=0.7
+                        ).add_to(yield_group)
+            
+            # Add the feature group to the map
+            yield_group.add_to(simple_map)
+            
+            # Add layer control
+            folium.LayerControl().add_to(simple_map)
+            
+        except Exception as e:
+            st.warning(f"⚠️ Could not add yield data to map: {e}")
+    
+    return simple_map
 
-# Add a test marker
-folium.Marker(
-    location=[41.5, -93.0],
-    popup="Farm ROI Mapping Tool",
-    icon=folium.Icon(color="green", icon="info-sign")
-).add_to(simple_map)
-
-# Add yield data as circles if we have coordinates
-if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
-    try:
-        # Sample some points to avoid overcrowding
-        sample_size = min(1000, len(df_valid))
-        sample_df = df_valid.sample(n=sample_size) if len(df_valid) > sample_size else df_valid
-        
-        for idx, row in sample_df.iterrows():
-            if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
-                # Color based on yield value
-                yield_val = row.get("Yield", 0)
-                if yield_val > 0:
-                    color = "green" if yield_val > 100 else "yellow" if yield_val > 50 else "red"
-                    folium.CircleMarker(
-                        location=[row["Latitude"], row["Longitude"]],
-                        radius=3,
-                        popup=f"Yield: {yield_val:.1f} bu/ac",
-                        color=color,
-                        fill=True,
-                        fillColor=color
-                    ).add_to(simple_map)
-        
-        st.info(f"✅ Added {len(sample_df)} yield data points to map")
-    except Exception as e:
-        st.warning(f"⚠️ Could not add yield data to map: {e}")
+# Create the optimized map
+simple_map = create_optimized_map(df_valid)
+st.info("✅ Optimized map created with caching to prevent flashing")
 
 # =========================================================
 # MULTIPLE MAP RENDERING ATTEMPTS
