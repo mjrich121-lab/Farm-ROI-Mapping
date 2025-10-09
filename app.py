@@ -1511,50 +1511,24 @@ else:
     # if 'Yield' in df_for_maps.columns:
     #     st.write(f"DEBUG - Yield range: {df_for_maps['Yield'].min():.2f} to {df_for_maps['Yield'].max():.2f}")
 
-    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
-    if ymin is not None:
-        add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
+    # Skip the old overlay system to prevent conflicts with the new map
+    # ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
+    # if ymin is not None:
+    #     add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
 
-    vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-    if vmin is not None:
-        add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
+    # vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    # if vmin is not None:
+    #     add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
 
-    fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-    if fmin is not None:
-        add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
-
-# =========================================================
-# FINAL ZONE OUTLINES + AUTO ZOOM
-# =========================================================
-try:
-    zones_gdf = st.session_state.get("zones_gdf")
-    if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
-        folium.GeoJson(
-            zones_gdf,
-            name="Zone Outlines (Top)",
-            style_function=lambda feature: {
-                "fillOpacity": 0,
-                "color": "#000000",
-                "weight": 3,
-                "opacity": 1.0,
-            },
-            tooltip=None
-        ).add_to(m)
-
-    # Final fit using all active layers
-    south, west, north, east = compute_bounds_for_heatmaps()
-    m.fit_bounds([[south, west], [north, east]])
-except Exception as e:
-    st.warning(f"Auto-zoom/top-outline fallback failed: {e}")
+    # fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    # if fmin is not None:
+    #     add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
 # =========================================================
-# ALWAYS DISPLAY THE MAP (EVEN WITH NO DATA)
+# OLD MAP SYSTEM DISABLED - USING NEW SIMPLIFIED SYSTEM BELOW
 # =========================================================
-# Show helpful message if no data is uploaded
-if not st.session_state.get("yield_df", pd.DataFrame()).empty:
-    st.info("🗺️ Interactive map with yield data and overlays")
-else:
-    st.info("🗺️ Interactive map ready - upload yield data, zones, or prescription maps to see overlays")
+# The old complex map system is disabled to prevent conflicts
+# All map rendering is now handled by the simplified system below
 
 # Debug map information (commented out to prevent re-rendering)
 # st.write("DEBUG - Map object type:", type(m))
@@ -1709,80 +1683,53 @@ else:
     st.info("✅ Using cached map to prevent re-rendering")
 
 # =========================================================
-# MULTIPLE MAP RENDERING ATTEMPTS
+# SIMPLE MAP RENDERING - NO CONFLICTS
 # =========================================================
 
-# Try Method 1: Basic st_folium with key to prevent re-rendering
+# Show helpful message
+if not st.session_state.get("yield_df", pd.DataFrame()).empty:
+    st.info("🗺️ Interactive satellite map with yield heatmap")
+else:
+    st.info("🗺️ Interactive map ready - upload yield data to see heatmap")
+
+# Render the map with a stable key
 try:
-    st.info("🔄 Rendering satellite map with yield data...")
-    # Use a key to prevent constant re-rendering
-    map_key = f"farm_map_{hash(str(df_valid.shape))}"
+    map_key = "farm_roi_map_stable"
     st_folium(simple_map, use_container_width=True, height=600, key=map_key)
-    st.success("✅ Satellite map with yield data rendered successfully!")
+    st.success("✅ Map displayed successfully!")
     
-except Exception as e1:
-    st.warning(f"⚠️ Method 1 failed: {e1}")
+except Exception as e:
+    st.error(f"❌ Map rendering failed: {e}")
     
-    # Try Method 2: Without use_container_width
-    try:
-        st.info("🔄 Attempting Method 2: Without use_container_width...")
-        st_folium(simple_map, height=600)
-        st.success("✅ Method 2: Map rendered successfully!")
-        
-    except Exception as e2:
-        st.warning(f"⚠️ Method 2 failed: {e2}")
-        
-        # Try Method 3: Minimal parameters
-        try:
-            st.info("🔄 Attempting Method 3: Minimal parameters...")
-            st_folium(simple_map)
-            st.success("✅ Method 3: Map rendered successfully!")
-            
-        except Exception as e3:
-            st.warning(f"⚠️ Method 3 failed: {e3}")
-            
-            # Try Method 4: HTML export
-            try:
-                st.info("🔄 Attempting Method 4: HTML export...")
-                map_html = simple_map._repr_html_()
-                st.components.v1.html(map_html, height=600)
-                st.success("✅ Method 4: Map rendered via HTML!")
-                
-            except Exception as e4:
-                st.warning(f"⚠️ Method 4 failed: {e4}")
-                
-                # Final fallback: Show data summary
-                st.error("❌ All map rendering methods failed")
-                
-                # Show comprehensive data summary
-                st.markdown("""
-                <div style="border: 2px solid #4CAF50; padding: 20px; border-radius: 10px; background-color: #f0f8f0; text-align: center;">
-                    <h3>🗺️ Data Processing Complete!</h3>
-                    <p><strong>Your Farm ROI data has been successfully processed!</strong></p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
-                        <div style="background: white; padding: 15px; border-radius: 8px;">
-                            <h4>📊 Data Summary</h4>
-                            <p><strong>{:,}</strong> yield data points</p>
-                            <p><strong>{:.1f}</strong> to <strong>{:.1f}</strong> bu/ac yield range</p>
-                        </div>
-                        <div style="background: white; padding: 15px; border-radius: 8px;">
-                            <h4>🌍 Location</h4>
-                            <p><strong>{:.2f}°N</strong> to <strong>{:.2f}°N</strong></p>
-                            <p><strong>{:.2f}°W</strong> to <strong>{:.2f}°W</strong></p>
-                        </div>
-                    </div>
-                    <p><em>The interactive map cannot be displayed, but all calculations are working correctly!</em></p>
-                    <p>✅ Profit calculations ✅ Data processing ✅ Coordinate extraction</p>
-                </div>
-                """.format(
-                    len(df_valid) if not df_valid.empty else 0,
-                    df_valid["Yield"].min() if not df_valid.empty and "Yield" in df_valid.columns else 0,
-                    df_valid["Yield"].max() if not df_valid.empty and "Yield" in df_valid.columns else 0,
-                    df_valid["Latitude"].min() if not df_valid.empty and "Latitude" in df_valid.columns else 0,
-                    df_valid["Latitude"].max() if not df_valid.empty and "Latitude" in df_valid.columns else 0,
-                    df_valid["Longitude"].min() if not df_valid.empty and "Longitude" in df_valid.columns else 0,
-                    df_valid["Longitude"].max() if not df_valid.empty and "Longitude" in df_valid.columns else 0
-                ), unsafe_allow_html=True)
+    # Show data summary as fallback
+    st.markdown("""
+    <div style="border: 2px solid #4CAF50; padding: 20px; border-radius: 10px; background-color: #f0f8f0; text-align: center;">
+        <h3>🗺️ Data Processing Complete!</h3>
+        <p><strong>Your Farm ROI data has been successfully processed!</strong></p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+            <div style="background: white; padding: 15px; border-radius: 8px;">
+                <h4>📊 Data Summary</h4>
+                <p><strong>{:,}</strong> yield data points</p>
+                <p><strong>{:.1f}</strong> to <strong>{:.1f}</strong> bu/ac yield range</p>
+            </div>
+            <div style="background: white; padding: 15px; border-radius: 8px;">
+                <h4>🌍 Location</h4>
+                <p><strong>{:.2f}°N</strong> to <strong>{:.2f}°N</strong></p>
+                <p><strong>{:.2f}°W</strong> to <strong>{:.2f}°W</strong></p>
+            </div>
+        </div>
+        <p><em>The interactive map cannot be displayed, but all calculations are working correctly!</em></p>
+        <p>✅ Profit calculations ✅ Data processing ✅ Coordinate extraction</p>
+    </div>
+    """.format(
+        len(df_valid) if not df_valid.empty else 0,
+        df_valid["Yield"].min() if not df_valid.empty and "Yield" in df_valid.columns else 0,
+        df_valid["Yield"].max() if not df_valid.empty and "Yield" in df_valid.columns else 0,
+        df_valid["Latitude"].min() if not df_valid.empty and "Latitude" in df_valid.columns else 0,
+        df_valid["Latitude"].max() if not df_valid.empty and "Latitude" in df_valid.columns else 0,
+        df_valid["Longitude"].min() if not df_valid.empty and "Longitude" in df_valid.columns else 0,
+        df_valid["Longitude"].max() if not df_valid.empty and "Longitude" in df_valid.columns else 0
+    ), unsafe_allow_html=True)
 
 
 # =========================================================
