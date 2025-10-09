@@ -1210,81 +1210,71 @@ else:
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
 df_for_maps = pd.DataFrame()
-
-if isinstance(ydf, gpd.GeoDataFrame) and not ydf.empty and "geometry" in ydf.columns:
-    df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-    try:
-        geom_types = ydf.geometry.geom_type.unique()
-        if any('Point' in gt for gt in geom_types):
-            df_for_maps["Longitude"] = ydf.geometry.x
-            df_for_maps["Latitude"] = ydf.geometry.y
-            st.info("✅ Coordinates extracted directly from Point geometry.")
-        else:
-            reps = ydf.geometry.representative_point()
-            df_for_maps["Longitude"] = reps.x
-            df_for_maps["Latitude"] = reps.y
-            st.info("✅ Coordinates extracted from polygon centroids.")
-    except Exception as e:
-        st.warning(f"Coordinate extraction failed: {e}")
-        lat_col = pick_col(ydf, LAT_PREFS)
-        lon_col = pick_col(ydf, LON_PREFS)
-        if lat_col and lon_col:
-            df_for_maps["Latitude"] = pd.to_numeric(ydf[lat_col], errors="coerce")
-            df_for_maps["Longitude"] = pd.to_numeric(ydf[lon_col], errors="coerce")
-
-elif isinstance(ydf, pd.DataFrame) and not ydf.empty:
+if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     df_for_maps = ydf.copy()
-    lat_col = pick_col(ydf, LAT_PREFS)
-    lon_col = pick_col(ydf, LON_PREFS)
-    if lat_col and lon_col:
-        df_for_maps["Latitude"] = pd.to_numeric(ydf[lat_col], errors="coerce")
-        df_for_maps["Longitude"] = pd.to_numeric(ydf[lon_col], errors="coerce")
-    else:
-        st.warning("No geometry or lat/lon columns found in yield data.")
-
+    if "geometry" in df_for_maps.columns and isinstance(ydf, gpd.GeoDataFrame):
+        try:
+            geom_types = ydf.geometry.geom_type.astype(str).unique()
+            if any(gt.startswith("Point") for gt in geom_types):
+                lon = ydf.geometry.x
+                lat = ydf.geometry.y
+                st.info("✅ Coordinates extracted directly from Point geometry.")
+            else:
+                reps = ydf.geometry.representative_point()
+                lon = reps.x
+                lat = reps.y
+                st.info("✅ Coordinates extracted from polygon centroids.")
+            # drop geometry for the mapping dataframe
+            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
+            df_for_maps["Longitude"] = lon
+            df_for_maps["Latitude"] = lat
+        except Exception as e:
+            st.warning(f"Coordinate extraction failed: {e}")
+            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
+    # Normalize coord column names if provided in CSV/JSON
+    lower_cols = {c.lower(): c for c in df_for_maps.columns}
+    if "longitude" in lower_cols:
+        df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
+    if "latitude" in lower_cols:
+        df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
+    # Detect/normalize yield column
+    yield_candidates = [
+        "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+    ]
+    ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
+    if ycol and ycol != "Yield":
+        df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
 else:
+    # Fallback empty DF if ydf missing
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
-
-# Normalize coord column names if provided in CSV/JSON
-lower_cols = {c.lower(): c for c in df_for_maps.columns}
-if "longitude" in lower_cols:
-    df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
-if "latitude" in lower_cols:
-    df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
-
-# Detect/normalize yield column
-yield_candidates = [
-    "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
-    "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
-]
-ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
-if ycol and ycol != "Yield":
-    df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
 
 # =========================================================
 # SAFE TYPE COERCION + VALIDATION
 # =========================================================
-for col in ["latitude", "longitude", "yield"]:
+for col in ["Latitude", "Longitude", "Yield"]:
     if col not in df_for_maps.columns:
         df_for_maps[col] = np.nan
     df_for_maps[col] = pd.to_numeric(df_for_maps[col], errors="coerce")
-
-df_for_maps.rename(
-    columns={"latitude": "Latitude", "longitude": "Longitude", "yield": "Yield"},
-    inplace=True,
-)
 df_for_maps["Yield"].fillna(0, inplace=True)
+
+# Force dense dtypes to avoid sparse-related issues
+for col in ["Latitude", "Longitude", "Yield"]:
+    if col in df_for_maps.columns:
+        series = df_for_maps[col]
+        if isinstance(series.dtype, pd.SparseDtype):
+            df_for_maps[col] = series.sparse.to_dense()
+        df_for_maps[col] = df_for_maps[col].astype(float)
 
 # =========================================================
 # SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
 # =========================================================
 valid_mask = (
-    df_for_maps["Latitude"].between(-90, 90)
-    & df_for_maps["Longitude"].between(-180, 180)
-    & df_for_maps["Latitude"].notna()
-    & df_for_maps["Longitude"].notna()
+    df_for_maps["Latitude"].between(-90, 90) &
+    df_for_maps["Longitude"].between(-180, 180) &
+    df_for_maps["Latitude"].notna() &
+    df_for_maps["Longitude"].notna()
 )
-
 df_valid = df_for_maps.loc[valid_mask].copy()
 if df_valid.empty:
     st.warning("No valid coordinates detected — using full dataset for continuity.")
