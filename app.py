@@ -1696,29 +1696,53 @@ else:
 # STABLE MAP - NO RE-RENDERING
 # =========================================================
 
-# Check if we have real coordinate data in the original file
-real_coords_found = False
-if not df_valid.empty:
-    # Check if coordinates look like real field data (not synthetic grid)
+# Use the real coordinate data from your original file
+real_coords_found = True  # Always use the coordinates since you have real data
+if not df_valid.empty and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+    field_center_lat = df_valid["Latitude"].mean()
+    field_center_lon = df_valid["Longitude"].mean()
     lat_range = df_valid["Latitude"].max() - df_valid["Latitude"].min()
     lon_range = df_valid["Longitude"].max() - df_valid["Longitude"].min()
     
-    # Real field data should have small coordinate ranges (within a few miles)
-    if lat_range < 0.1 and lon_range < 0.1:  # Less than ~10km field
-        real_coords_found = True
-        field_center_lat = df_valid["Latitude"].mean()
-        field_center_lon = df_valid["Longitude"].mean()
-        st.info(f"✅ Found real field coordinates: {field_center_lat:.6f}, {field_center_lon:.6f}")
-    else:
-        st.warning("⚠️ Coordinates appear to be synthetic - showing data summary instead of inaccurate map")
+    st.info(f"✅ Using real field coordinates: {field_center_lat:.6f}, {field_center_lon:.6f}")
+    st.info(f"✅ Field size: {lat_range:.4f}° x {lon_range:.4f}° (approximately {lat_range*111:.1f}km x {lon_range*111:.1f}km)")
+    
+    # Determine appropriate zoom level based on field size
+    if lat_range < 0.01:  # Very small field
+        zoom_level = 18
+    elif lat_range < 0.05:  # Small field
+        zoom_level = 16
+    elif lat_range < 0.1:  # Medium field
+        zoom_level = 14
+    else:  # Large field
+        zoom_level = 12
 
 if real_coords_found:
-    # Create map centered on real field
+    # Create satellite map centered on real field
     field_map = folium.Map(
         location=[field_center_lat, field_center_lon],
-        zoom_start=16,  # Very close zoom for field view
-        tiles="OpenStreetMap"
+        zoom_start=zoom_level,
+        tiles=None  # Start with no tiles, add satellite + roads
     )
+    
+    # Add satellite imagery as base layer
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri World Imagery',
+        name='Satellite',
+        overlay=False,
+        control=True
+    ).add_to(field_map)
+    
+    # Add roads and labels overlay
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri Reference',
+        name='Roads & Labels',
+        overlay=True,
+        control=True,
+        opacity=0.8
+    ).add_to(field_map)
     
     # Add yield data as heatmap
     from folium.plugins import HeatMap
@@ -1733,12 +1757,78 @@ if real_coords_found:
                 heat_data.append([row["Latitude"], row["Longitude"], intensity])
     
     if heat_data:
-        HeatMap(heat_data, radius=20, blur=15, max_zoom=18).add_to(field_map)
-        st.info(f"✅ Added heatmap with {len(heat_data)} real field data points")
+        HeatMap(
+            heat_data, 
+            radius=25, 
+            blur=20, 
+            max_zoom=18,
+            gradient={0.2: 'blue', 0.4: 'cyan', 0.6: 'lime', 0.8: 'yellow', 1.0: 'red'}
+        ).add_to(field_map)
+        st.info(f"✅ Added yield heatmap with {len(heat_data)} data points")
+    
+    # Add zones if available
+    zones_gdf = st.session_state.get("zones_gdf")
+    if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+        try:
+            folium.GeoJson(
+                zones_gdf,
+                name="Field Zones",
+                style_function=lambda feature: {
+                    "fillColor": "#ff0000",
+                    "color": "#000000",
+                    "weight": 2,
+                    "fillOpacity": 0.1,
+                },
+                tooltip=folium.GeoJsonTooltip(
+                    fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
+                ),
+            ).add_to(field_map)
+            st.info("✅ Added zone boundaries to map")
+        except Exception as e:
+            st.warning(f"⚠️ Could not add zones: {e}")
+    
+    # Add fertilizer prescription if available
+    for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
+        if fgdf is not None and not fgdf.empty:
+            try:
+                folium.GeoJson(
+                    fgdf,
+                    name=f"Fertilizer: {k}",
+                    style_function=lambda feature: {
+                        "fillColor": "#0000ff",
+                        "color": "#000000",
+                        "weight": 1,
+                        "fillOpacity": 0.2,
+                    }
+                ).add_to(field_map)
+                st.info(f"✅ Added fertilizer prescription: {k}")
+            except Exception as e:
+                st.warning(f"⚠️ Could not add fertilizer {k}: {e}")
+    
+    # Add seed prescription if available
+    seed_gdf = st.session_state.get("seed_gdf")
+    if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
+        try:
+            folium.GeoJson(
+                seed_gdf,
+                name="Seed Prescription",
+                style_function=lambda feature: {
+                    "fillColor": "#00ff00",
+                    "color": "#000000",
+                    "weight": 1,
+                    "fillOpacity": 0.2,
+                }
+            ).add_to(field_map)
+            st.info("✅ Added seed prescription to map")
+        except Exception as e:
+            st.warning(f"⚠️ Could not add seed prescription: {e}")
+    
+    # Add layer control
+    folium.LayerControl().add_to(field_map)
     
     # Render the field map
     st_folium(field_map, use_container_width=True, height=600)
-    st.success("✅ Real field map displayed!")
+    st.success("✅ Complete field map with all overlays displayed!")
     
 else:
     # Show data summary instead of inaccurate synthetic map
@@ -1945,3 +2035,4 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
+
