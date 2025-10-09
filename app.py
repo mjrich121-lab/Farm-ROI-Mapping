@@ -517,13 +517,27 @@ def render_uploaders():
                         st.session_state["_yield_gdf_raw"] = gdf
 
                     # --- Detect yield column ---
-                    yield_col = next(
-                        (c for c in df.columns if c.strip().lower().replace(" ", "_") in YIELD_PREFS),
-                        None
-                    )
+                    yield_col = None
+                    for c in df.columns:
+                        c_clean = c.strip().lower().replace(" ", "_")
+                        if c_clean in YIELD_PREFS:
+                            yield_col = c
+                            break
+                    
+                    # If no exact match, try partial matches
+                    if not yield_col:
+                        for c in df.columns:
+                            c_clean = c.strip().lower().replace(" ", "_")
+                            if "crop_flw" in c_clean or "yld_mass" in c_clean or "yld_vol" in c_clean:
+                                yield_col = c
+                                break
                     if not yield_col:
                         messages.append(f"{yf.name}: no recognized yield column — skipped.")
+                        st.warning(f"Available columns: {list(df.columns)}")
+                        st.warning(f"Looking for yield columns: {YIELD_PREFS}")
                         continue
+                    
+                    st.info(f"✅ Using yield column: '{yield_col}'")
 
                     # --- Fill coords if missing ---
                     if "Latitude" not in df.columns or "Longitude" not in df.columns:
@@ -1228,10 +1242,13 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
             zones_gdf["geometry"] = zones_gdf.geometry.buffer(0)
         except Exception:
             pass
-        try:
-            zones_gdf = zones_gdf.explode(index_parts=False, ignore_index=True)
-        except TypeError:
-            zones_gdf = zones_gdf.explode().reset_index(drop=True)
+        
+        # Only explode if there are multi-part geometries and we want to split them
+        # Comment out explosion to keep original zone count
+        # try:
+        #     zones_gdf = zones_gdf.explode(index_parts=False, ignore_index=True)
+        # except TypeError:
+        #     zones_gdf = zones_gdf.explode().reset_index(drop=True)
 
         palette = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400",
                    "#1E90FF", "#8A2BE2", "#FFC0CB", "#A52A2A", "#00CED1"]
