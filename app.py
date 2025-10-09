@@ -1257,44 +1257,41 @@ sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
 # =========================================================
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
-    df_for_maps = ydf.copy()
-
-    # =========================================================
-    # ✅ DIRECT COORDINATE EXTRACTION FROM GEOMETRY (UNIVERSAL)
-    # =========================================================
+    # ✅ Preserve geometry if it exists
     if "geometry" in ydf.columns:
         try:
-            df_for_maps["Longitude"] = ydf.geometry.x
-            df_for_maps["Latitude"]  = ydf.geometry.y
-            st.info("✅ Coordinates extracted directly from shapefile geometry.")
+            gdf = gpd.GeoDataFrame(ydf, geometry="geometry")
+            df_for_maps = gdf.copy()
+            df_for_maps["Longitude"] = gdf.geometry.x
+            df_for_maps["Latitude"] = gdf.geometry.y
+            st.success("✅ Coordinates extracted directly from shapefile geometry.")
         except Exception as e:
             st.warning(f"Coordinate extraction failed: {e}")
-
-    # =========================================================
-    # ✅ CSV / GEOJSON FALLBACK (for non-shapefile uploads)
-    # =========================================================
-    elif {"longitude", "latitude"}.issubset(set(ydf.columns)):
-        df_for_maps["Longitude"] = pd.to_numeric(ydf["longitude"], errors="coerce")
-        df_for_maps["Latitude"]  = pd.to_numeric(ydf["latitude"], errors="coerce")
-        st.info("✅ Coordinates extracted from CSV/GeoJSON columns.")
-
+            df_for_maps = ydf.copy()
     else:
-        st.warning("⚠️ No coordinate source found; map rendering may be skipped.")
-        df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
+        df_for_maps = ydf.copy()
 
-    # =========================================================
-    # ✅ Normalize column names + detect yield column
-    # =========================================================
+        # ✅ Fallback for CSV/GeoJSON with lat/lon columns
+        if {"longitude", "latitude"}.issubset(set(ydf.columns)):
+            df_for_maps["Longitude"] = pd.to_numeric(ydf["longitude"], errors="coerce")
+            df_for_maps["Latitude"] = pd.to_numeric(ydf["latitude"], errors="coerce")
+            st.info("✅ Coordinates extracted from CSV or JSON columns.")
+        else:
+            st.warning("⚠️ No geometry or coordinate columns found — map may not render.")
+            df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
+
+    # Normalize columns
     df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
-    # detect yield column dynamically
+    # Detect yield column
     yield_col = next((c for c in df_for_maps.columns if "yld" in c or "yield" in c), None)
     if yield_col and yield_col != "yield":
         df_for_maps.rename(columns={yield_col: "yield"}, inplace=True)
 
 else:
-    # ✅ Create placeholder if yield_df missing or empty
+    # ✅ Fallback empty DF if ydf missing
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
+
 
 # =========================================================
 # SAFE TYPE COERCION + VALIDATION
