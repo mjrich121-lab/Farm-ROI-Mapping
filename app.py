@@ -1286,6 +1286,26 @@ if not isinstance(df_for_maps, pd.DataFrame):
 # Re-normalize column names to lowercase/underscored
 df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
 
+# =========================================================
+# IF GEOMETRY EXISTS BUT NO LAT/LON COLUMNS, EXTRACT THEM
+# =========================================================
+if "geometry" in df_for_maps.columns and (
+    "latitude" not in df_for_maps.columns or "longitude" not in df_for_maps.columns
+):
+    try:
+        # Use shapely centroids if geometry column is valid
+        gtmp = gpd.GeoDataFrame(df_for_maps, geometry="geometry", crs="EPSG:4326")
+        if gtmp.geom_type.astype(str).str.contains("Point", case=False).any():
+            df_for_maps["longitude"] = gtmp.geometry.x
+            df_for_maps["latitude"]  = gtmp.geometry.y
+        else:
+            reps = gtmp.geometry.representative_point()
+            df_for_maps["longitude"] = reps.x
+            df_for_maps["latitude"]  = reps.y
+    except Exception:
+        pass  # Non-fatal; downstream fallback will still create columns
+
+
 # Guarantee required columns exist
 for col in ["latitude", "longitude", "yield"]:
     if col not in df_for_maps.columns:
