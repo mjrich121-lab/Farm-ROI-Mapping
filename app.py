@@ -339,12 +339,17 @@ def render_uploaders():
         if zone_file:
             zones_gdf = load_vector_file(zone_file)
             if zones_gdf is not None and not zones_gdf.empty:
+                st.info(f"✅ Loaded zones: {len(zones_gdf)} features")
+                st.info(f"Zone columns: {list(zones_gdf.columns)}")
+                
                 zone_col = next((c for c in ["Zone", "zone", "ZONE", "Name", "name"]
                                  if c in zones_gdf.columns), None)
                 if not zone_col:
                     zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
                     zone_col = "Zone"
                 zones_gdf["Zone"] = zones_gdf[zone_col]
+                
+                st.info(f"Zone values: {sorted(zones_gdf['Zone'].unique())}")
 
                 g2 = zones_gdf.copy()
                 if g2.crs is None:
@@ -402,37 +407,9 @@ def render_uploaders():
                     name = yf.name.lower()
                     df, gdf = None, None
 
-                    # --- CSV or CSV in ZIP ---
-                    if name.endswith(".csv") or (name.endswith(".zip") and "csv" in name.lower()):
-                        df = None
-                        
-                        # Handle CSV in ZIP
-                        if name.endswith(".zip"):
-                            try:
-                                with tempfile.TemporaryDirectory() as tmpdir:
-                                    zpath = os.path.join(tmpdir, "temp.zip")
-                                    with open(zpath, "wb") as f:
-                                        f.write(yf.getbuffer())
-                                    
-                                    with zipfile.ZipFile(zpath, "r") as z:
-                                        # Find CSV file in zip
-                                        csv_files = [f for f in z.namelist() if f.lower().endswith('.csv')]
-                                        if csv_files:
-                                            csv_content = z.read(csv_files[0])
-                                            df = pd.read_csv(io.BytesIO(csv_content))
-                                            st.info(f"✅ Found CSV file '{csv_files[0]}' in ZIP")
-                                        else:
-                                            st.error(f"No CSV file found in ZIP: {yf.name}")
-                                            messages.append(f"{yf.name}: no CSV file found in ZIP — skipped.")
-                                            continue
-                            except Exception as e:
-                                st.error(f"Error reading CSV from ZIP: {e}")
-                                messages.append(f"{yf.name}: ZIP read error — skipped.")
-                                continue
-                        else:
-                            # Handle direct CSV
-                            df = safe_read_csv(yf)
-                        
+                    # --- CSV ---
+                    if name.endswith(".csv"):
+                        df = safe_read_csv(yf)
                         if df is not None and not df.empty:
                             df.columns = [c.strip() for c in df.columns]
                             
@@ -476,7 +453,7 @@ def render_uploaders():
                             messages.append(f"{yf.name}: could not read CSV — skipped.")
                             continue
 
-                    # --- SHP/GEOJSON ---
+                    # --- SHP/GEOJSON/ZIP(SHP) ---
                     else:
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
