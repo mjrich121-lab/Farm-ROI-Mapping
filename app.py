@@ -1206,49 +1206,80 @@ if isinstance(ydf, gpd.GeoDataFrame):
 else:
     st.write("⚠️ ydf is NOT a GeoDataFrame — geometry stripped before this point")
 
-```python
 # =========================================================
-# DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
+# IMPROVED COORDINATE EXTRACTION FOR YIELD HEATMAPS
 # =========================================================
 df_for_maps = pd.DataFrame()
+
 if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     df_for_maps = ydf.copy()
-    if "geometry" in df_for_maps.columns and isinstance(ydf, gpd.GeoDataFrame):
+    
+    # Check if we have a GeoDataFrame with geometry
+    if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
         try:
-            geom_types = ydf.geometry.geom_type.astype(str).unique()
-            if any(gt.startswith("Point") for gt in geom_types):
-                lon = ydf.geometry.x
-                lat = ydf.geometry.y
-                st.info("✅ Coordinates extracted directly from Point geometry.")
+            # Extract coordinates from geometry
+            if ydf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
+                # Point geometries - extract x,y directly
+                df_for_maps["Longitude"] = ydf.geometry.x
+                df_for_maps["Latitude"] = ydf.geometry.y
+                st.info("✅ Coordinates extracted from Point geometries")
             else:
+                # Polygon/other geometries - use representative points
                 reps = ydf.geometry.representative_point()
-                lon = reps.x
-                lat = reps.y
-                st.info("✅ Coordinates extracted from polygon centroids.")
-            # drop geometry for the mapping dataframe
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-            df_for_maps["Longitude"] = lon
-            df_for_maps["Latitude"] = lat
+                df_for_maps["Longitude"] = reps.x
+                df_for_maps["Latitude"] = reps.y
+                st.info("✅ Coordinates extracted from polygon centroids")
+            
+            # Remove geometry column for mapping
+            df_for_maps = df_for_maps.drop(columns="geometry", errors="ignore")
+            
         except Exception as e:
-            st.warning(f"Coordinate extraction failed: {e}")
-            df_for_maps = ydf.drop(columns="geometry", errors="ignore").copy()
-    # Normalize coord column names if provided in CSV/JSON
-    lower_cols = {c.lower(): c for c in df_for_maps.columns}
-    if "longitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
-    if "latitude" in lower_cols:
-        df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
-    # Detect/normalize yield column
+            st.warning(f"Geometry coordinate extraction failed: {e}")
+            # Fallback: try to find existing coordinate columns
+            coord_cols = [c for c in ydf.columns if any(coord in c.lower() for coord in ['lat', 'lon', 'x', 'y'])]
+            if coord_cols:
+                st.info(f"Using existing coordinate columns: {coord_cols}")
+    
+    # Normalize coordinate column names (case-insensitive)
+    col_mapping = {}
+    for col in df_for_maps.columns:
+        col_lower = col.lower().replace("_", "").replace(" ", "")
+        if col_lower in ['longitude', 'long', 'lon', 'x', 'xcoord', 'easting']:
+            col_mapping[col] = "Longitude"
+        elif col_lower in ['latitude', 'lat', 'y', 'ycoord', 'northing']:
+            col_mapping[col] = "Latitude"
+    
+    df_for_maps = df_for_maps.rename(columns=col_mapping)
+    
+    # Detect and normalize yield column
     yield_candidates = [
         "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
-        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+        "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", 
+        "harvestyield", "yld_vol_dr", "yld_mass_dr"
     ]
-    ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
-    if ycol and ycol != "Yield":
-        df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
+    
+    yield_col = None
+    for col in df_for_maps.columns:
+        col_lower = col.lower().replace("_", "").replace(" ", "")
+        if any(candidate.replace("_", "").replace(" ", "") in col_lower for candidate in yield_candidates):
+            yield_col = col
+            break
+    
+    if yield_col and yield_col != "Yield":
+        df_for_maps = df_for_maps.rename(columns={yield_col: "Yield"})
+        st.info(f"✅ Yield column detected and renamed: {yield_col} → Yield")
+    
+    # Ensure we have the required columns
+    if "Yield" not in df_for_maps.columns:
+        st.warning("⚠️ No yield column detected - heatmaps may not display")
+    
+    if "Longitude" not in df_for_maps.columns or "Latitude" not in df_for_maps.columns:
+        st.warning("⚠️ No coordinate columns detected - heatmaps may not display")
+        
 else:
-    # Fallback empty DF if ydf missing
+    # Fallback empty DataFrame
     df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
+    st.warning("⚠️ No yield data available")
 
 # =========================================================
 # SAFE TYPE COERCION + VALIDATION
