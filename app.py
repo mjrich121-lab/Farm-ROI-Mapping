@@ -423,7 +423,8 @@ def render_uploaders():
                             gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
 
                         df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
-                        st.session_state["_yield_gdf_raw"] = gdf_keep
+                        # IMPORTANT: Save the gdf with coordinates to session state
+                        st.session_state["_yield_gdf_raw"] = gdf
 
                     # --- Detect yield column ---
                     yield_col = next(
@@ -474,17 +475,7 @@ def render_uploaders():
                 gdf_full = st.session_state.get("_yield_gdf_raw")
 
                 if gdf_full is not None and not getattr(gdf_full, "empty", True):
-                    try:
-                        if gdf_full.crs is not None and gdf_full.crs.to_epsg() != 4326:
-                            gdf_full = gdf_full.to_crs(epsg=4326)
-
-                        reps = gdf_full.geometry.representative_point()
-                        gdf_full["Latitude"] = reps.y
-                        gdf_full["Longitude"] = reps.x
-
-                    except Exception as e:
-                        st.warning(f"Coordinate extraction failed: {e}")
-
+                    # Use the gdf that already has coordinates (from synthetic generation)
                     st.session_state["yield_df"] = gdf_full.copy()
                 else:
                     st.session_state["yield_df"] = combo.copy()
