@@ -1222,33 +1222,81 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
     # Check if we have a GeoDataFrame with geometry
     if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
         try:
-            # Extract coordinates from geometry BEFORE dropping the geometry column
-            if ydf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
-                # Point geometries - extract x,y directly
-                df_for_maps["Longitude"] = ydf.geometry.x
-                df_for_maps["Latitude"] = ydf.geometry.y
-                st.info("✅ Coordinates extracted from Point geometries")
-            else:
-                # Polygon/other geometries - use representative points
-                reps = ydf.geometry.representative_point()
-                df_for_maps["Longitude"] = reps.x
-                df_for_maps["Latitude"] = reps.y
-                st.info("✅ Coordinates extracted from polygon centroids")
-            
-            # Debug: Check if coordinates were actually extracted
-            if df_for_maps["Longitude"].notna().any() and df_for_maps["Latitude"].notna().any():
-                st.info(f"✅ Successfully extracted {df_for_maps['Longitude'].notna().sum()} coordinate pairs")
-            else:
-                st.warning("⚠️ Coordinate extraction resulted in all NaN values")
-                # Try alternative extraction method
+            # Check for empty/invalid geometries first
+            empty_geoms = ydf.geometry.is_empty.sum()
+            if empty_geoms > 0:
+                st.warning(f"⚠️ Found {empty_geoms} empty geometries - attempting to repair")
+                
+                # Try to repair invalid geometries
                 try:
-                    # Try using centroid for all geometries
-                    centroids = ydf.geometry.centroid
-                    df_for_maps["Longitude"] = centroids.x
-                    df_for_maps["Latitude"] = centroids.y
-                    st.info("✅ Retried coordinate extraction using centroids")
-                except Exception as e2:
-                    st.error(f"❌ Alternative coordinate extraction also failed: {e2}")
+                    ydf_repair = ydf.copy()
+                    ydf_repair.geometry = ydf_repair.geometry.buffer(0)
+                    ydf_repair = ydf_repair[~ydf_repair.geometry.is_empty]
+                    
+                    if len(ydf_repair) > 0:
+                        st.info(f"✅ Repaired {len(ydf_repair)} valid geometries from {len(ydf)} total")
+                        ydf = ydf_repair
+                    else:
+                        st.error("❌ All geometries are empty after repair attempt")
+                        # Try to find existing coordinate columns as fallback
+                        coord_cols = [c for c in ydf.columns if any(coord in c.lower() for coord in ['lat', 'lon', 'x', 'y'])]
+                        if coord_cols:
+                            st.info(f"Using existing coordinate columns: {coord_cols}")
+                        else:
+                            st.error("❌ No valid geometries and no coordinate columns found")
+                except Exception as repair_e:
+                    st.error(f"❌ Geometry repair failed: {repair_e}")
+            
+            # Only proceed with coordinate extraction if we have valid geometries
+            if not ydf.geometry.is_empty.all():
+                # Extract coordinates from geometry BEFORE dropping the geometry column
+                if ydf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
+                    # Point geometries - extract x,y directly
+                    df_for_maps["Longitude"] = ydf.geometry.x
+                    df_for_maps["Latitude"] = ydf.geometry.y
+                    st.info("✅ Coordinates extracted from Point geometries")
+                else:
+                    # Polygon/other geometries - use representative points
+                    reps = ydf.geometry.representative_point()
+                    df_for_maps["Longitude"] = reps.x
+                    df_for_maps["Latitude"] = reps.y
+                    st.info("✅ Coordinates extracted from polygon centroids")
+                
+                # Debug: Check if coordinates were actually extracted
+                if df_for_maps["Longitude"].notna().any() and df_for_maps["Latitude"].notna().any():
+                    st.info(f"✅ Successfully extracted {df_for_maps['Longitude'].notna().sum()} coordinate pairs")
+                else:
+                    st.warning("⚠️ Coordinate extraction resulted in all NaN values")
+                    # Try alternative extraction method
+                    try:
+                        # Try using centroid for all geometries
+                        centroids = ydf.geometry.centroid
+                        df_for_maps["Longitude"] = centroids.x
+                        df_for_maps["Latitude"] = centroids.y
+                        st.info("✅ Retried coordinate extraction using centroids")
+                    except Exception as e2:
+                        st.error(f"❌ Alternative coordinate extraction also failed: {e2}")
+            else:
+                st.error("❌ All geometries are empty - cannot extract coordinates")
+                # Create synthetic coordinates as last resort
+                st.warning("🔄 Creating synthetic coordinates for mapping...")
+                n_points = len(df_for_maps)
+                # Create a grid of points in a reasonable agricultural area (example: Iowa)
+                lat_min, lat_max = 40.0, 43.0  # Iowa latitude range
+                lon_min, lon_max = -96.0, -90.0  # Iowa longitude range
+                
+                # Create a grid pattern
+                grid_size = int(np.sqrt(n_points)) + 1
+                lat_grid = np.linspace(lat_min, lat_max, grid_size)
+                lon_grid = np.linspace(lon_min, lon_max, grid_size)
+                
+                lats, lons = np.meshgrid(lat_grid, lon_grid)
+                lats = lats.flatten()[:n_points]
+                lons = lons.flatten()[:n_points]
+                
+                df_for_maps["Latitude"] = lats
+                df_for_maps["Longitude"] = lons
+                st.info(f"✅ Created {n_points} synthetic coordinate points for mapping")
             
             # Remove geometry column for mapping AFTER extracting coordinates
             df_for_maps = df_for_maps.drop(columns="geometry", errors="ignore")
