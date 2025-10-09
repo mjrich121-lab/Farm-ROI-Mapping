@@ -1262,10 +1262,11 @@ if isinstance(ydf, pd.DataFrame) and not ydf.empty:
 # =========================================================
 # 🔧 PATCH — REBUILD LAT/LON FROM GEOMETRY (if missing)
 # =========================================================
-if (
-    ("Latitude" not in df_for_maps.columns or "Longitude" not in df_for_maps.columns)
-    and "_yield_gdf_raw" in st.session_state
-):
+    if (
+        ("Latitude" not in df_for_maps.columns)
+        or ("Longitude" not in df_for_maps.columns)
+    ) and ("_yield_gdf_raw" in st.session_state):
+
     gtmp = st.session_state["_yield_gdf_raw"]
     if isinstance(gtmp, gpd.GeoDataFrame) and not gtmp.empty:
         try:
