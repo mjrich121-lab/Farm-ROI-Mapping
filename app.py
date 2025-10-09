@@ -1250,9 +1250,33 @@ sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn
 
 # --- Defensive conversion ---
 if isinstance(ydf, pd.DataFrame) and not ydf.empty:
-    # Normalize column names
     df_for_maps = ydf.copy()
-    df_for_maps.columns = [c.strip().capitalize() for c in df_for_maps.columns]
+
+    # ✅ Normalize all column names to lowercase (safer)
+    df_for_maps.columns = [c.strip().lower().replace(" ", "_") for c in df_for_maps.columns]
+
+    # ✅ Handle multiple naming patterns
+    lat_col = None
+    lon_col = None
+    for c in df_for_maps.columns:
+        if c.startswith("lat"):
+            lat_col = c
+        elif c.startswith("lon") or c.startswith("long"):
+            lon_col = c
+
+    # ✅ If still missing, check for centroid columns created earlier
+    if not lat_col and "latitude" in df_for_maps.columns:
+        lat_col = "latitude"
+    if not lon_col and "longitude" in df_for_maps.columns:
+        lon_col = "longitude"
+
+    if not lat_col or not lon_col:
+        st.error(f"No coordinate columns found in yield data — detected columns: {list(df_for_maps.columns)}")
+        df_for_maps = pd.DataFrame(columns=["latitude", "longitude", "yield"])
+    else:
+        df_for_maps.rename(columns={lat_col: "Latitude", lon_col: "Longitude"}, inplace=True)
+else:
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
     # Make sure required columns exist
     lat_col = next((c for c in df_for_maps.columns if "Lat" in c), None)
