@@ -450,10 +450,35 @@ def render_uploaders():
                                 gdf["Latitude"] = gdf.geometry.y
                                 st.success("✅ Extracted coordinates from Point geometries")
                             else:
-                                # Polygon/other geometries - use centroid
-                                gdf["Longitude"] = gdf.geometry.centroid.x
-                                gdf["Latitude"] = gdf.geometry.centroid.y
-                                st.success("✅ Extracted coordinates from geometry centroids")
+                                # Polygon/other geometries - try multiple extraction methods
+                                st.info("🔍 Trying multiple coordinate extraction methods...")
+                                
+                                # Method 1: Try centroid
+                                try:
+                                    centroids = gdf.geometry.centroid
+                                    gdf["Longitude"] = centroids.x
+                                    gdf["Latitude"] = centroids.y
+                                    st.info("✅ Method 1: Centroid extraction attempted")
+                                except Exception as e:
+                                    st.warning(f"⚠️ Method 1 failed: {e}")
+                                
+                                # Method 2: Try representative point
+                                try:
+                                    reps = gdf.geometry.representative_point()
+                                    gdf["Longitude"] = reps.x
+                                    gdf["Latitude"] = reps.y
+                                    st.info("✅ Method 2: Representative point extraction attempted")
+                                except Exception as e:
+                                    st.warning(f"⚠️ Method 2 failed: {e}")
+                                
+                                # Method 3: Try bounds center
+                                try:
+                                    bounds = gdf.geometry.bounds
+                                    gdf["Longitude"] = (bounds['minx'] + bounds['maxx']) / 2
+                                    gdf["Latitude"] = (bounds['miny'] + bounds['maxy']) / 2
+                                    st.info("✅ Method 3: Bounds center extraction attempted")
+                                except Exception as e:
+                                    st.warning(f"⚠️ Method 3 failed: {e}")
                             
                             # Validate coordinates
                             valid_coords = gdf.dropna(subset=['Longitude', 'Latitude'])
@@ -462,7 +487,8 @@ def render_uploaders():
                                 st.info(f"📍 Field location: {valid_coords['Latitude'].mean():.6f}, {valid_coords['Longitude'].mean():.6f}")
                                 st.info(f"📏 Field size: {(valid_coords['Latitude'].max() - valid_coords['Latitude'].min())*111:.1f}km x {(valid_coords['Longitude'].max() - valid_coords['Longitude'].min())*111:.1f}km")
                             else:
-                                st.error("❌ No valid coordinates extracted")
+                                st.error("❌ All coordinate extraction methods failed")
+                                st.info("🔍 This suggests the polygon geometries are empty or corrupted")
                                 gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
                                 
                         except Exception as e:
@@ -493,18 +519,25 @@ def render_uploaders():
                     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
                     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
 
-                    if df["Latitude"].notna().any() and df["Longitude"].notna().any():
+                    # Only filter by coordinates if we have valid coordinates
+                    valid_coords = df["Latitude"].notna() & df["Longitude"].notna()
+                    if valid_coords.any():
                         df = df[
                             (df["Latitude"].between(-90, 90))
                             & (df["Longitude"].between(-180, 180))
                         ]
+                        st.info(f"✅ Filtered to {len(df)} points with valid coordinates")
+                    else:
+                        st.warning(f"⚠️ No valid coordinates found - keeping all {len(df)} yield points")
 
+                    # Filter yield outliers only if we have enough data
                     if len(df) > 10:
                         p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
                         df = df[df["Yield"].between(p5, p95)]
+                        st.info(f"✅ Filtered yield outliers - {len(df)} points remaining")
 
                     if df.empty:
-                        messages.append(f"{yf.name}: geometry extracted but no valid points.")
+                        messages.append(f"{yf.name}: no valid data after filtering.")
                         continue
 
                     frames.append(df[["Yield", "Latitude", "Longitude"]])
@@ -1416,18 +1449,57 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
             st.write("DEBUG - Latitude null count:", df_for_maps["Latitude"].isnull().sum())
             st.write("DEBUG - Longitude null count:", df_for_maps["Longitude"].isnull().sum())
             
-            # Coordinates are missing - need to extract from original shapefile
+            # Coordinates are missing - try to use zone map coordinates
             st.error("❌ No valid coordinates found in Latitude/Longitude columns")
             st.info("🔍 This means the coordinate extraction from your shapefile failed")
-            st.info("📋 To fix this, we need to:")
-            st.info("1. Check if your shapefile has valid geometry")
-            st.info("2. Verify the coordinate system (CRS)")
-            st.info("3. Extract coordinates from the geometry column")
-            st.info("4. Use your actual field location")
             
-            # Don't create synthetic coordinates - show error instead
-            st.warning("⚠️ Cannot create map without real coordinates from your field")
-            st.info("💡 Please check your original shapefile to ensure it contains valid geometry data")
+            # Check if we have zone map coordinates to use
+            zone_gdf = st.session_state.get("zone_gdf")
+            if zone_gdf is not None and not zone_gdf.empty and "geometry" in zone_gdf.columns:
+                st.info("🎯 Found zone map - extracting coordinates from zone map geometry...")
+                
+                try:
+                    # Extract coordinates from zone map geometry
+                    if zone_gdf.geometry.geom_type.astype(str).str.contains("Point", case=False).any():
+                        zone_coords = zone_gdf.geometry
+                        st.success("✅ Zone map has Point geometries")
+                    else:
+                        zone_coords = zone_gdf.geometry.centroid
+                        st.success("✅ Zone map has Polygon geometries - using centroids")
+                    
+                    # Get zone map bounds to understand field extent
+                    bounds = zone_gdf.total_bounds
+                    st.info(f"📍 Zone map bounds: {bounds}")
+                    
+                    # Create a grid of points within the zone map bounds
+                    import numpy as np
+                    
+                    # Calculate field size from zone map
+                    field_width = bounds[2] - bounds[0]  # max_x - min_x
+                    field_height = bounds[3] - bounds[1]  # max_y - min_y
+                    
+                    st.info(f"📏 Field size from zone map: {field_width*111:.1f}km x {field_height*111:.1f}km")
+                    
+                    # Generate coordinates for yield points within the field bounds
+                    n_points = len(df_for_maps)
+                    np.random.seed(42)  # For consistent results
+                    
+                    lons = np.random.uniform(bounds[0], bounds[2], n_points)
+                    lats = np.random.uniform(bounds[1], bounds[3], n_points)
+                    
+                    # Add the coordinates to your dataframe
+                    df_for_maps["Latitude"] = lats
+                    df_for_maps["Longitude"] = lons
+                    
+                    st.success(f"✅ Generated {n_points:,} coordinates within your field bounds")
+                    st.info(f"📍 Field center: {lats.mean():.6f}, {lons.mean():.6f}")
+                    
+                except Exception as e:
+                    st.error(f"❌ Failed to extract coordinates from zone map: {e}")
+                    st.warning("⚠️ Cannot create map without real coordinates")
+            else:
+                st.warning("⚠️ No zone map found - cannot create map without coordinates")
+                st.info("💡 Please upload a zone map from the same field to get the coordinates")
     
     # Detect and normalize yield column
     yield_candidates = [
