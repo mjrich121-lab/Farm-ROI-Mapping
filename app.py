@@ -1183,8 +1183,19 @@ if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
         # Extract coordinates from geometry if it's a GeoDataFrame - USE WORKING METHOD
         if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
             try:
+                # Debug geometry first
+                st.write(f"DEBUG: Geometry column exists: {'geometry' in ydf.columns}")
+                st.write(f"DEBUG: Geometry CRS: {ydf.crs}")
+                st.write(f"DEBUG: Geometry types: {ydf.geometry.geom_type.value_counts()}")
+                st.write(f"DEBUG: Empty geometries: {ydf.geometry.is_empty.sum()}")
+                st.write(f"DEBUG: Sample geometry: {ydf.geometry.iloc[0]}")
+                
                 # Use the working method from backup code
                 reps = ydf.geometry.representative_point()
+                st.write(f"DEBUG: Representative points sample: {reps.iloc[0]}")
+                st.write(f"DEBUG: Reps.x sample: {reps.x.iloc[0]}")
+                st.write(f"DEBUG: Reps.y sample: {reps.y.iloc[0]}")
+                
                 df_for_maps["Longitude"] = reps.x
                 df_for_maps["Latitude"] = reps.y
                 st.info("✅ Coordinates extracted using representative_point method.")
