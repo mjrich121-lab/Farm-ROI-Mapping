@@ -1339,21 +1339,17 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             field_polygon = zones_gdf.geometry.unary_union
             st.info("✅ Zone polygon available - will apply as clipping mask after interpolation")
         
-        # Higher resolution for better detail
-        n = 300
+        # High resolution grid for swath-level detail
+        n = 500
         lon_lin = np.linspace(xmin, xmax, n)
         lat_lin = np.linspace(ymin, ymax, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        # Interpolate yield data
-        grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
-        grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-        grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
+        # Use NEAREST interpolation to preserve blocky yield texture (real combine passes)
+        # This eliminates artificial triangle banding and angular artifacts
+        grid = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
         
-        # Fill remaining NaN with mean
-        if np.any(np.isnan(grid)):
-            valid_mean = np.nanmean(vals_ok)
-            grid = np.where(np.isnan(grid), valid_mean, grid)
+        st.info(f"✅ Interpolated {len(vals_ok)} yield points using nearest-neighbor method")
 
         # Clip grid to field polygon if available (conditional masking)
         if field_polygon is not None:
@@ -1365,15 +1361,19 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             except Exception as e:
                 st.warning(f"Vectorized field clipping failed: {e}")
 
-        # Create 5-class red-to-green yield colormap with boundary normalization
-        yield_cmap = mpl_colors.ListedColormap(["#a50026", "#d73027", "#fdae61", "#a6d96a", "#1a9850"])
+        # Create professional yield colormap (red to green gradient)
+        yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
+            "yieldmap", ["#a50026", "#d73027", "#fdae61", "#ffffbf", "#a6d96a", "#1a9850"]
+        )
         
-        # Use percentile-based boundaries for better visual distribution
-        p5, p95 = np.nanpercentile(grid, [5, 95])
-        boundaries = np.linspace(p5, p95, 6)
-        norm = mpl_colors.BoundaryNorm(boundaries, yield_cmap.N)
+        # Use percentile-based normalization to remove outlier distortion
+        vmin = np.nanpercentile(vals_ok, 5)
+        vmax = np.nanpercentile(vals_ok, 95)
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
         
-        # Apply colormap with boundary normalization
+        st.info(f"✅ Color range: {vmin:.1f} - {vmax:.1f} bu/ac (5th-95th percentile)")
+        
+        # Apply colormap with percentile normalization
         rgba = yield_cmap(norm(grid))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
