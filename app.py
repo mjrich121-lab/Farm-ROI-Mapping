@@ -1533,32 +1533,46 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         st.info(f"✅ Interpolated {len(vals_ok)} yield points using nearest-neighbor method")
 
         # ==========================================================
-        # HARVEST EXTENT MASK — Prevent interpolation outside yield data
+        # HARVEST EXTENT MASK — Alpha shape (concave hull)
         # ==========================================================
         try:
             from shapely.geometry import Point as ShapePoint
-            from shapely.ops import unary_union
+            from shapely.vectorized import contains
             
-            # Convert all yield coordinates to a GeoSeries
+            # Build GeoSeries of yield points
             yield_points_geom = gpd.GeoSeries(
                 [ShapePoint(x, y) for x, y in zip(pts_lon, pts_lat)],
                 crs="EPSG:4326"
             )
             
-            # Create a convex hull around the harvested area
-            # (This forms the true boundary of combine travel)
-            harvest_hull = yield_points_geom.unary_union.convex_hull
+            # Try alpha shape (concave hull) for tight boundary fitting
+            try:
+                from alphashape import alphashape
+                
+                # Compute concave (alpha) hull — adjust alpha for smoothness
+                alpha_value = 0.0025  # lower = tighter boundary, higher = smoother
+                harvest_hull = alphashape(yield_points_geom, alpha_value)
+                
+                st.info(f"✅ Created alpha-shape harvest boundary (α={alpha_value})")
+                
+            except ImportError:
+                # Fallback to convex hull if alphashape not installed
+                st.warning("⚠️ alphashape library not found - using convex hull (install: pip install alphashape)")
+                harvest_hull = yield_points_geom.unary_union.convex_hull
+                st.info("✅ Created convex hull around harvest extent")
+            except Exception as e:
+                # Fallback to convex hull if alpha shape fails
+                st.warning(f"Alpha shape failed: {e} - using convex hull")
+                harvest_hull = yield_points_geom.unary_union.convex_hull
+                st.info("✅ Created convex hull around harvest extent")
             
-            st.info("✅ Created convex hull around harvest extent")
-            
-            # Build mask using vectorized contains for performance
-            from shapely.vectorized import contains
+            # Vectorized mask
             harvest_mask = contains(harvest_hull, lon_grid, lat_grid)
             
-            # Apply mask — set all non-harvest cells to NaN
+            # Apply mask — remove grid cells outside harvested boundary
             grid = np.where(harvest_mask, grid, np.nan)
             
-            st.info("✅ Applied harvest extent mask — map limited to true harvested area (no overfill)")
+            st.info("✅ Applied harvest extent mask — unharvested areas excluded")
             
         except Exception as e:
             st.warning(f"Harvest extent mask failed, using full grid: {e}")
