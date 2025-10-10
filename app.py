@@ -584,9 +584,8 @@ def render_uploaders():
                                                         # Convert to radians
                                                         angles_rad = np.radians(angles)
                                                         
-                                                        # Calculate offsets - adjust for proper field coverage
-                                                        # Scale up the conversion to cover more field area
-                                                        scale_factor = 10.0  # Increase to cover more area
+                                                        # Calculate offsets - scale up significantly for full field coverage
+                                                        scale_factor = 50.0  # Much larger scale for full field coverage
                                                         dx = distances * np.sin(angles_rad) * feet_to_degrees * scale_factor
                                                         dy = distances * np.cos(angles_rad) * feet_to_degrees * scale_factor
                                                         
@@ -1202,7 +1201,6 @@ def compute_bounds_for_heatmaps():
             
             # If zones are present, they get priority for field boundary definition
             if "zones" in layer_info and len(layer_info) > 1:
-                st.info(f"✅ Zones present - using zones as primary field boundary with {len(layer_info)-1} other layers")
                 # Use zones as primary but ensure other layers are visible
                 zone_tb = zones_gdf.total_bounds
                 if zone_tb is not None and len(zone_tb) == 4:
@@ -1220,7 +1218,6 @@ def compute_bounds_for_heatmaps():
                     east = zone_east + (lon_range * 0.05)
             else:
                 # No zones or zones only - use combined bounds from all available layers
-                st.info(f"✅ Using combined bounds from {len(layer_info)} layer(s): {', '.join(layer_info)}")
                 # Add small buffer to combined bounds
                 lat_range = north - south
                 lon_range = east - west
@@ -1266,7 +1263,6 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 
         # Use provided bounds (should be unified bounds from zones)
         south, west, north, east = bounds
-        st.info(f"Using bounds for {name}: {south:.4f}, {west:.4f}, {north:.4f}, {east:.4f}")
 
         vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
         if vmin == vmax:
@@ -1293,7 +1289,6 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         if np.any(np.isnan(grid)):
             valid_mean = np.nanmean(vals_ok)
             grid = np.where(np.isnan(grid), valid_mean, grid)
-            st.info(f"✅ Filled remaining gaps with mean yield value: {valid_mean:.1f}")
 
         rgba = cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
@@ -1625,7 +1620,6 @@ else:
             north = float(df_valid["Latitude"].max())
             east = float(df_valid["Longitude"].max())
             bounds = (south, west, north, east)
-            st.info(f"✅ Using yield data bounds as fallback: {south:.4f}, {west:.4f}, {north:.4f}, {east:.4f}")
     except Exception as e:
         st.warning(f"Map bounds computation failed: {e}")
 
