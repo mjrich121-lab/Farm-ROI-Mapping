@@ -464,6 +464,9 @@ def render_uploaders():
 
                     # --- SHP/GEOJSON/ZIP(SHP) ---
                     else:
+                        # ============================================================
+                        # TRUE POINT GEOMETRY OVERRIDE — FINAL FIX
+                        # ============================================================
                         gdf = load_vector_file(yf)
                         if gdf is None or gdf.empty:
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
@@ -471,175 +474,129 @@ def render_uploaders():
                         
                         # Debug: show what's in the shapefile
                         st.info(f"✅ Loaded yield shapefile: {len(gdf)} features")
-                        st.info(f"Yield columns: {list(gdf.columns)}")
-                        st.info(f"Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
-                        st.info(f"Empty geometries: {gdf.geometry.is_empty.sum()}")
+                        st.info(f"📋 Available columns: {list(gdf.columns)}")
+                        st.info(f"🔍 Geometry types (initial): {gdf.geometry.geom_type.value_counts().to_dict()}")
+                        st.info(f"📍 Empty geometries: {gdf.geometry.is_empty.sum()}")
+                        st.info(f"🗺️ CRS: {gdf.crs}")
 
                         # ✅ Ensure WGS84 CRS
                         if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
                             try:
                                 gdf = gdf.to_crs(epsg=4326)
+                                st.info("✅ Converted to EPSG:4326")
                             except Exception as e:
                                 st.warning(f"CRS conversion failed for {yf.name}: {e}")
 
                         # ======================================================
-                        # TRUE YIELD POINT GEOMETRY DETECTION — FINAL FIX
+                        # ABSOLUTE PRIORITY: Extract coordinates from geometry
                         # ======================================================
-                        # Check if file contains valid Point geometries with CRS EPSG:4326
                         has_valid_coords = False
                         
-                        st.info(f"🔍 Geometry info: {len(gdf)} features, type: {gdf.geometry.geom_type.value_counts().to_dict()}, CRS: {gdf.crs}")
-                        
-                        # PRIORITY 1: Check for Point geometries
-                        if gdf.geometry.geom_type.isin(["Point"]).all() and not gdf.geometry.is_empty.any():
-                            st.success(f"✅ Using {len(gdf)} true GPS points from geometry (EPSG:4326)")
+                        # Check if we have Point geometries (even if mixed with other types)
+                        if gdf.geometry.geom_type.isin(["Point"]).any():
+                            # Filter to only Point geometries if mixed
+                            if not gdf.geometry.geom_type.isin(["Point"]).all():
+                                st.warning(f"⚠️ Mixed geometry types detected - filtering to Points only")
+                                gdf = gdf[gdf.geometry.geom_type == "Point"].copy()
+                                st.info(f"✅ Filtered to {len(gdf)} Point geometries")
                             
-                            try:
-                                # Extract coordinates directly from geometry
-                                gdf["Longitude"] = gdf.geometry.x
-                                gdf["Latitude"] = gdf.geometry.y
-                                
-                                # Verify coordinate ranges
-                                lon_min, lon_max = gdf["Longitude"].min(), gdf["Longitude"].max()
-                                lat_min, lat_max = gdf["Latitude"].min(), gdf["Latitude"].max()
-                                
-                                st.info(f"📍 Coordinate range: lon [{lon_min:.6f}, {lon_max:.6f}], lat [{lat_min:.6f}, {lat_max:.6f}]")
-                                st.info(f"📍 Sample coordinates: {list(zip(gdf['Longitude'].head(3), gdf['Latitude'].head(3)))}")
-                                
-                                # Ensure CRS alignment
-                                if gdf.crs is None or gdf.crs.to_epsg() != 4326:
-                                    gdf = gdf.set_crs("EPSG:4326", allow_override=True)
-                                    st.info("✅ Set CRS to EPSG:4326")
-                                
-                                has_valid_coords = True
-                                st.success("✅ Skipping synthetic coordinate generation — true GPS geometry found")
-                                
-                            except Exception as e:
-                                st.error(f"❌ Failed to extract coordinates from Point geometry: {e}")
+                            # Check for empty geometries
+                            if gdf.geometry.is_empty.any():
+                                st.warning(f"⚠️ {gdf.geometry.is_empty.sum()} empty geometries - removing them")
+                                gdf = gdf[~gdf.geometry.is_empty].copy()
+                                st.info(f"✅ Retained {len(gdf)} non-empty Point geometries")
+                            
+                            if len(gdf) > 0:
+                                try:
+                                    # Extract coordinates directly from Point geometry
+                                    gdf["Longitude"] = gdf.geometry.x
+                                    gdf["Latitude"] = gdf.geometry.y
+                                    
+                                    # Verify coordinate ranges
+                                    lon_min, lon_max = gdf["Longitude"].min(), gdf["Longitude"].max()
+                                    lat_min, lat_max = gdf["Latitude"].min(), gdf["Latitude"].max()
+                                    
+                                    st.success(f"✅ Using {len(gdf)} true GPS points from Point geometry (EPSG:4326)")
+                                    st.success(f"📍 Coordinate range: lon [{lon_min:.6f}, {lon_max:.6f}], lat [{lat_min:.6f}, {lat_max:.6f}]")
+                                    st.info(f"📍 Sample coordinates: {list(zip(gdf['Longitude'].head(3).values, gdf['Latitude'].head(3).values))}")
+                                    
+                                    # Ensure CRS is set
+                                    if gdf.crs is None:
+                                        gdf = gdf.set_crs("EPSG:4326", allow_override=True)
+                                        st.info("✅ Set CRS to EPSG:4326")
+                                    
+                                    has_valid_coords = True
+                                    st.success("✅ TRUE COORDINATES EXTRACTED - Skipping all synthetic reconstruction")
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to extract coordinates from Point geometry: {e}")
                         
                         # PRIORITY 2: Check for X/Y columns in attribute table
-                        elif "X" in gdf.columns and "Y" in gdf.columns:
+                        if not has_valid_coords and "X" in gdf.columns and "Y" in gdf.columns:
                             st.info("✅ Found X and Y columns in attribute table")
                             try:
                                 gdf["Longitude"] = pd.to_numeric(gdf["X"], errors="coerce")
                                 gdf["Latitude"] = pd.to_numeric(gdf["Y"], errors="coerce")
                                 gdf = gdf.dropna(subset=["Latitude", "Longitude"])
                                 
-                                # Create geometry from coordinates
-                                gdf = gpd.GeoDataFrame(
-                                    gdf, 
-                                    geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
-                                    crs="EPSG:4326"
-                                )
-                                has_valid_coords = True
-                                st.success(f"✅ Extracted {len(gdf)} points from X/Y columns")
-                                st.info(f"📍 Coordinate range: lon [{gdf['Longitude'].min():.6f}, {gdf['Longitude'].max():.6f}], lat [{gdf['Latitude'].min():.6f}, {gdf['Latitude'].max():.6f}]")
+                                # Validate geographic ranges
+                                if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                    gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                    # Create geometry from coordinates
+                                    gdf = gpd.GeoDataFrame(
+                                        gdf, 
+                                        geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                        crs="EPSG:4326"
+                                    )
+                                    has_valid_coords = True
+                                    st.success(f"✅ Extracted {len(gdf)} points from X/Y attribute columns")
+                                    st.info(f"📍 Coordinate range: lon [{gdf['Longitude'].min():.6f}, {gdf['Longitude'].max():.6f}], lat [{gdf['Latitude'].min():.6f}, {gdf['Latitude'].max():.6f}]")
+                                else:
+                                    st.error(f"❌ X/Y columns contain invalid coordinate ranges")
                             except Exception as e:
                                 st.error(f"❌ Failed to extract from X/Y columns: {e}")
                         
-                        else:
-                            st.error(f"❌ No valid Point geometry or X/Y columns found")
+                        # PRIORITY 3: Check for other coordinate column names
+                        if not has_valid_coords:
+                            lat_col, lon_col = None, None
+                            for c in gdf.columns:
+                                c_lower = c.lower()
+                                if lat_col is None and c_lower in ["y", "lat", "latitude", "northing"]:
+                                    lat_col = c
+                                if lon_col is None and c_lower in ["x", "lon", "long", "longitude", "easting"]:
+                                    lon_col = c
+                            
+                            if lat_col and lon_col:
+                                st.info(f"✅ Found coordinate columns: {lon_col}, {lat_col}")
+                                try:
+                                    gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
+                                    gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
+                                    gdf = gdf.dropna(subset=["Latitude", "Longitude"])
+                                    
+                                    if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                        gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                        gdf = gpd.GeoDataFrame(
+                                            gdf, 
+                                            geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                            crs="EPSG:4326"
+                                        )
+                                        has_valid_coords = True
+                                        st.success(f"✅ Extracted {len(gdf)} points from {lon_col}, {lat_col} columns")
+                                except Exception as e:
+                                    st.error(f"❌ Failed to extract from {lon_col}, {lat_col}: {e}")
+                        
+                        # Final check: Do we have valid coordinates?
+                        if not has_valid_coords:
+                            st.error(f"❌ No valid Point geometry or coordinate columns found")
                             st.error(f"   Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
-                            st.error(f"   Available columns: {list(gdf.columns)[:20]}")  # Show first 20 columns
-                            st.error(f"   Geometry reconstruction will be INACCURATE")
+                            st.error(f"   Available columns: {list(gdf.columns)[:20]}")
+                            st.error(f"   ⚠️ Synthetic reconstruction will be used - results will be INACCURATE")
 
-                        # ✅ Extract coordinates from geometry (only if we don't have them from attribute table)
+                        # ✅ All coordinate extraction complete above - now handle fallback reconstruction
                         try:
                             if has_valid_coords:
-                                st.info("✅ Skipping all geometry repair and reconstruction (true coordinates already extracted).")
-                            elif (gdf.geometry.geom_type.isin(["Point"]).all() and 
-                                gdf.crs and "4326" in str(gdf.crs) and
-                                not gdf.geometry.is_empty.any()):
-                                try:
-                                    gdf["Latitude"] = gdf.geometry.y
-                                    gdf["Longitude"] = gdf.geometry.x
-                                    st.info(f"✅ Using native Point geometry for yield coordinates (EPSG:4326) - {len(gdf)} GPS points")
-                                    has_valid_coords = True
-                                except Exception as e:
-                                    st.warning(f"Failed to extract from Point geometry: {e}")
-                            
-                            # PRIORITY 2: Check if valid Latitude/Longitude columns already exist
-                            if not has_valid_coords:
-                                for lat_name in ['Latitude', 'latitude', 'Lat', 'lat', 'LATITUDE']:
-                                    for lon_name in ['Longitude', 'longitude', 'Lon', 'lon', 'LONGITUDE']:
-                                        if lat_name in gdf.columns and lon_name in gdf.columns:
-                                            try:
-                                                lat_vals = pd.to_numeric(gdf[lat_name], errors='coerce').dropna()
-                                                lon_vals = pd.to_numeric(gdf[lon_name], errors='coerce').dropna()
-                                                if len(lat_vals) > 0 and len(lon_vals) > 0:
-                                                    if (lat_vals.min() >= -90 and lat_vals.max() <= 90 and
-                                                        lon_vals.min() >= -180 and lon_vals.max() <= 180):
-                                                        st.info(f"✅ Found valid coordinates in columns: {lat_name}, {lon_name}")
-                                                        has_valid_coords = True
-                                                        # Use these directly - no geometry extraction needed
-                                                        gdf["Latitude"] = gdf[lat_name]
-                                                        gdf["Longitude"] = gdf[lon_name]
-                                                        break
-                                            except:
-                                                continue
-                                        if has_valid_coords:
-                                            break
-                                    if has_valid_coords:
-                                        break
-                            
-                            if has_valid_coords:
-                                # Skip all geometry repair - we have valid coordinates
-                                st.info(f"✅ Using existing valid geographic coordinates from {yf.name}")
-                            elif gdf.geometry.is_empty.all() or not gdf.geometry.geom_type.isin(["Point"]).all():
-                                st.warning(f"Geometries are empty or not Point type in {yf.name}")
-                                st.info(f"Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
-                                st.info("Checking for coordinate columns in attribute table...")
-                                
-                                # PRIORITY: Extract coordinates from attribute table (common in John Deere/Ag Leader files)
-                                lat_col = None
-                                lon_col = None
-                                
-                                # Look for common coordinate column patterns
-                                for c in gdf.columns:
-                                    c_lower = c.lower()
-                                    # Latitude candidates
-                                    if c_lower in ["y", "lat", "latitude", "northing", "y_coord", "ycoord"]:
-                                        lat_col = c
-                                    # Longitude candidates  
-                                    if c_lower in ["x", "lon", "long", "longitude", "easting", "x_coord", "xcoord"]:
-                                        lon_col = c
-                                
-                                # Check for exact "Y" and "X" if not found (case-sensitive for some formats)
-                                if not lat_col and "Y" in gdf.columns:
-                                    lat_col = "Y"
-                                if not lon_col and "X" in gdf.columns:
-                                    lon_col = "X"
-                                
-                                if lat_col and lon_col:
-                                    try:
-                                        gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
-                                        gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
-                                        gdf = gdf.dropna(subset=["Latitude", "Longitude"])
-                                        
-                                        # Validate that these are geographic coordinates
-                                        if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
-                                            gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
-                                            st.info(f"✅ Using true coordinate columns from attribute table: {lon_col}, {lat_col}")
-                                            st.info(f"✅ Extracted {len(gdf)} valid GPS points from attribute data")
-                                            
-                                            # Create geometry from these coordinates
-                                            gdf = gpd.GeoDataFrame(
-                                                gdf, 
-                                                geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
-                                                crs="EPSG:4326"
-                                            )
-                                            has_valid_coords = True
-                                        else:
-                                            st.warning(f"⚠️ Columns {lat_col}, {lon_col} don't contain valid geographic coordinates")
-                                    except Exception as e:
-                                        st.warning(f"Failed to extract from attribute columns: {e}")
-                                
-                                if not has_valid_coords:
-                                    st.warning("⚠️ No explicit Lat/Lon columns found in attribute table")
-                                    st.info("Attempting geometry repair...")
-                                
-                                # Only try geometry repair if we don't have valid coords
-                                if not has_valid_coords:
+                                st.info("✅ TRUE COORDINATES LOADED - All reconstruction and repair paths DISABLED")
+                            elif not has_valid_coords:
                                     # Try multiple repair methods
                                     try:
                                         # Method 1: Buffer repair
