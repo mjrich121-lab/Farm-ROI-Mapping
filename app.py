@@ -52,6 +52,12 @@ def ensure_alphashape():
 alphashape = ensure_alphashape()
 ALPHA_OK = alphashape is not None
 
+# Debug: Show alphashape status
+if ALPHA_OK:
+    st.info(f"✅ alphashape module loaded successfully (version: {getattr(alphashape, '__version__', 'unknown')})")
+else:
+    st.warning("⚠️ alphashape module not available - using convex hull fallback for harvest boundaries")
+
 # Clear caches
 st.cache_data.clear()
 st.cache_resource.clear()
