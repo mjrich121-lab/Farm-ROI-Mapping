@@ -482,13 +482,54 @@ def render_uploaders():
                             except Exception as e:
                                 st.warning(f"CRS conversion failed for {yf.name}: {e}")
 
-                        # ✅ Extract coordinates from geometry
+                        # ✅ ABSOLUTE PRIORITY: Check for X/Y coordinate columns in attribute table FIRST
+                        # This must happen BEFORE any geometry validation or repair
+                        has_valid_coords = False
+                        lat_col, lon_col = None, None
+                        
+                        # Look for coordinate columns in attribute data
+                        for c in gdf.columns:
+                            c_lower = c.lower()
+                            if c_lower in ["y", "lat", "latitude", "northing", "y_coord", "ycoord"]:
+                                lat_col = c
+                            if c_lower in ["x", "lon", "long", "longitude", "easting", "x_coord", "xcoord"]:
+                                lon_col = c
+                        
+                        # Explicit uppercase fallback for John Deere / Ag Leader
+                        if not lat_col and "Y" in gdf.columns:
+                            lat_col = "Y"
+                        if not lon_col and "X" in gdf.columns:
+                            lon_col = "X"
+                        
+                        if lat_col and lon_col:
+                            try:
+                                gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
+                                gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
+                                gdf = gdf.dropna(subset=["Latitude", "Longitude"])
+                                
+                                # Validate geographic ranges
+                                if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                    gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                    # Create geometry from these coordinates
+                                    gdf = gpd.GeoDataFrame(
+                                        gdf, 
+                                        geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                        crs="EPSG:4326"
+                                    )
+                                    has_valid_coords = True
+                                    st.info(f"✅ Extracted {len(gdf)} points using coordinate columns: {lon_col}, {lat_col}")
+                                else:
+                                    st.warning(f"⚠️ Columns {lon_col}, {lat_col} don't contain valid geographic coordinates")
+                            except Exception as e:
+                                st.warning(f"Failed to extract coordinates from {lon_col}, {lat_col}: {e}")
+                        else:
+                            st.warning(f"⚠️ No X/Y coordinate columns found in attribute data — geometry reconstruction will be inaccurate.")
+
+                        # ✅ Extract coordinates from geometry (only if we don't have them from attribute table)
                         try:
-                            # ABSOLUTE PRIORITY: Use native Point geometry if available
-                            has_valid_coords = False
-                            
-                            # Check if we have Point geometry with valid CRS (EPSG:4326)
-                            if (gdf.geometry.geom_type.isin(["Point"]).all() and 
+                            if has_valid_coords:
+                                st.info("✅ Skipping all geometry repair and reconstruction (true coordinates already extracted).")
+                            elif (gdf.geometry.geom_type.isin(["Point"]).all() and 
                                 gdf.crs and "4326" in str(gdf.crs) and
                                 not gdf.geometry.is_empty.any()):
                                 try:
