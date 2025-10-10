@@ -484,27 +484,44 @@ def render_uploaders():
 
                         # ✅ Extract coordinates from geometry
                         try:
-                            # PRIORITY 1: Check if valid Latitude/Longitude columns already exist
+                            # ABSOLUTE PRIORITY: Use native Point geometry if available
                             has_valid_coords = False
-                            for lat_name in ['Latitude', 'latitude', 'Lat', 'lat', 'LATITUDE']:
-                                for lon_name in ['Longitude', 'longitude', 'Lon', 'lon', 'LONGITUDE']:
-                                    if lat_name in gdf.columns and lon_name in gdf.columns:
-                                        try:
-                                            lat_vals = pd.to_numeric(gdf[lat_name], errors='coerce').dropna()
-                                            lon_vals = pd.to_numeric(gdf[lon_name], errors='coerce').dropna()
-                                            if len(lat_vals) > 0 and len(lon_vals) > 0:
-                                                if (lat_vals.min() >= -90 and lat_vals.max() <= 90 and
-                                                    lon_vals.min() >= -180 and lon_vals.max() <= 180):
-                                                    st.info(f"✅ Found valid coordinates in columns: {lat_name}, {lon_name}")
-                                                    has_valid_coords = True
-                                                    # Use these directly - no geometry extraction needed
-                                                    gdf["Latitude"] = gdf[lat_name]
-                                                    gdf["Longitude"] = gdf[lon_name]
-                                                    break
-                                        except:
-                                            continue
-                                if has_valid_coords:
-                                    break
+                            
+                            # Check if we have Point geometry with valid CRS (EPSG:4326)
+                            if (gdf.geometry.geom_type.isin(["Point"]).all() and 
+                                gdf.crs and "4326" in str(gdf.crs) and
+                                not gdf.geometry.is_empty.any()):
+                                try:
+                                    gdf["Latitude"] = gdf.geometry.y
+                                    gdf["Longitude"] = gdf.geometry.x
+                                    st.info(f"✅ Using native Point geometry for yield coordinates (EPSG:4326) - {len(gdf)} GPS points")
+                                    has_valid_coords = True
+                                except Exception as e:
+                                    st.warning(f"Failed to extract from Point geometry: {e}")
+                            
+                            # PRIORITY 2: Check if valid Latitude/Longitude columns already exist
+                            if not has_valid_coords:
+                                for lat_name in ['Latitude', 'latitude', 'Lat', 'lat', 'LATITUDE']:
+                                    for lon_name in ['Longitude', 'longitude', 'Lon', 'lon', 'LONGITUDE']:
+                                        if lat_name in gdf.columns and lon_name in gdf.columns:
+                                            try:
+                                                lat_vals = pd.to_numeric(gdf[lat_name], errors='coerce').dropna()
+                                                lon_vals = pd.to_numeric(gdf[lon_name], errors='coerce').dropna()
+                                                if len(lat_vals) > 0 and len(lon_vals) > 0:
+                                                    if (lat_vals.min() >= -90 and lat_vals.max() <= 90 and
+                                                        lon_vals.min() >= -180 and lon_vals.max() <= 180):
+                                                        st.info(f"✅ Found valid coordinates in columns: {lat_name}, {lon_name}")
+                                                        has_valid_coords = True
+                                                        # Use these directly - no geometry extraction needed
+                                                        gdf["Latitude"] = gdf[lat_name]
+                                                        gdf["Longitude"] = gdf[lon_name]
+                                                        break
+                                            except:
+                                                continue
+                                        if has_valid_coords:
+                                            break
+                                    if has_valid_coords:
+                                        break
                             
                             if has_valid_coords:
                                 # Skip all geometry repair - we have valid coordinates
