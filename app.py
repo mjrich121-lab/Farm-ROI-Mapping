@@ -1532,7 +1532,38 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         
         st.info(f"✅ Interpolated {len(vals_ok)} yield points using nearest-neighbor method")
 
-        # Clip grid to field polygon if available (conditional masking)
+        # ==========================================================
+        # HARVEST EXTENT MASK — Prevent interpolation outside yield data
+        # ==========================================================
+        try:
+            from shapely.geometry import Point as ShapePoint
+            from shapely.ops import unary_union
+            
+            # Convert all yield coordinates to a GeoSeries
+            yield_points_geom = gpd.GeoSeries(
+                [ShapePoint(x, y) for x, y in zip(pts_lon, pts_lat)],
+                crs="EPSG:4326"
+            )
+            
+            # Create a convex hull around the harvested area
+            # (This forms the true boundary of combine travel)
+            harvest_hull = yield_points_geom.unary_union.convex_hull
+            
+            st.info("✅ Created convex hull around harvest extent")
+            
+            # Build mask using vectorized contains for performance
+            from shapely.vectorized import contains
+            harvest_mask = contains(harvest_hull, lon_grid, lat_grid)
+            
+            # Apply mask — set all non-harvest cells to NaN
+            grid = np.where(harvest_mask, grid, np.nan)
+            
+            st.info("✅ Applied harvest extent mask — map limited to true harvested area (no overfill)")
+            
+        except Exception as e:
+            st.warning(f"Harvest extent mask failed, using full grid: {e}")
+
+        # Clip grid to field polygon if available (additional conditional masking)
         if field_polygon is not None:
             try:
                 from shapely.vectorized import contains
