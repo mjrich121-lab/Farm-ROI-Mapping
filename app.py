@@ -21,26 +21,36 @@ from matplotlib import colors as mpl_colors
 from shapely.geometry import Point
 
 # ===========================
-# ALPHASHAPE AUTO-INSTALLER (Cloud-Safe)
+# ALPHASHAPE AUTO-INSTALLER (Bulletproof Cloud Version)
 # ===========================
-try:
-    import alphashape
-    ALPHA_OK = True
-except ModuleNotFoundError:
+import importlib
+import subprocess
+import sys
+
+def ensure_alphashape():
+    """
+    Ensures alphashape is available and functional.
+    Safe for Streamlit Cloud / Cursor environments.
+    Never crashes the app, always falls back gracefully.
+    """
     try:
-        import subprocess
-        import sys
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "alphashape", "--quiet"],
-            check=True,
-            timeout=60
-        )
-        import alphashape
-        ALPHA_OK = True
-        st.success("✅ alphashape installed successfully")
+        alphashape_module = importlib.import_module("alphashape")
+        return alphashape_module
     except Exception as e:
-        st.warning(f"⚠️ alphashape unavailable ({str(e)[:50]}); using convex hull fallback")
-        ALPHA_OK = False
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "alphashape==1.3.1", "--quiet", "--disable-pip-version-check"],
+                check=True,
+                timeout=60
+            )
+            alphashape_module = importlib.import_module("alphashape")
+            st.success("✅ alphashape installed and imported successfully")
+            return alphashape_module
+        except Exception as e2:
+            return None
+
+alphashape = ensure_alphashape()
+ALPHA_OK = alphashape is not None
 
 # Clear caches
 st.cache_data.clear()
@@ -1567,8 +1577,8 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
                 crs="EPSG:4326"
             )
             
-            # Use alpha shape (concave hull) for tight boundary fitting if available
-            if ALPHA_OK:
+            # === HARVEST EXTENT BOUNDARY (Bulletproof) ===
+            if ALPHA_OK and alphashape is not None:
                 try:
                     # Compute concave (alpha) hull — adjust alpha for smoothness
                     alpha_value = 0.0025  # lower = tighter boundary, higher = smoother
@@ -1578,12 +1588,11 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
                     
                 except Exception as e:
                     # Fallback to convex hull if alpha shape computation fails
-                    st.warning(f"⚠️ Alpha shape failed: {e} - using convex hull")
+                    st.warning(f"⚠️ Alpha shape failed: {str(e)[:60]} - using convex hull")
                     harvest_hull = yield_points_geom.unary_union.convex_hull
-                    st.info("✅ Created convex hull around harvest extent")
             else:
                 # Fallback to convex hull if alphashape not available
-                st.info("ℹ️ Using convex hull (alphashape library not available)")
+                st.info("ℹ️ Using convex hull (alphashape not available)")
                 harvest_hull = yield_points_geom.unary_union.convex_hull
             
             # Vectorized mask
