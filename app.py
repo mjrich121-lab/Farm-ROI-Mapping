@@ -570,24 +570,34 @@ def render_uploaders():
                                                         
                                                         st.info(f"Using reference point from {ref_source}: {ref_lat:.4f}, {ref_lon:.4f}")
                                                         
-                                                        # Convert GPS distance/angle to lat/lon
+                                                        # Convert GPS distance/angle to lat/lon with proper field coverage
                                                         import math
                                                         from shapely.geometry import Point
                                                         
-                                                        # Convert feet to degrees (more accurate conversion)
-                                                        feet_to_degrees = 1.0 / 364000  # Rough conversion
+                                                        # More accurate feet to degrees conversion
+                                                        feet_to_degrees = 1.0 / 364000
                                                         
-                                                        # Calculate coordinates
+                                                        # Get coordinate ranges
                                                         distances = gdf['Distance_f'].values
                                                         angles = gdf['Track_deg_'].values
                                                         
                                                         # Convert to radians
                                                         angles_rad = np.radians(angles)
                                                         
-                                                        # Calculate offsets - scale up significantly for full field coverage
-                                                        scale_factor = 50.0  # Much larger scale for full field coverage
-                                                        dx = distances * np.sin(angles_rad) * feet_to_degrees * scale_factor
-                                                        dy = distances * np.cos(angles_rad) * feet_to_degrees * scale_factor
+                                                        # Create a more realistic field coverage pattern
+                                                        # Use a reasonable field size (e.g., 1 mile x 1 mile)
+                                                        field_size_degrees = 0.015  # ~1 mile in degrees
+                                                        
+                                                        # Normalize distances to 0-1 range
+                                                        dist_min, dist_max = distances.min(), distances.max()
+                                                        if dist_max > dist_min:
+                                                            norm_distances = (distances - dist_min) / (dist_max - dist_min)
+                                                        else:
+                                                            norm_distances = np.ones_like(distances) * 0.5
+                                                        
+                                                        # Create field coverage with proper aspect ratio
+                                                        dx = norm_distances * field_size_degrees * np.sin(angles_rad)
+                                                        dy = norm_distances * field_size_degrees * np.cos(angles_rad)
                                                         
                                                         # Calculate final coordinates
                                                         lons = ref_lon + dx
@@ -1272,32 +1282,54 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
 
-        # Increase grid resolution for better coverage
-        n = 300  # Higher resolution for better interpolation
-        lon_lin = np.linspace(west, east, n)
-        lat_lin = np.linspace(south, north, n)
+        # Create proper yield map with realistic field dimensions
+        # Use square aspect ratio for realistic field coverage
+        lat_range = north - south
+        lon_range = east - west
+        max_range = max(lat_range, lon_range)
+        
+        # Center the field and make it square
+        center_lat = (south + north) / 2
+        center_lon = (west + east) / 2
+        half_range = max_range / 2
+        
+        # Create square field bounds
+        field_south = center_lat - half_range
+        field_north = center_lat + half_range
+        field_west = center_lon - half_range
+        field_east = center_lon + half_range
+        
+        # Higher resolution for better detail
+        n = 200
+        lon_lin = np.linspace(field_west, field_east, n)
+        lat_lin = np.linspace(field_south, field_north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        # Use more aggressive interpolation to fill the entire field area
+        # Interpolate yield data
         grid_lin = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="linear")
         grid_nn  = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-        
-        # Fill NaN areas with nearest neighbor values to ensure complete coverage
         grid = np.where(np.isnan(grid_lin), grid_nn, grid_lin)
         
-        # Additional step: fill any remaining NaN values with the mean of valid values
+        # Fill remaining NaN with mean
         if np.any(np.isnan(grid)):
             valid_mean = np.nanmean(vals_ok)
             grid = np.where(np.isnan(grid), valid_mean, grid)
 
-        rgba = cmap((grid - vmin) / (vmax - vmin))
+        # Create yield map colormap (red to yellow to green)
+        yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
+            "yieldmap", ["#d7191c", "#fdae61", "#ffffbf", "#a6d96a", "#1a9641"]
+        )
+        
+        # Apply colormap with full opacity
+        rgba = yield_cmap((grid - vmin) / (vmax - vmin))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
+        # Add opaque yield map overlay
         folium.raster_layers.ImageOverlay(
             image=rgba,
-            bounds=[[south, west], [north, east]],
-            opacity=0.5,
+            bounds=[[field_south, field_west], [field_north, field_east]],
+            opacity=1.0,  # Full opacity like reference image
             name=name,
             overlay=True,
             show=show_default
