@@ -1506,6 +1506,9 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lon = df[lonc].astype(float).values
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
+        
+        # Debug: Show sample of actual coordinates being used
+        st.info(f"📍 Sample coordinates: lon={pts_lon[:3]}, lat={pts_lat[:3]}")
 
         # CRITICAL: Yield grid bounds = actual yield data extent (source of truth)
         # Compute grid strictly from yield coordinate ranges
@@ -1967,9 +1970,21 @@ else:
     if fmin is not None:
         add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
-# Final fit using all active layers
+# Final fit using all active layers - prioritize yield data if available
 try:
-    south, west, north, east = compute_bounds_for_heatmaps()
+    # First try to use yield data bounds directly
+    if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        lat_vals = df_for_maps["Latitude"].dropna()
+        lon_vals = df_for_maps["Longitude"].dropna()
+        if len(lat_vals) > 0 and len(lon_vals) > 0:
+            south, north = lat_vals.min(), lat_vals.max()
+            west, east = lon_vals.min(), lon_vals.max()
+            st.info(f"✅ Map bounds from yield data: lat [{south:.6f}, {north:.6f}], lon [{west:.6f}, {east:.6f}]")
+        else:
+            south, west, north, east = compute_bounds_for_heatmaps()
+    else:
+        south, west, north, east = compute_bounds_for_heatmaps()
+    
     m.fit_bounds([[south, west], [north, east]])
 except Exception as e:
     st.warning(f"Auto-zoom fallback failed: {e}")
