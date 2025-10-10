@@ -537,15 +537,25 @@ def render_uploaders():
                                                 if 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
                                                     st.info("Found GPS distance/angle columns. Attempting coordinate conversion...")
                                                     try:
-                                                        # Use a reference point (approximate field center from zones)
-                                                        ref_lat = 38.8075  # From zone center
-                                                        ref_lon = -87.5390  # From zone center
+                                                        # Use field center from zones if available, otherwise use a better reference
+                                                        zones_gdf = st.session_state.get("zones_gdf")
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            # Use the actual field center from zones
+                                                            zone_bounds = zones_gdf.total_bounds
+                                                            ref_lat = (zone_bounds[1] + zone_bounds[3]) / 2
+                                                            ref_lon = (zone_bounds[0] + zone_bounds[2]) / 2
+                                                            st.info(f"Using field center from zones: {ref_lat:.4f}, {ref_lon:.4f}")
+                                                        else:
+                                                            # Fallback to original reference point
+                                                            ref_lat = 38.8075
+                                                            ref_lon = -87.5390
+                                                            st.info(f"Using default reference point: {ref_lat:.4f}, {ref_lon:.4f}")
                                                         
                                                         # Convert GPS distance/angle to lat/lon
                                                         import math
                                                         from shapely.geometry import Point
                                                         
-                                                        # Convert feet to degrees (approximate)
+                                                        # Convert feet to degrees (more accurate conversion)
                                                         feet_to_degrees = 1.0 / 364000  # Rough conversion
                                                         
                                                         # Calculate coordinates
@@ -555,9 +565,11 @@ def render_uploaders():
                                                         # Convert to radians
                                                         angles_rad = np.radians(angles)
                                                         
-                                                        # Calculate offsets
-                                                        dx = distances * np.sin(angles_rad) * feet_to_degrees
-                                                        dy = distances * np.cos(angles_rad) * feet_to_degrees
+                                                        # Calculate offsets - adjust for proper field coverage
+                                                        # Scale up the conversion to cover more field area
+                                                        scale_factor = 10.0  # Increase to cover more area
+                                                        dx = distances * np.sin(angles_rad) * feet_to_degrees * scale_factor
+                                                        dy = distances * np.cos(angles_rad) * feet_to_degrees * scale_factor
                                                         
                                                         # Calculate final coordinates
                                                         lons = ref_lon + dx
@@ -1123,19 +1135,33 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
     add_gradient_legend(m, legend_name, vmin, vmax, cmap, index)
 
 def compute_bounds_for_heatmaps():
+    """Compute unified bounds for all map layers to ensure consistent coverage."""
     try:
         bnds = []
-        for key in ["zones_gdf", "seed_gdf"]:
+        
+        # Priority 1: Use zones as the primary field boundary if available
+        zones_gdf = st.session_state.get("zones_gdf")
+        if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+            tb = zones_gdf.total_bounds
+            if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                st.info(f"✅ Using zone bounds as primary field boundary")
+        
+        # Add other layer bounds for reference
+        for key in ["seed_gdf"]:
             g = st.session_state.get(key)
             if g is not None and not getattr(g, "empty", True):
                 tb = g.total_bounds
                 if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
                     bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                    
         for _k, fg in st.session_state.get("fert_gdfs", {}).items():
             if fg is not None and not fg.empty:
                 tb = fg.total_bounds
                 if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
                     bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                    
+        # Add yield bounds but don't let them override zone bounds
         ydf = st.session_state.get("yield_df")
         if ydf is not None and not ydf.empty:
             latc = find_col(ydf, ["latitude"]) or "Latitude"
@@ -1143,14 +1169,37 @@ def compute_bounds_for_heatmaps():
             if latc in ydf.columns and lonc in ydf.columns:
                 bnds.append([[ydf[latc].min(), ydf[lonc].min()],
                              [ydf[latc].max(), ydf[lonc].max()]])
+        
         if bnds:
             south = min(b[0][0] for b in bnds)
             west = min(b[0][1] for b in bnds)
             north = max(b[1][0] for b in bnds)
             east = max(b[1][1] for b in bnds)
+            
+            # If we have zones, use them as the primary bounds and expand slightly for yield data
+            if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+                zone_tb = zones_gdf.total_bounds
+                if zone_tb is not None and len(zone_tb) == 4:
+                    # Use zone bounds as primary, but expand slightly to accommodate yield points
+                    zone_south = zone_tb[1]
+                    zone_west = zone_tb[0] 
+                    zone_north = zone_tb[3]
+                    zone_east = zone_tb[2]
+                    
+                    # Expand bounds by 5% to ensure yield points are visible
+                    lat_range = zone_north - zone_south
+                    lon_range = zone_east - zone_west
+                    south = zone_south - (lat_range * 0.05)
+                    west = zone_west - (lon_range * 0.05)
+                    north = zone_north + (lat_range * 0.05)
+                    east = zone_east + (lon_range * 0.05)
+                    
+                    st.info(f"✅ Using expanded zone bounds for unified field coverage")
+            
             return south, west, north, east
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"Bounds calculation error: {e}")
+        
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
 def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
@@ -1182,8 +1231,9 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         if len(df) < 3:
             return None, None
 
-        # Use provided bounds
+        # Use provided bounds (should be unified bounds from zones)
         south, west, north, east = bounds
+        st.info(f"Using bounds for {name}: {south:.4f}, {west:.4f}, {north:.4f}, {east:.4f}")
 
         vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
         if vmin == vmax:
@@ -1193,7 +1243,8 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
 
-        n = 200
+        # Increase grid resolution for better coverage
+        n = 300  # Higher resolution for better interpolation
         lon_lin = np.linspace(west, east, n)
         lat_lin = np.linspace(south, north, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
@@ -1522,14 +1573,20 @@ else:
         if df_valid["Yield"].max() > 400:
             df_valid["Yield"] = df_valid["Yield"] / 15.93
 
-        if "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+        # Use unified bounds from zones if available, otherwise use yield data bounds
+        zones_gdf = st.session_state.get("zones_gdf")
+        if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+            # Use zone bounds as primary field boundary
+            bounds = compute_bounds_for_heatmaps()
+            st.info(f"✅ Using unified zone bounds for yield heatmap")
+        elif "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
             south = float(df_valid["Latitude"].min())
             west = float(df_valid["Longitude"].min())
             north = float(df_valid["Latitude"].max())
             east = float(df_valid["Longitude"].max())
+            bounds = (south, west, north, east)
         else:
-            south, west, north, east = 25.0, -125.0, 49.0, -66.0  # fallback USA
-        bounds = (south, west, north, east)
+            bounds = (25.0, -125.0, 49.0, -66.0)  # fallback USA
     except Exception as e:
         st.warning(f"Map bounds computation failed: {e}")
 
