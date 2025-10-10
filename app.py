@@ -571,31 +571,75 @@ def render_uploaders():
                                                         # Convert GPS distance/angle to lat/lon with proper field coverage
                                                         from shapely.geometry import Point
                                                         
-                                                        # Rebuild coordinates relative to field polygon center
-                                                        # Use zones_gdf total_bounds for reference frame and scaling
+                                                        # CRITICAL: Calibrate reconstruction to fill actual field extent
+                                                        # Get field dimensions from zones_gdf for proper scaling
                                                         if zones_gdf is not None and not zones_gdf.empty:
                                                             xmin, ymin, xmax, ymax = zones_gdf.total_bounds
                                                             ref_lon = (xmin + xmax) / 2
                                                             ref_lat = (ymin + ymax) / 2
-                                                            scale_lon = (xmax - xmin) * 0.5
-                                                            scale_lat = (ymax - ymin) * 0.5
+                                                            field_width_degrees = xmax - xmin
+                                                            field_height_degrees = ymax - ymin
+                                                            st.info(f"Using field extent: width={field_width_degrees:.6f}°, height={field_height_degrees:.6f}°")
                                                         else:
-                                                            scale_lon = scale_lat = 0.005
+                                                            # Fallback to typical field size (~1 mile = 0.014 degrees)
+                                                            field_width_degrees = 0.014
+                                                            field_height_degrees = 0.014
+                                                            st.warning("No zones available - using default field dimensions")
                                                         
-                                                        # Convert angles to radians
-                                                        angles_rad = np.radians(gdf["Track_deg_"].astype(float))
-                                                        distances = pd.to_numeric(gdf["Distance_f"], errors="coerce").fillna(0)
+                                                        # Extract distance and angle data
+                                                        distances = pd.to_numeric(gdf["Distance_f"], errors="coerce").fillna(0).values
+                                                        angles = gdf["Track_deg_"].astype(float).values
                                                         
-                                                        # Normalize distances (0–1) across full dataset
+                                                        # Normalize distance to 0-1 range across full dataset
                                                         dist_min, dist_max = distances.min(), distances.max()
-                                                        norm_distances = (distances - dist_min) / (dist_max - dist_min + 1e-9)
+                                                        if dist_max > dist_min:
+                                                            norm_distances = (distances - dist_min) / (dist_max - dist_min)
+                                                        else:
+                                                            norm_distances = np.ones_like(distances) * 0.5
                                                         
-                                                        # Rebuild lat/lon pattern oriented correctly (sin for X, cos for Y)
-                                                        lons = ref_lon + (norm_distances - 0.5) * scale_lon * np.sin(angles_rad)
-                                                        lats = ref_lat + (norm_distances - 0.5) * scale_lat * np.cos(angles_rad)
+                                                        # Check if we have pass number for better reconstruction
+                                                        if 'Pass_Num' in gdf.columns:
+                                                            pass_nums = pd.to_numeric(gdf["Pass_Num"], errors="coerce").fillna(0).values
+                                                            max_pass = pass_nums.max()
+                                                            if max_pass > 0:
+                                                                # Use pass number for cross-track position
+                                                                norm_pass = pass_nums / max_pass
+                                                                # Reconstruct using distance along track and pass across track
+                                                                dx = (norm_distances - 0.5) * field_width_degrees
+                                                                dy = (norm_pass - 0.5) * field_height_degrees
+                                                                st.info("✅ Using Pass_Num for improved spatial reconstruction")
+                                                            else:
+                                                                # Use angle-based reconstruction
+                                                                angles_rad = np.radians(angles)
+                                                                dx = (norm_distances - 0.5) * field_width_degrees * np.sin(angles_rad)
+                                                                dy = (norm_distances - 0.5) * field_height_degrees * np.cos(angles_rad)
+                                                        else:
+                                                            # Use angle-based reconstruction with full field spread
+                                                            angles_rad = np.radians(angles)
+                                                            # Scale to fill field extent
+                                                            dx = (norm_distances - 0.5) * field_width_degrees * np.sin(angles_rad)
+                                                            dy = (norm_distances - 0.5) * field_height_degrees * np.cos(angles_rad)
+                                                        
+                                                        # Apply spatial calibration
+                                                        lons = ref_lon + dx
+                                                        lats = ref_lat + dy
+                                                        
+                                                        # Ensure reconstructed bounds match field extent (final calibration)
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            # Compute current extent
+                                                            lon_curr_min, lon_curr_max = lons.min(), lons.max()
+                                                            lat_curr_min, lat_curr_max = lats.min(), lats.max()
+                                                            
+                                                            # Scale to match field extent precisely
+                                                            lon_scale = field_width_degrees / (lon_curr_max - lon_curr_min + 1e-9)
+                                                            lat_scale = field_height_degrees / (lat_curr_max - lat_curr_min + 1e-9)
+                                                            
+                                                            # Apply scaling around center
+                                                            lons = ref_lon + (lons - ref_lon) * lon_scale * 0.95  # 95% to avoid edge overlap
+                                                            lats = ref_lat + (lats - ref_lat) * lat_scale * 0.95
                                                         
                                                         gdf.geometry = [Point(lon, lat) for lon, lat in zip(lons, lats)]
-                                                        st.info(f"✅ Reconstructed yield coordinates aligned to zone field bounds")
+                                                        st.info(f"✅ Reconstructed yield coordinates calibrated to field extent: {len(gdf)} points")
                                                         
                                                     except Exception as gps_error:
                                                         st.error(f"GPS conversion failed: {gps_error}")
