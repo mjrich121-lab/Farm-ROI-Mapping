@@ -487,21 +487,29 @@ def render_uploaders():
                         has_valid_coords = False
                         lat_col, lon_col = None, None
                         
-                        # Look for coordinate columns in attribute data
-                        for c in gdf.columns:
-                            c_lower = c.lower()
-                            if c_lower in ["y", "lat", "latitude", "northing", "y_coord", "ycoord"]:
-                                lat_col = c
-                            if c_lower in ["x", "lon", "long", "longitude", "easting", "x_coord", "xcoord"]:
-                                lon_col = c
+                        # DEBUG: Show all available columns
+                        st.info(f"🔍 Available columns in shapefile: {list(gdf.columns)}")
                         
-                        # Explicit uppercase fallback for John Deere / Ag Leader
-                        if not lat_col and "Y" in gdf.columns:
-                            lat_col = "Y"
-                        if not lon_col and "X" in gdf.columns:
+                        # EXPLICIT CHECK: Look for uppercase X and Y first (most common in equipment exports)
+                        if "X" in gdf.columns and "Y" in gdf.columns:
                             lon_col = "X"
+                            lat_col = "Y"
+                            st.info("✅ Found uppercase X and Y columns")
+                        elif "x" in gdf.columns and "y" in gdf.columns:
+                            lon_col = "x"
+                            lat_col = "y"
+                            st.info("✅ Found lowercase x and y columns")
+                        else:
+                            # Fallback: Look for coordinate columns in attribute data
+                            for c in gdf.columns:
+                                c_lower = c.lower()
+                                if lat_col is None and c_lower in ["y", "lat", "latitude", "northing", "y_coord", "ycoord"]:
+                                    lat_col = c
+                                if lon_col is None and c_lower in ["x", "lon", "long", "longitude", "easting", "x_coord", "xcoord"]:
+                                    lon_col = c
                         
                         if lat_col and lon_col:
+                            st.info(f"🎯 Using columns: {lon_col} (longitude), {lat_col} (latitude)")
                             try:
                                 gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
                                 gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
@@ -517,13 +525,18 @@ def render_uploaders():
                                         crs="EPSG:4326"
                                     )
                                     has_valid_coords = True
-                                    st.info(f"✅ Extracted {len(gdf)} points using coordinate columns: {lon_col}, {lat_col}")
+                                    st.success(f"✅ Extracted {len(gdf)} points using coordinate columns: {lon_col}, {lat_col}")
+                                    st.success(f"✅ Coordinate ranges: lon [{gdf['Longitude'].min():.6f}, {gdf['Longitude'].max():.6f}], lat [{gdf['Latitude'].min():.6f}, {gdf['Latitude'].max():.6f}]")
                                 else:
-                                    st.warning(f"⚠️ Columns {lon_col}, {lat_col} don't contain valid geographic coordinates")
+                                    st.error(f"❌ Columns {lon_col}, {lat_col} don't contain valid geographic coordinates")
+                                    st.error(f"   Lon range: [{gdf['Longitude'].min()}, {gdf['Longitude'].max()}]")
+                                    st.error(f"   Lat range: [{gdf['Latitude'].min()}, {gdf['Latitude'].max()}]")
                             except Exception as e:
-                                st.warning(f"Failed to extract coordinates from {lon_col}, {lat_col}: {e}")
+                                st.error(f"❌ Failed to extract coordinates from {lon_col}, {lat_col}: {e}")
                         else:
-                            st.warning(f"⚠️ No X/Y coordinate columns found in attribute data — geometry reconstruction will be inaccurate.")
+                            st.error(f"❌ No X/Y coordinate columns found in attribute data")
+                            st.error(f"   Available columns: {list(gdf.columns)}")
+                            st.error(f"   Geometry reconstruction will be INACCURATE")
 
                         # ✅ Extract coordinates from geometry (only if we don't have them from attribute table)
                         try:
