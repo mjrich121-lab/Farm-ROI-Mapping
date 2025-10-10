@@ -484,7 +484,32 @@ def render_uploaders():
 
                         # ✅ Extract coordinates from geometry
                         try:
-                            if gdf.geometry.is_empty.all():
+                            # PRIORITY 1: Check if valid Latitude/Longitude columns already exist
+                            has_valid_coords = False
+                            for lat_name in ['Latitude', 'latitude', 'Lat', 'lat', 'LATITUDE']:
+                                for lon_name in ['Longitude', 'longitude', 'Lon', 'lon', 'LONGITUDE']:
+                                    if lat_name in gdf.columns and lon_name in gdf.columns:
+                                        try:
+                                            lat_vals = pd.to_numeric(gdf[lat_name], errors='coerce').dropna()
+                                            lon_vals = pd.to_numeric(gdf[lon_name], errors='coerce').dropna()
+                                            if len(lat_vals) > 0 and len(lon_vals) > 0:
+                                                if (lat_vals.min() >= -90 and lat_vals.max() <= 90 and
+                                                    lon_vals.min() >= -180 and lon_vals.max() <= 180):
+                                                    st.info(f"✅ Found valid coordinates in columns: {lat_name}, {lon_name}")
+                                                    has_valid_coords = True
+                                                    # Use these directly - no geometry extraction needed
+                                                    gdf["Latitude"] = gdf[lat_name]
+                                                    gdf["Longitude"] = gdf[lon_name]
+                                                    break
+                                        except:
+                                            continue
+                                if has_valid_coords:
+                                    break
+                            
+                            if has_valid_coords:
+                                # Skip all geometry repair - we have valid coordinates
+                                st.info(f"✅ Using existing valid geographic coordinates from {yf.name}")
+                            elif gdf.geometry.is_empty.all():
                                 st.warning(f"All geometries are empty in {yf.name}")
                                 st.info("Attempting to repair geometries...")
                                 
@@ -658,11 +683,12 @@ def render_uploaders():
                                     messages.append(f"{yf.name}: geometry repair failed — skipped.")
                                     continue
                             
-                            # Extract coordinates using representative points
-                            reps = gdf.geometry.representative_point()
-                            gdf["Longitude"] = reps.x
-                            gdf["Latitude"] = reps.y
-                            st.info(f"✅ Extracted coordinates from {yf.name}")
+                            # Extract coordinates using representative points ONLY if we don't have valid ones
+                            if not has_valid_coords:
+                                reps = gdf.geometry.representative_point()
+                                gdf["Longitude"] = reps.x
+                                gdf["Latitude"] = reps.y
+                                st.info(f"✅ Extracted coordinates from geometry in {yf.name}")
                             
                         except Exception as e:
                             st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
@@ -1282,13 +1308,47 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         if df is None or df.empty:
             return None, None
 
-        # Find coord columns
+        # CRITICAL: Validate that coordinate columns contain true geographic data
+        def is_valid_lat(series):
+            """Check if series contains valid latitude values."""
+            try:
+                numeric = pd.to_numeric(series, errors="coerce").dropna()
+                if len(numeric) == 0:
+                    return False
+                return numeric.min() >= -90 and numeric.max() <= 90
+            except:
+                return False
+        
+        def is_valid_lon(series):
+            """Check if series contains valid longitude values."""
+            try:
+                numeric = pd.to_numeric(series, errors="coerce").dropna()
+                if len(numeric) == 0:
+                    return False
+                return numeric.min() >= -180 and numeric.max() <= 180
+            except:
+                return False
+        
+        # Find and validate coord columns
         latc = find_col(df, ["latitude"]) or "Latitude"
         lonc = find_col(df, ["longitude"]) or "Longitude"
+        
+        # Check if columns exist
         if latc not in df.columns or lonc not in df.columns:
-            # No coordinates => skip overlay (do not synthesize)
+            st.warning("⚠️ No valid geographic coordinates found in yield file; cannot render map.")
             return None, None
-
+        
+        # Validate that columns contain real geographic coordinates
+        if not is_valid_lat(df[latc]):
+            st.warning(f"⚠️ Column '{latc}' does not contain valid latitude values (-90 to 90)")
+            return None, None
+        
+        if not is_valid_lon(df[lonc]):
+            st.warning(f"⚠️ Column '{lonc}' does not contain valid longitude values (-180 to 180)")
+            return None, None
+        
+        st.info(f"✅ Validated geographic coordinates: '{latc}' and '{lonc}'")
+        
         # Sanitize and keep only good rows
         df = df.copy()
         df[latc] = pd.to_numeric(df[latc], errors="coerce")
@@ -1299,11 +1359,15 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 
         # Still nothing? skip
         if df.empty:
+            st.warning("⚠️ No valid yield points after coordinate validation")
             return None, None
 
-        # If fewer than 3 real points, skip heatmap entirely (no markers)
+        # If fewer than 3 real points, skip heatmap entirely
         if len(df) < 3:
+            st.warning(f"⚠️ Only {len(df)} valid points - need at least 3 for interpolation")
             return None, None
+
+        st.info(f"✅ Processing {len(df)} validated yield points with true GPS coordinates")
 
         # Use provided bounds (should be unified bounds from zones)
         south, west, north, east = bounds
