@@ -1298,11 +1298,14 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             field_bounds = [west, south, east, north]
             st.info("Using rectangular bounds (no field polygon available)")
         
-        # Use field bounds for interpolation
-        xmin, ymin, xmax, ymax = field_bounds
+        # Use field bounds for interpolation - prioritize zones_gdf
+        if zones_gdf is not None and not zones_gdf.empty:
+            xmin, ymin, xmax, ymax = zones_gdf.total_bounds
+        else:
+            xmin, ymin, xmax, ymax = field_bounds
         
         # Higher resolution for better detail
-        n = 200
+        n = 300
         lon_lin = np.linspace(xmin, xmax, n)
         lat_lin = np.linspace(ymin, ymax, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
@@ -1320,27 +1323,16 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         # Clip grid to field polygon if available
         if field_polygon is not None:
             try:
-                # Create mask for points inside field polygon
-                from shapely.geometry import Point
-                mask = np.zeros_like(grid, dtype=bool)
-                
-                for i in range(grid.shape[0]):
-                    for j in range(grid.shape[1]):
-                        point = Point(lon_grid[i, j], lat_grid[i, j])
-                        if field_polygon.contains(point):
-                            mask[i, j] = True
-                
-                # Apply mask - set outside points to NaN
-                grid_masked = grid.copy()
-                grid_masked[~mask] = np.nan
-                grid = grid_masked
-                st.info("Applied field polygon clipping to yield map")
+                from shapely.vectorized import contains
+                mask = contains(field_polygon, lon_grid, lat_grid)
+                grid = np.where(mask, grid, np.nan)
+                st.info("✅ Clipped yield heatmap to field polygon boundaries")
             except Exception as e:
-                st.warning(f"Field clipping failed, using full grid: {e}")
+                st.warning(f"Vectorized field clipping failed: {e}")
 
-        # Create yield map colormap (red to yellow to green)
+        # Create yield map colormap (professional red to yellow to green)
         yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
-            "yieldmap", ["#d7191c", "#fdae61", "#ffffbf", "#a6d96a", "#1a9641"]
+            "yieldmap", ["#d73027", "#fdae61", "#ffffbf", "#a6d96a", "#1a9850"]
         )
         
         # Apply colormap with full opacity
@@ -1348,10 +1340,16 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
-        # Add opaque yield map overlay using field bounds
+        # Add opaque yield map overlay using field bounds from zones
+        if zones_gdf is not None and not zones_gdf.empty:
+            zb = zones_gdf.total_bounds
+            bounds = [[zb[1], zb[0]], [zb[3], zb[2]]]
+        else:
+            bounds = [[ymin, xmin], [ymax, xmax]]
+
         folium.raster_layers.ImageOverlay(
             image=rgba,
-            bounds=[[ymin, xmin], [ymax, xmax]],
+            bounds=bounds,
             opacity=1.0,  # Full opacity like reference image
             name=name,
             overlay=True,
