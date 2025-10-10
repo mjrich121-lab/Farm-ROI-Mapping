@@ -1272,27 +1272,28 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
 
-        # Get field polygon for clipping if available
+        # CRITICAL: Yield grid bounds = actual yield data extent (source of truth)
+        # Compute grid strictly from yield coordinate ranges
+        xmin, xmax = df[lonc].min(), df[lonc].max()
+        ymin, ymax = df[latc].min(), df[latc].max()
+        
+        # Apply small buffer (2%) to avoid edge artifacts
+        lon_range = xmax - xmin
+        lat_range = ymax - ymin
+        buffer_pct = 0.02
+        xmin -= lon_range * buffer_pct
+        xmax += lon_range * buffer_pct
+        ymin -= lat_range * buffer_pct
+        ymax += lat_range * buffer_pct
+        
+        st.info(f"✅ Yield grid bounds from actual data: lon [{xmin:.6f}, {xmax:.6f}], lat [{ymin:.6f}, {ymax:.6f}]")
+        
+        # Zones are ONLY used as an optional clipping mask, not for grid generation
         zones_gdf = st.session_state.get("zones_gdf")
         field_polygon = None
-        field_bounds = None
-        
         if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
-            # Use field polygon bounds for proper clipping
-            field_bounds = zones_gdf.total_bounds
-            # Combine all zone polygons into one field boundary
             field_polygon = zones_gdf.geometry.unary_union
-            st.info("Using field polygon for yield map clipping")
-        else:
-            # Fallback to rectangular bounds
-            field_bounds = [west, south, east, north]
-            st.info("Using rectangular bounds (no field polygon available)")
-        
-        # Use field bounds for interpolation - prioritize zones_gdf
-        if zones_gdf is not None and not zones_gdf.empty:
-            xmin, ymin, xmax, ymax = zones_gdf.total_bounds
-        else:
-            xmin, ymin, xmax, ymax = field_bounds
+            st.info("✅ Zone polygon available - will apply as clipping mask after interpolation")
         
         # Higher resolution for better detail
         n = 300
@@ -1310,7 +1311,7 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             valid_mean = np.nanmean(vals_ok)
             grid = np.where(np.isnan(grid), valid_mean, grid)
 
-        # Clip grid to field polygon if available
+        # Clip grid to field polygon if available (conditional masking)
         if field_polygon is not None:
             try:
                 from shapely.vectorized import contains
@@ -1320,31 +1321,32 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             except Exception as e:
                 st.warning(f"Vectorized field clipping failed: {e}")
 
-        # Create yield map colormap (professional red to yellow to green)
-        yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
-            "yieldmap", ["#d73027", "#fdae61", "#ffffbf", "#a6d96a", "#1a9850"]
-        )
+        # Create 5-class red-to-green yield colormap with boundary normalization
+        yield_cmap = mpl_colors.ListedColormap(["#a50026", "#d73027", "#fdae61", "#a6d96a", "#1a9850"])
         
-        # Apply colormap with full opacity
-        rgba = yield_cmap((grid - vmin) / (vmax - vmin))
+        # Use percentile-based boundaries for better visual distribution
+        p5, p95 = np.nanpercentile(grid, [5, 95])
+        boundaries = np.linspace(p5, p95, 6)
+        norm = mpl_colors.BoundaryNorm(boundaries, yield_cmap.N)
+        
+        # Apply colormap with boundary normalization
+        rgba = yield_cmap(norm(grid))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
-        # Add opaque yield map overlay using field bounds from zones
-        if zones_gdf is not None and not zones_gdf.empty:
-            zb = zones_gdf.total_bounds
-            bounds = [[zb[1], zb[0]], [zb[3], zb[2]]]
-        else:
-            bounds = [[ymin, xmin], [ymax, xmax]]
-
+        # Add opaque yield map overlay using actual yield data bounds
+        overlay_bounds = [[ymin, xmin], [ymax, xmax]]
+        
         folium.raster_layers.ImageOverlay(
             image=rgba,
-            bounds=bounds,
-            opacity=1.0,  # Full opacity like reference image
+            bounds=overlay_bounds,
+            opacity=1.0,
             name=name,
             overlay=True,
             show=show_default
         ).add_to(m)
+        
+        st.info(f"✅ Added {name} overlay with true measured data extent")
 
         return vmin, vmax
 
