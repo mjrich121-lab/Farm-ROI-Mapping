@@ -532,7 +532,6 @@ def render_uploaders():
                                 st.info("Checking for coordinate columns in attribute table...")
                                 
                                 # PRIORITY: Extract coordinates from attribute table (common in John Deere/Ag Leader files)
-                                coord_candidates = [c.lower() for c in gdf.columns]
                                 lat_col = None
                                 lon_col = None
                                 
@@ -540,15 +539,17 @@ def render_uploaders():
                                 for c in gdf.columns:
                                     c_lower = c.lower()
                                     # Latitude candidates
-                                    if lat_col is None and (c_lower in ['y', 'lat', 'latitude', 'northing'] or 
-                                                            c_lower.startswith('y_') or 
-                                                            'latitude' in c_lower or 'lat' == c_lower):
+                                    if c_lower in ["y", "lat", "latitude", "northing", "y_coord", "ycoord"]:
                                         lat_col = c
                                     # Longitude candidates  
-                                    if lon_col is None and (c_lower in ['x', 'lon', 'long', 'longitude', 'easting'] or 
-                                                            c_lower.startswith('x_') or 
-                                                            'longitude' in c_lower or 'lon' == c_lower):
+                                    if c_lower in ["x", "lon", "long", "longitude", "easting", "x_coord", "xcoord"]:
                                         lon_col = c
+                                
+                                # Check for exact "Y" and "X" if not found (case-sensitive for some formats)
+                                if not lat_col and "Y" in gdf.columns:
+                                    lat_col = "Y"
+                                if not lon_col and "X" in gdf.columns:
+                                    lon_col = "X"
                                 
                                 if lat_col and lon_col:
                                     try:
@@ -559,8 +560,8 @@ def render_uploaders():
                                         # Validate that these are geographic coordinates
                                         if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
                                             gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
-                                            st.info(f"✅ Using coordinate columns from attribute table: {lat_col}, {lon_col}")
-                                            st.info(f"✅ Extracted {len(gdf)} valid GPS points")
+                                            st.info(f"✅ Using true coordinate columns from attribute table: {lon_col}, {lat_col}")
+                                            st.info(f"✅ Extracted {len(gdf)} valid GPS points from attribute data")
                                             
                                             # Create geometry from these coordinates
                                             gdf = gpd.GeoDataFrame(
@@ -626,9 +627,9 @@ def render_uploaders():
                                             else:
                                                 # Method 4: Try to convert GPS distance/angle to coordinates
                                                 # ONLY if we don't already have valid coords from attribute table
-                                                if not has_valid_coords:
-                                                    st.info("No coordinate columns found. Checking for GPS distance/angle data...")
-                                                if not has_valid_coords and 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
+                                                if has_valid_coords:
+                                                    st.info("✅ Skipping coordinate reconstruction (true coordinates already loaded).")
+                                                elif 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
                                                     st.info("Found GPS distance/angle columns. Attempting coordinate conversion...")
                                                     try:
                                                         # Use field center from any available layer, with smart fallback
@@ -768,25 +769,41 @@ def render_uploaders():
                         # Save the gdf with coordinates to session state
                         st.session_state["_yield_gdf_raw"] = gdf
 
-                    # --- Detect yield column ---
-                    yield_col = None
-                    for c in df.columns:
-                        c_clean = c.strip().lower().replace(" ", "_")
-                        if c_clean in YIELD_PREFS:
-                            yield_col = c
-                            break
+                    # --- Detect yield column (universal brand support) ---
+                    # Support Ag Leader, John Deere, Case IH, and other formats
+                    preferred_yield_cols = [
+                        "Yld_Vol_Dr", "Dry_Yield", "Yield_Volume_Dry", "Yield_buac",
+                        "DryYield_buac", "Yld_Mass_Dr", "Yield", "Yld_Vol_We", "Crop_Flw_M",
+                        "Yld_Mass_D", "dry_yield", "DRY_YIELD", "YIELD", "Yield_Dry",
+                        "Dry_Yield_Volume", "yld_vol_dr", "yld_mass_dr"
+                    ]
                     
-                    # If no exact match, try partial matches
+                    # First try exact match
+                    yield_col = next((c for c in preferred_yield_cols if c in df.columns), None)
+                    
+                    # If no exact match, try case-insensitive
+                    if not yield_col:
+                        col_map = {c.lower(): c for c in df.columns}
+                        for pref in preferred_yield_cols:
+                            if pref.lower() in col_map:
+                                yield_col = col_map[pref.lower()]
+                                break
+                    
+                    # If still no match, try partial matching
                     if not yield_col:
                         for c in df.columns:
-                            c_clean = c.strip().lower().replace(" ", "_")
-                            if "crop_flw" in c_clean or "yld_mass" in c_clean or "yld_vol" in c_clean:
+                            c_lower = c.lower()
+                            if ("yld" in c_lower and ("dry" in c_lower or "vol" in c_lower or "mass" in c_lower)) or \
+                               ("yield" in c_lower and "dry" in c_lower) or \
+                               "crop_flw" in c_lower:
                                 yield_col = c
                                 break
+                    
                     if not yield_col:
                         messages.append(f"{yf.name}: no recognized yield column — skipped.")
+                        st.warning(f"⚠️ No valid yield column found in {yf.name}")
                         st.warning(f"Available columns: {list(df.columns)}")
-                        st.warning(f"Looking for yield columns: {YIELD_PREFS}")
+                        st.warning(f"Looking for patterns: Yld_Vol_Dr, Dry_Yield, Yield_buac, etc.")
                         continue
                     
                     st.info(f"✅ Using yield column: '{yield_col}'")
