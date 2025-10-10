@@ -1,5 +1,5 @@
 # =========================================================
-# Farm Profit Mapping Tool V4 — WORKING LOGIC + COMPACT LAYOUT
+# Farm Profit Mapping Tool V4 - WORKING LOGIC + COMPACT LAYOUT
 # =========================================================
 import os
 import io
