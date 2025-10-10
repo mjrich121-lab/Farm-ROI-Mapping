@@ -1282,27 +1282,29 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
 
-        # Create proper yield map with realistic field dimensions
-        # Use square aspect ratio for realistic field coverage
-        lat_range = north - south
-        lon_range = east - west
-        max_range = max(lat_range, lon_range)
+        # Get field polygon for clipping if available
+        zones_gdf = st.session_state.get("zones_gdf")
+        field_polygon = None
+        field_bounds = None
         
-        # Center the field and make it square
-        center_lat = (south + north) / 2
-        center_lon = (west + east) / 2
-        half_range = max_range / 2
+        if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+            # Use field polygon bounds for proper clipping
+            field_bounds = zones_gdf.total_bounds
+            # Combine all zone polygons into one field boundary
+            field_polygon = zones_gdf.geometry.unary_union
+            st.info("Using field polygon for yield map clipping")
+        else:
+            # Fallback to rectangular bounds
+            field_bounds = [west, south, east, north]
+            st.info("Using rectangular bounds (no field polygon available)")
         
-        # Create square field bounds
-        field_south = center_lat - half_range
-        field_north = center_lat + half_range
-        field_west = center_lon - half_range
-        field_east = center_lon + half_range
+        # Use field bounds for interpolation
+        xmin, ymin, xmax, ymax = field_bounds
         
         # Higher resolution for better detail
         n = 200
-        lon_lin = np.linspace(field_west, field_east, n)
-        lat_lin = np.linspace(field_south, field_north, n)
+        lon_lin = np.linspace(xmin, xmax, n)
+        lat_lin = np.linspace(ymin, ymax, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
         # Interpolate yield data
@@ -1315,6 +1317,27 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             valid_mean = np.nanmean(vals_ok)
             grid = np.where(np.isnan(grid), valid_mean, grid)
 
+        # Clip grid to field polygon if available
+        if field_polygon is not None:
+            try:
+                # Create mask for points inside field polygon
+                from shapely.geometry import Point
+                mask = np.zeros_like(grid, dtype=bool)
+                
+                for i in range(grid.shape[0]):
+                    for j in range(grid.shape[1]):
+                        point = Point(lon_grid[i, j], lat_grid[i, j])
+                        if field_polygon.contains(point):
+                            mask[i, j] = True
+                
+                # Apply mask - set outside points to NaN
+                grid_masked = grid.copy()
+                grid_masked[~mask] = np.nan
+                grid = grid_masked
+                st.info("Applied field polygon clipping to yield map")
+            except Exception as e:
+                st.warning(f"Field clipping failed, using full grid: {e}")
+
         # Create yield map colormap (red to yellow to green)
         yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
             "yieldmap", ["#d7191c", "#fdae61", "#ffffbf", "#a6d96a", "#1a9641"]
@@ -1325,10 +1348,10 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
-        # Add opaque yield map overlay
+        # Add opaque yield map overlay using field bounds
         folium.raster_layers.ImageOverlay(
             image=rgba,
-            bounds=[[field_south, field_west], [field_north, field_east]],
+            bounds=[[ymin, xmin], [ymax, xmax]],
             opacity=1.0,  # Full opacity like reference image
             name=name,
             overlay=True,
