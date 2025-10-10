@@ -1,56 +1,2208 @@
-Excellent — that’s exactly right. Since the **Farm Profit Mapping Tool** runs as a **cloud-hosted Streamlit app** for public users, we must make sure:
+# =========================================================
+# Farm Profit Mapping Tool V4 — WORKING LOGIC + COMPACT LAYOUT
+# =========================================================
+import os
+import io
+import zipfile
+import tempfile
+from typing import Optional
 
-* It **auto-installs and uses `alphashape` when available**,
-* It **never crashes or hangs** if the library isn’t present, and
-* It **falls back** cleanly to the convex-hull method if installation fails (for example, when a restricted environment blocks `pip`).
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
 
-Below is the **production-safe snippet** that you can drop directly near the top of your app (right after your imports and before you start processing shapefiles):
+from scipy.interpolate import griddata
+import streamlit as st
+import folium
+from streamlit_folium import st_folium
+from branca.element import MacroElement, Template
+from matplotlib import colors as mpl_colors
+from shapely.geometry import Point
 
----
-
-### ✅ Bulletproof Cloud Auto-Installer for `alphashape`
-
-```python
-# === OPTIONAL: Auto-install alphashape if missing ===
+# ===========================
+# ALPHASHAPE AUTO-INSTALLER (Cloud-Safe)
+# ===========================
 try:
     import alphashape
     ALPHA_OK = True
 except ModuleNotFoundError:
     try:
-        import subprocess, sys
+        import subprocess
+        import sys
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "alphashape", "--quiet"],
-            check=True
+            check=True,
+            timeout=60
         )
         import alphashape
         ALPHA_OK = True
-        print("✅ alphashape installed successfully.")
+        st.success("✅ alphashape installed successfully")
     except Exception as e:
-        print(f"⚠️ alphashape unavailable ({e}); using convex hull fallback.")
+        st.warning(f"⚠️ alphashape unavailable ({str(e)[:50]}); using convex hull fallback")
         ALPHA_OK = False
-```
 
-Then, in your map-building section, replace your current check with:
+# Clear caches
+st.cache_data.clear()
+st.cache_resource.clear()
 
-```python
-if ALPHA_OK:
-    boundary = alphashape.alphashape(points, alpha=0.0025)
-    print("✅ Created alpha-shape harvest boundary (α=0.0025)")
+# ===========================
+# COMPACT THEME + LAYOUT
+# ===========================
+def apply_compact_theme():
+    st.set_page_config(page_title="Farm ROI Tool V4", layout="wide")
+    st.title("Farm Profit Mapping Tool V4")
+
+# ===========================
+# HELPERS
+# ===========================
+import re
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(s).lower()).strip("_")
+
+def pick_col(df: pd.DataFrame, preferred: list[str]) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    norm_map = {_norm(c): c for c in df.columns}
+    # exact / preferred order first
+    for key in preferred:
+        if key in norm_map:
+            return norm_map[key]
+    # then fuzzy contains "yield" / "yld"
+    for k, orig in norm_map.items():
+        if "yield" in k or re.search(r"\byld\b", k):
+            return orig
+    return None
+
+YIELD_PREFS = [
+    "yield", "yld_vol_dr", "yld_mass_dr", "yield_dry", "dry_yield",
+    "yld_vol_wt", "yld_mass_wt", "wet_yield", "crop_flw_m"
+]
+
+LAT_PREFS = [
+    "latitude", "lat", "point_y", "y", "ycoord", "y_coord", "northing", "north"
+]
+
+LON_PREFS = [
+    "longitude", "lon", "long", "point_x", "x", "xcoord", "x_coord", "easting", "east"
+]
+
+def auto_height(df: pd.DataFrame, row_h: int = 36, header: int = 44, pad: int = 16) -> int:
+    n = max(1, len(df))
+    return int(header + n * row_h + pad)
+
+def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) -> int:
+    return int(header + max(1, nrows) * row_h + pad)
+
+def find_col(df: pd.DataFrame, names) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    norm = {c.lower().replace(" ", "_"): c for c in df.columns}
+    for n in names:
+        key = n.lower().replace(" ", "_")
+        if key in norm:
+            return norm[key]
+    return None
+
+def df_to_gdf(df: pd.DataFrame, lat_col: str = None, lon_col: str = None, crs: str = "EPSG:4326") -> Optional[gpd.GeoDataFrame]:
+    """Convert DataFrame to GeoDataFrame with robust lat/lon detection."""
+    if df is None or df.empty:
+        return None
+
+    if lat_col is None or lon_col is None:
+        # Common candidates for lat/lon columns
+        candidates = {"lat": ["lat", "latitude", "y"], "lon": ["lon", "longitude", "long", "x"]}
+        found_lat, found_lon = None, None
+        for c in df.columns:
+            cl = c.lower()
+            if any(k == cl or cl.startswith(k) for k in candidates["lat"]):
+                found_lat = c
+            if any(k == cl or cl.startswith(k) for k in candidates["lon"]):
+                found_lon = c
+        lat_col = found_lat
+        lon_col = found_lon
+
+    if lat_col is None or lon_col is None:
+        st.warning("Latitude/Longitude columns not found — returning None.")
+        return None
+
+    try:
+        gdf = gpd.GeoDataFrame(df.copy(), geometry=[Point(xy) for xy in zip(df[lon_col].astype(float), df[lat_col].astype(float))], crs=crs)
+        return gdf
+    except Exception as e:
+        st.error(f"Failed to convert to GeoDataFrame: {e}")
+        return None
+
+def safe_read_csv(uploaded_file) -> Optional[pd.DataFrame]:
+    """Safely read CSV file with encoding fallback."""
+    try:
+        if uploaded_file is None:
+            return None
+        return pd.read_csv(uploaded_file)
+    except Exception:
+        try:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, encoding="latin1")
+        except Exception:
+            st.error("Failed to parse CSV. Ensure it's a valid comma-separated file.")
+            return None
+
+# =========================================================
+# HARDENED load_vector_file (recursive + best shapefile select)
+# =========================================================
+def load_vector_file(uploaded_file):
+    """
+    Read GeoJSON/JSON/ZIP(SHP)/SHP into EPSG:4326 GeoDataFrame.
+    Recursively searches ZIPs for nested .shp files and picks the best candidate.
+    """
+    try:
+        name = uploaded_file.name.lower()
+
+        if name.endswith((".geojson", ".json")):
+            gdf = gpd.read_file(uploaded_file)
+
+        elif name.endswith(".zip"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zpath = os.path.join(tmpdir, "in.zip")
+                with open(zpath, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                with zipfile.ZipFile(zpath, "r") as zf:
+                    zf.extractall(tmpdir)
+
+                shp_candidates = []
+                for root, _, files in os.walk(tmpdir):
+                    for fn in files:
+                        if fn.lower().endswith(".shp"):
+                            shp_candidates.append(os.path.join(root, fn))
+                if not shp_candidates:
+                    return None
+
+                chosen = None
+                best_score = -1.0
+                for shp in shp_candidates:
+                    try:
+                        base = os.path.splitext(shp)[0]
+                        if not (os.path.exists(base + ".dbf") or os.path.exists(base + ".DBF")):
+                            continue
+                        g = gpd.read_file(shp)
+                        if g is None or g.empty:
+                            continue
+                        cols_lower = [c.lower() for c in g.columns]
+                        has_yield = any(k in cols_lower for k in [
+                            "yield","dry_yield","wet_yield","yld_mass_dr","yld_vol_dr",
+                            "yld_mass_wt","yld_vol_wt","crop_flw_m","yield_dry","yield_wet"
+                        ])
+                        is_point = g.geom_type.astype(str).str.contains("Point",case=False).any()
+                        score = (2 if has_yield else 0) + (1 if is_point else 0) + min(len(g),2000)/2000.0
+                        if score > best_score:
+                            best_score = score
+                            chosen = g
+                    except Exception:
+                        continue
+                gdf = chosen
+
+        elif name.endswith(".shp"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                shp_path = os.path.join(tmpdir, os.path.basename(uploaded_file.name))
+                with open(shp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                gdf = gpd.read_file(shp_path)
+        else:
+            return None
+
+        if gdf is None or gdf.empty:
+            return None
+
+        try:
+            if gdf.crs is None:
+                gdf.set_crs(epsg=4326, inplace=True)  # best-effort default if missing
+            elif getattr(gdf.crs, "is_projected", False):
+                gdf = gdf.to_crs(epsg=4326)
+        except Exception:
+            pass
+
+        # geometry hardening - SKIP for Point geometries (buffer corrupts them)
+        try:
+            # Only apply buffer to Polygon/MultiPolygon geometries
+            if not gdf.geometry.geom_type.isin(["Point", "MultiPoint"]).all():
+                gdf["geometry"] = gdf.geometry.buffer(0)
+                st.info("✅ Applied buffer(0) to polygon geometries")
+            else:
+                st.info("✅ Skipping buffer for Point geometries (preserves coordinates)")
+        except Exception:
+            pass
+        
+        # Only explode MultiPolygon/MultiPoint - NOT regular Points
+        try:
+            if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
+                gdf = gdf.explode(index_parts=False, ignore_index=True)
+                st.info("✅ Exploded multi-part geometries")
+            else:
+                st.info("✅ Skipping explode for Point geometries")
+        except TypeError:
+            if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
+                gdf = gdf.explode().reset_index(drop=True)
+
+        return gdf
+
+    except Exception as e:
+        st.warning(f"Vector read failure for {uploaded_file.name}: {e}")
+        return None
+
+# =========================================================
+# DEBUG REPORT for any loaded GeoDataFrame
+# =========================================================
+def debug_report_gdf(gdf: gpd.GeoDataFrame, label: str):
+    """Sidebar/expander debug: CRS, geometry types, columns, sample rows."""
+    if gdf is None or getattr(gdf, "empty", True):
+        return
+    try:
+        with st.expander(f"Debug · {label}", expanded=False):
+            st.write({
+                "rows": len(gdf),
+                "crs": str(gdf.crs),
+                "geom_types": gdf.geom_type.value_counts().to_dict()
+                if hasattr(gdf, "geom_type") else "N/A",
+                "total_bounds": getattr(gdf, "total_bounds", None),
+            })
+            st.write("Columns:", list(gdf.columns))
+            st.write(gdf.head(5))
+    except Exception:
+        pass
+
+# =========================================================
+# process_prescription and bootstrap (unchanged)
+# =========================================================
+def process_prescription(file, prescrip_type="fertilizer"):
+    """
+    Returns: (grouped_table, original_gdf_or_None)
+    grouped_table columns: product, Acres, CostTotal, CostPerAcre
+    """
+    if file is None:
+        return pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"]), None
+    try:
+        name = file.name.lower()
+        gdf_orig = None
+        if name.endswith((".geojson", ".json", ".zip", ".shp")):
+            gdf = load_vector_file(file)
+            if gdf is None or gdf.empty:
+                st.error(f"Could not read {prescrip_type} map.")
+                return pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"]), None
+            gdf.columns = [c.strip().lower().replace(" ", "_") for c in gdf.columns]
+            gdf_orig = gdf.copy()
+            try:
+                reps = gdf.geometry.representative_point()
+                gdf["Longitude"] = reps.x
+                gdf["Latitude"]  = reps.y
+            except Exception:
+                gdf["Longitude"], gdf["Latitude"] = np.nan, np.nan
+            df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+        else:
+            df = pd.read_csv(file)
+            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+
+        if "product" not in df.columns:
+            for c in ["variety", "hybrid", "type", "name", "material", "blend"]:
+                if c in df.columns:
+                    df.rename(columns={c: "product"}, inplace=True)
+                    break
+            else:
+                df["product"] = prescrip_type.capitalize()
+        if "acres" not in df.columns:
+            df["acres"] = 0.0
+        if "costtotal" not in df.columns:
+            if {"price_per_unit", "units"}.issubset(df.columns):
+                df["costtotal"] = pd.to_numeric(df["price_per_unit"], errors="coerce").fillna(0) * \
+                                  pd.to_numeric(df["units"], errors="coerce").fillna(0)
+            elif {"rate", "price"}.issubset(df.columns):
+                df["costtotal"] = pd.to_numeric(df["rate"], errors="coerce").fillna(0) * \
+                                  pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            else:
+                df["costtotal"] = 0.0
+
+        if df.empty:
+            return pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"]), gdf_orig
+
+        grouped = df.groupby("product", as_index=False).agg(
+            Acres=("acres", "sum"), CostTotal=("costtotal", "sum")
+        )
+        grouped["CostPerAcre"] = grouped.apply(
+            lambda r: r["CostTotal"] / r["Acres"] if r["Acres"] > 0 else 0, axis=1
+        )
+        return grouped, gdf_orig
+    except Exception as e:
+        st.warning(f"Failed to read {file.name}: {e}")
+        return pd.DataFrame(columns=["product", "Acres", "CostTotal", "CostPerAcre"]), None
+
+def _bootstrap_defaults():
+    """Ensure all keys exist so nothing crashes."""
+    for k in ["chem", "ins", "insect", "fert", "seed", "rent", "mach", "labor", "col", "fuel", "int", "truck"]:
+        st.session_state.setdefault(k, 0.0)
+    st.session_state.setdefault("corn_yield", 200.0)
+    st.session_state.setdefault("corn_price", 5.0)
+    st.session_state.setdefault("bean_yield", 60.0)
+    st.session_state.setdefault("bean_price", 12.0)
+    st.session_state.setdefault("sell_price", st.session_state["corn_price"])
+    st.session_state.setdefault("target_yield", 200.0)
+    st.session_state.setdefault("fixed_products", pd.DataFrame(
+        {"Type": ["Seed", "Fertilizer"], "Product": ["", ""], "Rate": [0.0, 0.0],
+         "CostPerUnit": [0.0, 0.0], "$/ac": [0.0, 0.0]}
+    ))
+    st.session_state.setdefault("yield_df", pd.DataFrame())
+    st.session_state.setdefault("fert_layers_store", {})
+    st.session_state.setdefault("seed_layers_store", {})
+    st.session_state.setdefault("fert_gdfs", {})
+    st.session_state.setdefault("seed_gdf", None)
+    st.session_state.setdefault("zones_gdf", None)
+    st.session_state.setdefault("expenses_dict", {})
+    st.session_state.setdefault("base_expenses_per_acre", 0.0)
+
+# =========================================================
+# UI: Uploaders row + summaries (FULLY HARDENED VERSION)
+# =========================================================
+def render_uploaders():
+    st.subheader("Upload Maps")
+    u1, u2, u3, u4 = st.columns(4)
+
+    # ------------------------- ZONES -------------------------
+    with u1:
+        st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
+        zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
+                                     key="up_zone", accept_multiple_files=False)
+        if zone_file:
+            zones_gdf = load_vector_file(zone_file)
+            if zones_gdf is not None and not zones_gdf.empty:
+                st.info(f"✅ Loaded zones: {len(zones_gdf)} features")
+                st.info(f"Zone columns: {list(zones_gdf.columns)}")
+                
+                # Look for zone ID column first
+                zone_col = next((c for c in ["Zone_ID", "zone_id", "ZONE_ID", "Zone", "zone", "ZONE", "Name", "name"]
+                                 if c in zones_gdf.columns), None)
+                if not zone_col:
+                    zones_gdf["Zone"] = range(1, len(zones_gdf) + 1)
+                    zone_col = "Zone"
+                
+                # Group by zone ID to combine features with same zone
+                if zone_col in zones_gdf.columns:
+                    st.info(f"Grouping {len(zones_gdf)} features by {zone_col}")
+                    zones_gdf = zones_gdf.dissolve(by=zone_col, aggfunc='first')
+                    zones_gdf["Zone"] = zones_gdf.index
+                    st.info(f"✅ Grouped into {len(zones_gdf)} zones")
+                else:
+                    zones_gdf["Zone"] = zones_gdf[zone_col]
+                
+                st.info(f"Zone values: {sorted(zones_gdf['Zone'].unique())}")
+
+                g2 = zones_gdf.copy()
+                if g2.crs is None:
+                    g2.set_crs(epsg=4326, inplace=True)
+                if g2.crs.is_geographic:
+                    g2 = g2.to_crs(epsg=5070)
+                zones_gdf["Calculated Acres"] = (g2.geometry.area * 0.000247105).astype(float)
+                zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"].astype(float)
+
+                disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
+                edited = st.data_editor(
+                    disp,
+                    num_rows="fixed", hide_index=True, use_container_width=True,
+                    column_config={
+                        "Zone": st.column_config.TextColumn(disabled=True),
+                        "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
+                        "Override Acres": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    height=df_px_height(len(disp)),
+                )
+                edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
+                    .fillna(edited["Calculated Acres"])
+                zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
+                st.caption(
+                    f"Zones: {len(zones_gdf)} | Calc: {zones_gdf['Calculated Acres'].sum():,.2f} ac | "
+                    f"Override: {zones_gdf['Override Acres'].sum():,.2f} ac"
+                )
+                st.session_state["zones_gdf"] = zones_gdf
+            else:
+                st.error("Could not read zone file.")
+        else:
+            st.caption("No zone file uploaded.")
+
+    # ------------------------- YIELD -------------------------
+    with u2:
+        st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
+        yield_files = st.file_uploader(
+            "Yield", type=["zip", "shp", "geojson", "json", "csv"],
+            key="up_yield", accept_multiple_files=True
+        )
+
+        st.session_state["yield_df"] = pd.DataFrame()
+
+        if yield_files:
+            frames, messages = [], []
+
+            YIELD_PREFS = [
+                "yld_vol_dr", "yld_mass_dr", "dry_yield", "dry_yld", "yield",
+                "harvestyield", "crop_yield", "yld_bu_ac", "prod_yield", "yld_bu_per_ac",
+                "crop_flw_m", "yld_mass_w", "yld_vol_we"
+            ]
+
+            for yf in yield_files:
+                try:
+                    name = yf.name.lower()
+                    df, gdf = None, None
+
+                    # --- CSV ---
+                    if name.endswith(".csv"):
+                        df = safe_read_csv(yf)
+                        if df is not None and not df.empty:
+                            df.columns = [c.strip() for c in df.columns]
+                            
+                            # Check if geometry column exists (for CSV with POINT data)
+                            if "geometry" in df.columns:
+                                try:
+                                    # Convert POINT strings to actual geometry
+                                    from shapely import wkt
+                                    df["geometry"] = df["geometry"].apply(lambda x: wkt.loads(x) if isinstance(x, str) else x)
+                                    gdf = gpd.GeoDataFrame(df, crs="EPSG:4326")
+                                    
+                                    # Extract coordinates from geometry
+                                    reps = gdf.geometry.representative_point()
+                                    gdf["Longitude"] = reps.x
+                                    gdf["Latitude"] = reps.y
+                                    st.info(f"✅ Extracted coordinates from geometry column in {yf.name}")
+                                    
+                                    st.session_state["_yield_gdf_raw"] = gdf
+                                    df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                    
+                                except Exception as e:
+                                    st.warning(f"Could not parse geometry column: {e}")
+                                    # Fallback to regular lat/lon detection
+                                    gdf = df_to_gdf(df)
+                                    if gdf is not None:
+                                        st.session_state["_yield_gdf_raw"] = gdf
+                                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                    else:
+                                        messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                                        continue
+                            else:
+                                # No geometry column, try regular lat/lon detection
+                                gdf = df_to_gdf(df)
+                                if gdf is not None:
+                                    st.session_state["_yield_gdf_raw"] = gdf
+                                    df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                                else:
+                                    messages.append(f"{yf.name}: no valid lat/lon columns found — skipped.")
+                                    continue
+                        else:
+                            messages.append(f"{yf.name}: could not read CSV — skipped.")
+                            continue
+
+                    # --- SHP/GEOJSON/ZIP(SHP) ---
+                    else:
+                        # ============================================================
+                        # TRUE POINT GEOMETRY OVERRIDE — FINAL FIX
+                        # ============================================================
+                        gdf = load_vector_file(yf)
+                        if gdf is None or gdf.empty:
+                            messages.append(f"{yf.name}: could not load geometry — skipped.")
+                            continue
+                        
+                        # Debug: show what's in the shapefile
+                        st.info(f"✅ Loaded yield shapefile: {len(gdf)} features")
+                        st.info(f"📋 Available columns: {list(gdf.columns)}")
+                        st.info(f"🔍 Geometry types (initial): {gdf.geometry.geom_type.value_counts().to_dict()}")
+                        st.info(f"📍 Empty geometries: {gdf.geometry.is_empty.sum()}")
+                        st.info(f"🗺️ CRS: {gdf.crs}")
+
+                        # ✅ Ensure WGS84 CRS
+                        if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
+                            try:
+                                gdf = gdf.to_crs(epsg=4326)
+                                st.info("✅ Converted to EPSG:4326")
+                            except Exception as e:
+                                st.warning(f"CRS conversion failed for {yf.name}: {e}")
+
+                        # ======================================================
+                        # ABSOLUTE PRIORITY: Extract coordinates from geometry
+                        # ======================================================
+                        has_valid_coords = False
+                        
+                        # Check if we have Point geometries (even if mixed with other types)
+                        if gdf.geometry.geom_type.isin(["Point"]).any():
+                            # Filter to only Point geometries if mixed
+                            if not gdf.geometry.geom_type.isin(["Point"]).all():
+                                st.warning(f"⚠️ Mixed geometry types detected - filtering to Points only")
+                                gdf = gdf[gdf.geometry.geom_type == "Point"].copy()
+                                st.info(f"✅ Filtered to {len(gdf)} Point geometries")
+                            
+                            # Check for empty geometries
+                            if gdf.geometry.is_empty.any():
+                                st.warning(f"⚠️ {gdf.geometry.is_empty.sum()} empty geometries - removing them")
+                                gdf = gdf[~gdf.geometry.is_empty].copy()
+                                st.info(f"✅ Retained {len(gdf)} non-empty Point geometries")
+                            
+                            if len(gdf) > 0:
+                                try:
+                                    # Extract coordinates directly from Point geometry
+                                    gdf["Longitude"] = gdf.geometry.x
+                                    gdf["Latitude"] = gdf.geometry.y
+                                    
+                                    # Verify coordinate ranges
+                                    lon_min, lon_max = gdf["Longitude"].min(), gdf["Longitude"].max()
+                                    lat_min, lat_max = gdf["Latitude"].min(), gdf["Latitude"].max()
+                                    
+                                    st.success(f"✅ Using {len(gdf)} true GPS points from Point geometry (EPSG:4326)")
+                                    st.success(f"📍 Coordinate range: lon [{lon_min:.6f}, {lon_max:.6f}], lat [{lat_min:.6f}, {lat_max:.6f}]")
+                                    st.info(f"📍 Sample coordinates: {list(zip(gdf['Longitude'].head(3).values, gdf['Latitude'].head(3).values))}")
+                                    
+                                    # Ensure CRS is set
+                                    if gdf.crs is None:
+                                        gdf = gdf.set_crs("EPSG:4326", allow_override=True)
+                                        st.info("✅ Set CRS to EPSG:4326")
+                                    
+                                    has_valid_coords = True
+                                    st.success("✅ TRUE COORDINATES EXTRACTED - Skipping all synthetic reconstruction")
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Failed to extract coordinates from Point geometry: {e}")
+                        
+                        # PRIORITY 2: Check for X/Y columns in attribute table
+                        if not has_valid_coords and "X" in gdf.columns and "Y" in gdf.columns:
+                            st.info("✅ Found X and Y columns in attribute table")
+                            try:
+                                gdf["Longitude"] = pd.to_numeric(gdf["X"], errors="coerce")
+                                gdf["Latitude"] = pd.to_numeric(gdf["Y"], errors="coerce")
+                                gdf = gdf.dropna(subset=["Latitude", "Longitude"])
+                                
+                                # Validate geographic ranges
+                                if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                    gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                    # Create geometry from coordinates
+                                    gdf = gpd.GeoDataFrame(
+                                        gdf, 
+                                        geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                        crs="EPSG:4326"
+                                    )
+                                    has_valid_coords = True
+                                    st.success(f"✅ Extracted {len(gdf)} points from X/Y attribute columns")
+                                    st.info(f"📍 Coordinate range: lon [{gdf['Longitude'].min():.6f}, {gdf['Longitude'].max():.6f}], lat [{gdf['Latitude'].min():.6f}, {gdf['Latitude'].max():.6f}]")
+                                else:
+                                    st.error(f"❌ X/Y columns contain invalid coordinate ranges")
+                            except Exception as e:
+                                st.error(f"❌ Failed to extract from X/Y columns: {e}")
+                        
+                        # PRIORITY 3: Check for other coordinate column names
+                        if not has_valid_coords:
+                            lat_col, lon_col = None, None
+                            for c in gdf.columns:
+                                c_lower = c.lower()
+                                if lat_col is None and c_lower in ["y", "lat", "latitude", "northing"]:
+                                    lat_col = c
+                                if lon_col is None and c_lower in ["x", "lon", "long", "longitude", "easting"]:
+                                    lon_col = c
+                            
+                            if lat_col and lon_col:
+                                st.info(f"✅ Found coordinate columns: {lon_col}, {lat_col}")
+                                try:
+                                    gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
+                                    gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
+                                    gdf = gdf.dropna(subset=["Latitude", "Longitude"])
+                                    
+                                    if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                        gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                        gdf = gpd.GeoDataFrame(
+                                            gdf, 
+                                            geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                            crs="EPSG:4326"
+                                        )
+                                        has_valid_coords = True
+                                        st.success(f"✅ Extracted {len(gdf)} points from {lon_col}, {lat_col} columns")
+                                except Exception as e:
+                                    st.error(f"❌ Failed to extract from {lon_col}, {lat_col}: {e}")
+                        
+                        # Final check: Do we have valid coordinates?
+                        if not has_valid_coords:
+                            st.error(f"❌ No valid Point geometry or coordinate columns found")
+                            st.error(f"   Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
+                            st.error(f"   Available columns: {list(gdf.columns)[:20]}")
+                            st.error(f"   ⚠️ Synthetic reconstruction will be used - results will be INACCURATE")
+
+                        # ✅ All coordinate extraction complete above - now handle fallback reconstruction
+                        try:
+                            if has_valid_coords:
+                                st.info("✅ TRUE COORDINATES LOADED - All reconstruction and repair paths DISABLED")
+                            elif not has_valid_coords:
+                                    # Try multiple repair methods
+                                    try:
+                                        # Method 1: Buffer repair
+                                        gdf.geometry = gdf.geometry.buffer(0)
+                                        if not gdf.geometry.is_empty.all():
+                                            st.info("✅ Repaired geometries using buffer method")
+                                        else:
+                                            # Method 2: Try to reconstruct from bounds if available
+                                            if hasattr(gdf, 'bounds') and not gdf.bounds.isnull().all().all():
+                                                st.info("Attempting to reconstruct geometries from bounds...")
+                                                # This is a fallback - create point geometries from bounds center
+                                                bounds = gdf.bounds
+                                                centers_lon = (bounds['minx'] + bounds['maxx']) / 2
+                                                centers_lat = (bounds['miny'] + bounds['maxy']) / 2
+                                                from shapely.geometry import Point
+                                                gdf.geometry = [Point(lon, lat) for lon, lat in zip(centers_lon, centers_lat)]
+                                                st.info("✅ Created point geometries from bounds")
+                                            else:
+                                                # Method 3: Continue with previous logic
+                                                st.info("Checking for other coordinate columns in attribute data...")
+                                            coord_cols = []
+                                            for col in gdf.columns:
+                                                col_lower = col.lower()
+                                                # More specific coordinate detection - exclude yield columns
+                                                if (any(coord in col_lower for coord in ['latitude', 'longitude', 'lat', 'lon', 'x_coord', 'y_coord', 'easting', 'northing']) 
+                                                    and not any(yield_word in col_lower for yield_word in ['yld', 'yield', 'mass', 'vol', 'flw'])):
+                                                    coord_cols.append(col)
+                                            
+                                            if len(coord_cols) >= 2:
+                                                st.info(f"Found coordinate columns: {coord_cols}")
+                                                try:
+                                                    # Use the first two coordinate columns found
+                                                    lat_col = coord_cols[0] if 'lat' in coord_cols[0].lower() else coord_cols[1]
+                                                    lon_col = coord_cols[1] if 'lon' in coord_cols[1].lower() else coord_cols[0]
+                                                    
+                                                    # Create point geometries from coordinate columns
+                                                    from shapely.geometry import Point
+                                                    gdf.geometry = [Point(lon, lat) for lon, lat in zip(gdf[lon_col], gdf[lat_col])]
+                                                    st.info(f"✅ Created geometries from coordinate columns: {lat_col}, {lon_col}")
+                                                except Exception as coord_error:
+                                                    st.error(f"Failed to create geometries from coordinates: {coord_error}")
+                                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                                    continue
+                                            else:
+                                                # Method 4: Try to convert GPS distance/angle to coordinates
+                                                # ONLY if we don't already have valid coords from attribute table
+                                                if has_valid_coords:
+                                                    st.info("✅ Skipping coordinate reconstruction (true coordinates already loaded).")
+                                                elif 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
+                                                    st.info("Found GPS distance/angle columns. Attempting coordinate conversion...")
+                                                    try:
+                                                        # Use field center from any available layer, with smart fallback
+                                                        ref_lat = 38.8075  # Default fallback
+                                                        ref_lon = -87.5390  # Default fallback
+                                                        ref_source = "default"
+                                                        
+                                                        # Try zones first
+                                                        zones_gdf = st.session_state.get("zones_gdf")
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            zone_bounds = zones_gdf.total_bounds
+                                                            ref_lat = (zone_bounds[1] + zone_bounds[3]) / 2
+                                                            ref_lon = (zone_bounds[0] + zone_bounds[2]) / 2
+                                                            ref_source = "zones"
+                                                        else:
+                                                            # Try other layers for reference
+                                                            seed_gdf = st.session_state.get("seed_gdf")
+                                                            if seed_gdf is not None and not seed_gdf.empty:
+                                                                seed_bounds = seed_gdf.total_bounds
+                                                                ref_lat = (seed_bounds[1] + seed_bounds[3]) / 2
+                                                                ref_lon = (seed_bounds[0] + seed_bounds[2]) / 2
+                                                                ref_source = "seed"
+                                                            else:
+                                                                # Try fertilizer layers
+                                                                fert_gdfs = st.session_state.get("fert_gdfs", {})
+                                                                for _k, fg in fert_gdfs.items():
+                                                                    if fg is not None and not fg.empty:
+                                                                        fert_bounds = fg.total_bounds
+                                                                        ref_lat = (fert_bounds[1] + fert_bounds[3]) / 2
+                                                                        ref_lon = (fert_bounds[0] + fert_bounds[2]) / 2
+                                                                        ref_source = "fertilizer"
+                                                                        break
+                                                        
+                                                        # Convert GPS distance/angle to lat/lon with proper field coverage
+                                                        from shapely.geometry import Point
+                                                        
+                                                        # CRITICAL: Calibrate reconstruction to fill actual field extent
+                                                        # Get field dimensions from zones_gdf for proper scaling
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            xmin, ymin, xmax, ymax = zones_gdf.total_bounds
+                                                            ref_lon = (xmin + xmax) / 2
+                                                            ref_lat = (ymin + ymax) / 2
+                                                            field_width_degrees = xmax - xmin
+                                                            field_height_degrees = ymax - ymin
+                                                            st.info(f"Using field extent: width={field_width_degrees:.6f}°, height={field_height_degrees:.6f}°")
+                                                        else:
+                                                            # Fallback to typical field size (~1 mile = 0.014 degrees)
+                                                            field_width_degrees = 0.014
+                                                            field_height_degrees = 0.014
+                                                            st.warning("No zones available - using default field dimensions")
+                                                        
+                                                        # Extract distance and angle data
+                                                        distances = pd.to_numeric(gdf["Distance_f"], errors="coerce").fillna(0).values
+                                                        angles = gdf["Track_deg_"].astype(float).values
+                                                        
+                                                        # Normalize distance to 0-1 range across full dataset
+                                                        dist_min, dist_max = distances.min(), distances.max()
+                                                        if dist_max > dist_min:
+                                                            norm_distances = (distances - dist_min) / (dist_max - dist_min)
+                                                        else:
+                                                            norm_distances = np.ones_like(distances) * 0.5
+                                                        
+                                                        # Check if we have pass number for better reconstruction
+                                                        if 'Pass_Num' in gdf.columns:
+                                                            pass_nums = pd.to_numeric(gdf["Pass_Num"], errors="coerce").fillna(0).values
+                                                            max_pass = pass_nums.max()
+                                                            if max_pass > 0:
+                                                                # Use pass number for cross-track position
+                                                                norm_pass = pass_nums / max_pass
+                                                                # Reconstruct using distance along track and pass across track
+                                                                dx = (norm_distances - 0.5) * field_width_degrees
+                                                                dy = (norm_pass - 0.5) * field_height_degrees
+                                                                st.info("✅ Using Pass_Num for improved spatial reconstruction")
+                                                            else:
+                                                                # Use angle-based reconstruction
+                                                                angles_rad = np.radians(angles)
+                                                                dx = (norm_distances - 0.5) * field_width_degrees * np.sin(angles_rad)
+                                                                dy = (norm_distances - 0.5) * field_height_degrees * np.cos(angles_rad)
+                                                        else:
+                                                            # Use angle-based reconstruction with full field spread
+                                                            angles_rad = np.radians(angles)
+                                                            # Scale to fill field extent
+                                                            dx = (norm_distances - 0.5) * field_width_degrees * np.sin(angles_rad)
+                                                            dy = (norm_distances - 0.5) * field_height_degrees * np.cos(angles_rad)
+                                                        
+                                                        # Apply spatial calibration
+                                                        lons = ref_lon + dx
+                                                        lats = ref_lat + dy
+                                                        
+                                                        # Ensure reconstructed bounds match field extent (final calibration)
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            # Compute current extent
+                                                            lon_curr_min, lon_curr_max = lons.min(), lons.max()
+                                                            lat_curr_min, lat_curr_max = lats.min(), lats.max()
+                                                            
+                                                            # Scale to match field extent precisely
+                                                            lon_scale = field_width_degrees / (lon_curr_max - lon_curr_min + 1e-9)
+                                                            lat_scale = field_height_degrees / (lat_curr_max - lat_curr_min + 1e-9)
+                                                            
+                                                            # Apply scaling around center
+                                                            lons = ref_lon + (lons - ref_lon) * lon_scale * 0.95  # 95% to avoid edge overlap
+                                                            lats = ref_lat + (lats - ref_lat) * lat_scale * 0.95
+                                                        
+                                                        gdf.geometry = [Point(lon, lat) for lon, lat in zip(lons, lats)]
+                                                        st.info(f"✅ Reconstructed yield coordinates calibrated to field extent: {len(gdf)} points")
+                                                        
+                                                    except Exception as gps_error:
+                                                        st.error(f"GPS conversion failed: {gps_error}")
+                                                        st.warning("Found GPS distance/angle columns but cannot convert to coordinates.")
+                                                        st.error("❌ GPS distance/angle data requires conversion to lat/lon coordinates.")
+                                                        st.info("Please provide a shapefile with actual latitude/longitude coordinates.")
+                                                        messages.append(f"{yf.name}: GPS distance/angle data cannot be converted — skipped.")
+                                                        continue
+                                                else:
+                                                    st.error(f"Cannot repair empty geometries in {yf.name}")
+                                                    st.info(f"Available columns: {list(gdf.columns)}")
+                                                    messages.append(f"{yf.name}: empty geometries — skipped.")
+                                                    continue
+                                    except Exception as repair_error:
+                                        st.error(f"Geometry repair failed: {repair_error}")
+                                        messages.append(f"{yf.name}: geometry repair failed — skipped.")
+                                        continue
+                            
+                            # Extract coordinates using representative points ONLY if we don't have valid ones
+                            if not has_valid_coords:
+                                reps = gdf.geometry.representative_point()
+                                gdf["Longitude"] = reps.x
+                                gdf["Latitude"] = reps.y
+                                st.info(f"✅ Extracted coordinates from geometry in {yf.name}")
+                            
+                        except Exception as e:
+                            st.warning(f"Coordinate extraction failed for {yf.name}: {e}")
+                            messages.append(f"{yf.name}: coordinate extraction failed — skipped.")
+                            continue
+
+                        df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
+                        # Save the gdf with coordinates to session state
+                        st.session_state["_yield_gdf_raw"] = gdf
+
+                    # --- Detect yield column (universal brand support) ---
+                    # Support Ag Leader, John Deere, Case IH, and other formats
+                    preferred_yield_cols = [
+                        "Yld_Vol_Dr", "Dry_Yield", "Yield_Volume_Dry", "Yield_buac",
+                        "DryYield_buac", "Yld_Mass_Dr", "Yield", "Yld_Vol_We", "Crop_Flw_M",
+                        "Yld_Mass_D", "dry_yield", "DRY_YIELD", "YIELD", "Yield_Dry",
+                        "Dry_Yield_Volume", "yld_vol_dr", "yld_mass_dr"
+                    ]
+                    
+                    # First try exact match
+                    yield_col = next((c for c in preferred_yield_cols if c in df.columns), None)
+                    
+                    # If no exact match, try case-insensitive
+                    if not yield_col:
+                        col_map = {c.lower(): c for c in df.columns}
+                        for pref in preferred_yield_cols:
+                            if pref.lower() in col_map:
+                                yield_col = col_map[pref.lower()]
+                                break
+                    
+                    # If still no match, try partial matching
+                    if not yield_col:
+                        for c in df.columns:
+                            c_lower = c.lower()
+                            if ("yld" in c_lower and ("dry" in c_lower or "vol" in c_lower or "mass" in c_lower)) or \
+                               ("yield" in c_lower and "dry" in c_lower) or \
+                               "crop_flw" in c_lower:
+                                yield_col = c
+                                break
+                    
+                    if not yield_col:
+                        messages.append(f"{yf.name}: no recognized yield column — skipped.")
+                        st.warning(f"⚠️ No valid yield column found in {yf.name}")
+                        st.warning(f"Available columns: {list(df.columns)}")
+                        st.warning(f"Looking for patterns: Yld_Vol_Dr, Dry_Yield, Yield_buac, etc.")
+                        continue
+                    
+                    st.info(f"✅ Using yield column: '{yield_col}'")
+
+                    # --- Fill coords if missing ---
+                    if "Latitude" not in df.columns or "Longitude" not in df.columns:
+                        if gdf is not None and not gdf.empty:
+                            reps = gdf.geometry.representative_point()
+                            df["Longitude"] = reps.x
+                            df["Latitude"] = reps.y
+
+                    # --- Clean numeric + filter ---
+                    df["Yield"] = pd.to_numeric(df[yield_col], errors="coerce").fillna(0)
+                    df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
+                    df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
+
+                    if df["Latitude"].notna().any() and df["Longitude"].notna().any():
+                        df = df[
+                            (df["Latitude"].between(-90, 90))
+                            & (df["Longitude"].between(-180, 180))
+                        ]
+
+                    if len(df) > 10:
+                        p5, p95 = np.nanpercentile(df["Yield"], [5, 95])
+                        df = df[df["Yield"].between(p5, p95)]
+
+                    if df.empty:
+                        messages.append(f"{yf.name}: geometry extracted but no valid points.")
+                        continue
+
+                    frames.append(df[["Yield", "Latitude", "Longitude"]])
+                    messages.append(f"{yf.name}: using '{yield_col}' with {len(df):,} valid yield points.")
+
+                except Exception as e:
+                    messages.append(f"{yf.name}: {e}")
+
+            # =========================================================
+            # ✅ Preserve geometry + ensure CRS = WGS84
+            # =========================================================
+            if frames:
+                combo = pd.concat(frames, ignore_index=True)
+                gdf_full = st.session_state.get("_yield_gdf_raw")
+
+                if gdf_full is not None and not getattr(gdf_full, "empty", True):
+                    # Use the gdf that already has coordinates (from synthetic generation)
+                    st.session_state["yield_df"] = gdf_full.copy()
+                else:
+                    st.session_state["yield_df"] = combo.copy()
+
+                st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+            else:
+                st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+        else:
+            st.caption("No yield files uploaded.")
+
+    # ------------------------- FERTILIZER -------------------------
+    with u3:
+        st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
+        fert_files = st.file_uploader("Fert", type=["csv", "geojson", "json", "zip"],
+                                      key="up_fert", accept_multiple_files=True)
+        st.session_state["fert_layers_store"] = {}
+        st.session_state["fert_gdfs"] = {}
+
+        if fert_files:
+            summary = []
+            for f in fert_files:
+                try:
+                    grouped, gdf_orig = process_prescription(f, "fertilizer")
+                    if gdf_orig is not None and not gdf_orig.empty:
+                        reps = gdf_orig.geometry.representative_point()
+                        gdf_orig["Longitude"], gdf_orig["Latitude"] = reps.x, reps.y
+                    if not grouped.empty:
+                        key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                        st.session_state["fert_layers_store"][key] = grouped
+                        st.session_state["fert_gdfs"][key] = gdf_orig
+                        summary.append({"File": f.name, "Products": len(grouped)})
+                except Exception as e:
+                    st.warning(f"Fertilizer {f.name}: {e}")
+
+            if summary:
+                st.dataframe(pd.DataFrame(summary), use_container_width=True,
+                             hide_index=True, height=df_px_height(len(summary)))
+            else:
+                st.error("No valid fertilizer RX maps detected.")
+        else:
+            st.caption("No fertilizer files uploaded.")
+
+    # ------------------------- SEED -------------------------
+    with u4:
+        st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
+        seed_files = st.file_uploader("Seed", type=["csv", "geojson", "json", "zip"],
+                                      key="up_seed", accept_multiple_files=True)
+        st.session_state["seed_layers_store"] = {}
+        st.session_state["seed_gdf"] = None
+
+        if seed_files:
+            summary = []
+            last_gdf = None
+            for f in seed_files:
+                try:
+                    grouped, gdf_orig = process_prescription(f, "seed")
+                    if gdf_orig is not None and not gdf_orig.empty:
+                        reps = gdf_orig.geometry.representative_point()
+                        gdf_orig["Longitude"], gdf_orig["Latitude"] = reps.x, reps.y
+                        last_gdf = gdf_orig
+                    if not grouped.empty:
+                        key = os.path.splitext(f.name)[0].lower().replace(" ", "_")
+                        st.session_state["seed_layers_store"][key] = grouped
+                        summary.append({"File": f.name, "Products": len(grouped)})
+                except Exception as e:
+                    st.warning(f"Seed {f.name}: {e}")
+
+            if last_gdf is not None and not last_gdf.empty:
+                st.session_state["seed_gdf"] = last_gdf
+
+            if summary:
+                st.dataframe(pd.DataFrame(summary), use_container_width=True,
+                             hide_index=True, height=df_px_height(len(summary)))
+            else:
+                st.error("No valid seed RX maps detected.")
+        else:
+            st.caption("No seed files uploaded.")
+
+# ===========================
+# UI: Fixed inputs + Variable/Flat/CornSoy strip
+# ===========================
+def _mini_num(label: str, key: str, default: float = 0.0, step: float = 0.1):
+    st.caption(label)
+    current_value = st.session_state.get(key, default)
+    return st.number_input(key, min_value=0.0, value=float(current_value),
+                           step=step, label_visibility="collapsed")
+
+def render_fixed_inputs_and_strip():
+    st.markdown("### Fixed Inputs ($/ac)")
+
+    r = st.columns(12, gap="small")
+    with r[0]:  st.session_state["chem"]  = _mini_num("Chem ($/ac)",        "chem",  0.0, 1.0)
+    with r[1]:  st.session_state["ins"]   = _mini_num("Insur ($/ac)",       "ins",   0.0, 1.0)
+    with r[2]:  st.session_state["insect"]= _mini_num("Insect/Fung ($/ac)", "insect",0.0, 1.0)
+    with r[3]:  st.session_state["fert"]  = _mini_num("Fert Flat ($/ac)",   "fert",  0.0, 1.0)
+    with r[4]:  st.session_state["seed"]  = _mini_num("Seed Flat ($/ac)",   "seed",  0.0, 1.0)
+    with r[5]:  st.session_state["rent"]  = _mini_num("Cash Rent ($/ac)",   "rent",  0.0, 1.0)
+    with r[6]:  st.session_state["mach"]  = _mini_num("Mach ($/ac)",        "mach",  0.0, 1.0)
+    with r[7]:  st.session_state["labor"] = _mini_num("Labor ($/ac)",       "labor", 0.0, 1.0)
+    with r[8]:  st.session_state["col"]   = _mini_num("Living ($/ac)",      "col",   0.0, 1.0)
+    with r[9]:  st.session_state["fuel"]  = _mini_num("Fuel ($/ac)",        "fuel",  0.0, 1.0)
+    with r[10]: st.session_state["int"]   = _mini_num("Interest ($/ac)",    "int",   0.0, 1.0)
+    with r[11]: st.session_state["truck"] = _mini_num("Truck Fuel ($/ac)",  "truck", 0.0, 1.0)
+
+    expenses = {
+        "Chemicals": st.session_state["chem"],
+        "Insurance": st.session_state["ins"],
+        "Insecticide/Fungicide": st.session_state["insect"],
+        "Fertilizer (Flat)": st.session_state["fert"],
+        "Seed (Flat)": st.session_state["seed"],
+        "Cash Rent": st.session_state["rent"],
+        "Machinery": st.session_state["mach"],
+        "Labor": st.session_state["labor"],
+        "Cost of Living": st.session_state["col"],
+        "Extra Fuel": st.session_state["fuel"],
+        "Extra Interest": st.session_state["int"],
+        "Truck Fuel": st.session_state["truck"],
+    }
+    st.session_state["expenses_dict"] = expenses
+    st.session_state["base_expenses_per_acre"] = sum(expenses.values())
+
+# =========================================================
+# SECTION: Variable Rate, Flat Rate (2 Columns, no scroll)
+# =========================================================
+def render_input_sections():
+    # --- Scoped CSS: keep things tidy & full-width without inner scroll ---
+    st.markdown("""
+    <style>
+      [data-testid="stDataEditorGrid"],
+      [data-testid="stDataFrameContainer"],
+      [data-testid="stDataFrameScrollableContainer"],
+      [data-testid="stDataFrame"] {
+          overflow: visible !important;
+          height: auto !important;
+          max-height: none !important;
+          width: 100% !important;
+      }
+      [data-testid="stDataEditorGrid"] table,
+      [data-testid="stDataFrame"] table {
+          width: 100% !important;
+          min-width: 100% !important;
+          table-layout: fixed !important;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+    def _profit_color(v):
+        if isinstance(v, (int, float)):
+            if v > 0:
+                return "color:limegreen;font-weight:bold;"
+            if v < 0:
+                return "color:#ff4d4d;font-weight:bold;"
+        return ""
+
+    # ===============================
+    # PREP: Gather all detected inputs
+    # ===============================
+    fert_store = st.session_state.get("fert_layers_store", {})
+    seed_store = st.session_state.get("seed_layers_store", {})
+
+    fert_products, seed_products = [], []
+    for _, df in fert_store.items():
+        if isinstance(df, pd.DataFrame) and "product" in df.columns:
+            fert_products.extend(list(df["product"].dropna().unique()))
+    for _, df in seed_store.items():
+        if isinstance(df, pd.DataFrame) and "product" in df.columns:
+            seed_products.extend(list(df["product"].dropna().unique()))
+
+    fert_products = sorted(set(fert_products))
+    seed_products = sorted(set(seed_products))
+
+    # Build editor rows from detected products
+    all_variable_inputs = (
+        [{"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in fert_products] +
+        [{"Type": "Seed",       "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in seed_products]
+    )
+    if not all_variable_inputs:
+        all_variable_inputs = [{
+            "Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0
+        }]
+
+    cols = st.columns(2, gap="small")
+
+    # -------------------------------------------------
+    # 1) VARIABLE RATE INPUTS
+    # -------------------------------------------------
+    with cols[0]:
+        st.markdown("### Variable Rate Inputs")
+        with st.expander("Open Variable Rate Inputs", expanded=False):
+            st.caption("Enter price per unit and total units applied from RX maps or manually.")
+            rx_df = pd.DataFrame(all_variable_inputs)
+
+            # Fixed rows = no checkbox column
+            edited = st.data_editor(
+                rx_df,
+                hide_index=True,
+                num_rows="fixed",
+                use_container_width=True,
+                key="var_inputs_editor_final",
+                column_config={
+                    "Type": st.column_config.TextColumn(disabled=True),
+                    "Product": st.column_config.TextColumn(),
+                    "Units Applied": st.column_config.NumberColumn(format="%.4f"),
+                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                },
+                height=auto_height(rx_df)
+            ).fillna(0.0)
+
+            edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
+
+            st.dataframe(
+                edited.style.format({
+                    "Units Applied": "{:,.4f}",
+                    "Price per Unit ($)": "${:,.2f}",
+                    "Total Cost ($)": "${:,.2f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=auto_height(edited)
+            )
+
+            base_acres = float(st.session_state.get("base_acres", 1.0))
+            st.session_state["variable_rate_inputs"] = edited
+            st.session_state["variable_rate_cost_per_acre"] = (
+                float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
+            )
+
+    # -------------------------------------------------
+    # 2) FLAT RATE INPUTS
+    # -------------------------------------------------
+    with cols[1]:
+        st.markdown("### Flat Rate Inputs")
+        with st.expander("Open Flat Rate Inputs", expanded=False):
+            st.caption("Uniform cost per acre for the entire field.")
+            flat_products = sorted(set(fert_products + seed_products))
+            flat_df = pd.DataFrame([{
+                "Product": p, "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0
+            } for p in flat_products]) if flat_products else pd.DataFrame(
+                [{"Product": "", "Rate (units/ac)": 0.0, "Price per Unit ($)": 0.0}]
+            )
+
+            edited_flat = st.data_editor(
+                flat_df,
+                hide_index=True,
+                num_rows="fixed",
+                use_container_width=True,
+                key="flat_inputs_editor_final",
+                column_config={
+                    "Product": st.column_config.TextColumn(),
+                    "Rate (units/ac)": st.column_config.NumberColumn(format="%.4f"),
+                    "Price per Unit ($)": st.column_config.NumberColumn(format="%.2f"),
+                },
+                height=auto_height(flat_df)
+            ).fillna(0.0)
+
+            edited_flat["Cost per Acre ($/ac)"] = (
+                edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
+            )
+
+            st.dataframe(
+                edited_flat.style.format({
+                    "Rate (units/ac)": "{:,.4f}",
+                    "Price per Unit ($)": "${:,.2f}",
+                    "Cost per Acre ($/ac)": "${:,.2f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=auto_height(edited_flat)
+            )
+
+            # Persist in state for Section 9 math
+            out_flat = edited_flat.copy()
+            out_flat["$/ac"] = out_flat["Cost per Acre ($/ac)"]
+            st.session_state["flat_products"] = edited_flat
+            st.session_state["fixed_products"] = out_flat
+            st.session_state["flat_rate_cost_per_acre"] = float(
+                edited_flat["Cost per Acre ($/ac)"].sum()
+            )
+
+# ===========================
+# Map helpers / overlays
+# ===========================
+def make_base_map():
+    """Absolute fallback-proof map — never fails, even with no internet."""
+    try:
+        # Start with built-in CartoDB layer (reliable)
+        m = folium.Map(
+            location=[39.5, -98.35],
+            zoom_start=5,
+            tiles="CartoDB positron",
+            attr="CartoDB",
+            prefer_canvas=True,
+            control_scale=False,
+            zoom_control=True,
+        )
+
+        # Try to add Esri imagery (optional, best quality)
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                overlay=False,
+                control=False,
+                max_zoom=19,
+                no_wrap=True
+            ).add_to(m)
+        except Exception:
+            pass  # skip Esri if network fails
+
+        # Add boundary labels if possible
+        try:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri Boundaries",
+                overlay=True,
+                control=False,
+                opacity=0.9,
+                max_zoom=19,
+                no_wrap=True
+            ).add_to(m)
+        except Exception:
+            pass
+
+        # Hide corner text, scale bar, and controls for compactness
+        template = Template("""
+        {% macro script(this, kwargs) %}
+        var map = {{this._parent.get_name()}};
+        map.scrollWheelZoom.disable();
+        map.on('click', () => map.scrollWheelZoom.enable());
+        map.on('mouseout', () => map.scrollWheelZoom.disable());
+        setTimeout(() => {
+          document.querySelectorAll('.leaflet-control-attribution, .leaflet-control-scale')
+            .forEach(el => el.style.display='none');
+        }, 500);
+        {% endmacro %}
+        """)
+        macro = MacroElement()
+        macro._template = template
+        m.get_root().add_child(macro)
+
+        return m
+
+    except Exception as e:
+        # Absolute emergency fallback (blank leaflet canvas)
+        st.error(f"Map fallback triggered: {e}")
+        return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
+
+def add_gradient_legend(m, name, vmin, vmax, cmap, index):
+    top_offset = 20 + (index * 80)
+    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
+    legend_html = f"""
+    <div style="position:absolute; top:{top_offset}px; left:10px; z-index:9999;
+                font-family:sans-serif; font-size:12px; color:white;
+                background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
+                width:180px;">
+      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
+      <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
+                  border-radius:2px; margin-bottom:4px;"></div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+      </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+def detect_rate_type(gdf):
+    try:
+        rate_col = None
+        for c in gdf.columns:
+            if "tgt" in c.lower() or "rate" in c.lower():
+                rate_col = c
+                break
+        if rate_col and gdf[rate_col].nunique(dropna=True) == 1:
+            return "Fixed Rate"
+    except Exception:
+        pass
+    return "Variable Rate"
+
+def infer_unit(gdf, rate_col, product_col):
+    for cand in ["unit", "units", "uom", "rate_uom", "rateunit", "rate_unit"]:
+        if cand in gdf.columns:
+            vals = gdf[cand].dropna().astype(str).str.strip()
+            if not vals.empty and vals.iloc[0] != "":
+                return vals.iloc[0]
+    rc = str(rate_col or "").lower()
+    if any(k in rc for k in ["gpa", "gal", "uan"]): return "gal/ac"
+    if any(k in rc for k in ["lb", "lbs", "dry", "nh3", "ammonia"]): return "lb/ac"
+    if "kg" in rc: return "kg/ha"
+    if any(k in rc for k in ["seed", "pop", "plant", "ksds", "kseed", "kseeds"]):
+        try:
+            med = pd.to_numeric(gdf[rate_col], errors="coerce").median()
+            if 10 <= float(med) <= 90:
+                return "k seeds/ac"
+        except Exception:
+            pass
+        return "seeds/ac"
+    prod_val = ""
+    if product_col and product_col in gdf.columns:
+        try:
+            prod_val = str(gdf[product_col].dropna().astype(str).iloc[0]).lower()
+        except Exception:
+            prod_val = ""
+    if "uan" in prod_val or "10-34-0" in prod_val: return "gal/ac"
+    return None
+
+def add_prescription_overlay(m, gdf, name, cmap, index):
+    if gdf is None or gdf.empty:
+        return
+    gdf = gdf.copy()
+
+    product_col, rate_col = None, None
+    for c in gdf.columns:
+        cl = str(c).lower()
+        if product_col is None and "product" in cl:
+            product_col = c
+        if rate_col is None and ("tgt" in cl or "rate" in cl):
+            rate_col = c
+
+    gdf["RateType"] = detect_rate_type(gdf)
+
+    if rate_col and pd.to_numeric(gdf[rate_col], errors="coerce").notna().any():
+        vals = pd.to_numeric(gdf[rate_col], errors="coerce").dropna()
+        vmin, vmax = float(vals.min()), float(vals.max())
+        if vmin == vmax:
+            vmax = vmin + 1.0
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    unit = infer_unit(gdf, rate_col, product_col)
+    rate_alias = f"Target Rate ({unit})" if unit else "Target Rate"
+    legend_name = f"{name} — {rate_alias}"
+
+    def style_fn(feat):
+        val = feat["properties"].get(rate_col) if rate_col else None
+        if val is None or pd.isna(val):
+            fill = "#808080"
+        else:
+            try:
+                norm = (float(val) - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+                norm = max(0.0, min(1.0, norm))
+                fill = mpl_colors.rgb2hex(cmap(norm)[:3])
+            except Exception:
+                fill = "#808080"
+        return {"stroke": False, "opacity": 0, "weight": 0,
+                "fillColor": fill, "fillOpacity": 0.55}
+
+    fields, aliases = [], []
+    if product_col: fields.append(product_col); aliases.append("Product")
+    if rate_col:    fields.append(rate_col);    aliases.append(rate_alias)
+    fields.append("RateType"); aliases.append("Type")
+
+    folium.GeoJson(
+        gdf, name=name, style_function=style_fn,
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+    ).add_to(m)
+
+    add_gradient_legend(m, legend_name, vmin, vmax, cmap, index)
+
+def compute_bounds_for_heatmaps():
+    """Compute flexible bounds that work with any combination of layers."""
+    try:
+        bnds = []
+        layer_info = []
+        
+        # Collect bounds from all available layers
+        zones_gdf = st.session_state.get("zones_gdf")
+        if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+            tb = zones_gdf.total_bounds
+            if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                layer_info.append("zones")
+        
+        # Check seed layer
+        seed_gdf = st.session_state.get("seed_gdf")
+        if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
+            tb = seed_gdf.total_bounds
+            if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                layer_info.append("seed")
+                
+        # Check fertilizer layers
+        for _k, fg in st.session_state.get("fert_gdfs", {}).items():
+            if fg is not None and not fg.empty:
+                tb = fg.total_bounds
+                if tb is not None and len(tb) == 4 and not any(pd.isna(tb)):
+                    bnds.append([[tb[1], tb[0]], [tb[3], tb[2]]])
+                    layer_info.append("fertilizer")
+                    
+        # Check yield layer
+        ydf = st.session_state.get("yield_df")
+        if ydf is not None and not ydf.empty:
+            latc = find_col(ydf, ["latitude"]) or "Latitude"
+            lonc = find_col(ydf, ["longitude"]) or "Longitude"
+            if latc in ydf.columns and lonc in ydf.columns:
+                bnds.append([[ydf[latc].min(), ydf[lonc].min()],
+                             [ydf[latc].max(), ydf[lonc].max()]])
+                layer_info.append("yield")
+        
+        if bnds:
+            # Strategy: Use the largest bounding box as primary, but consider all layers
+            south = min(b[0][0] for b in bnds)
+            west = min(b[0][1] for b in bnds)
+            north = max(b[1][0] for b in bnds)
+            east = max(b[1][1] for b in bnds)
+            
+            # If zones are present, they get priority for field boundary definition
+            if "zones" in layer_info and len(layer_info) > 1:
+                # Use zones as primary but ensure other layers are visible
+                zone_tb = zones_gdf.total_bounds
+                if zone_tb is not None and len(zone_tb) == 4:
+                    zone_south = zone_tb[1]
+                    zone_west = zone_tb[0] 
+                    zone_north = zone_tb[3]
+                    zone_east = zone_tb[2]
+                    
+                    # Use zone bounds but expand to accommodate other layers
+                    lat_range = zone_north - zone_south
+                    lon_range = zone_east - zone_west
+                    south = zone_south - (lat_range * 0.05)
+                    west = zone_west - (lon_range * 0.05)
+                    north = zone_north + (lat_range * 0.05)
+                    east = zone_east + (lon_range * 0.05)
+            else:
+                # No zones or zones only - use combined bounds from all available layers
+                # Add small buffer to combined bounds
+                lat_range = north - south
+                lon_range = east - west
+                south -= (lat_range * 0.02)
+                west -= (lon_range * 0.02)
+                north += (lat_range * 0.02)
+                east += (lon_range * 0.02)
+            
+            return south, west, north, east
+    except Exception as e:
+        st.warning(f"Bounds calculation error: {e}")
+        
+    return 25.0, -125.0, 49.0, -66.0  # fallback USA
+
+def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
+    try:
+        # Bail if nothing to draw
+        if df is None or df.empty:
+            return None, None
+
+        # CRITICAL: Validate that coordinate columns contain true geographic data
+        def is_valid_lat(series):
+            """Check if series contains valid latitude values."""
+            try:
+                numeric = pd.to_numeric(series, errors="coerce").dropna()
+                if len(numeric) == 0:
+                    return False
+                return numeric.min() >= -90 and numeric.max() <= 90
+            except:
+                return False
+        
+        def is_valid_lon(series):
+            """Check if series contains valid longitude values."""
+            try:
+                numeric = pd.to_numeric(series, errors="coerce").dropna()
+                if len(numeric) == 0:
+                    return False
+                return numeric.min() >= -180 and numeric.max() <= 180
+            except:
+                return False
+        
+        # Find and validate coord columns
+        latc = find_col(df, ["latitude"]) or "Latitude"
+        lonc = find_col(df, ["longitude"]) or "Longitude"
+        
+        # Check if columns exist
+        if latc not in df.columns or lonc not in df.columns:
+            st.warning("⚠️ No valid geographic coordinates found in yield file; cannot render map.")
+            return None, None
+        
+        # Validate that columns contain real geographic coordinates
+        if not is_valid_lat(df[latc]):
+            st.warning(f"⚠️ Column '{latc}' does not contain valid latitude values (-90 to 90)")
+            return None, None
+        
+        if not is_valid_lon(df[lonc]):
+            st.warning(f"⚠️ Column '{lonc}' does not contain valid longitude values (-180 to 180)")
+            return None, None
+        
+        st.info(f"✅ Validated geographic coordinates: '{latc}' and '{lonc}'")
+        
+        # Sanitize and keep only good rows
+        df = df.copy()
+        df[latc] = pd.to_numeric(df[latc], errors="coerce")
+        df[lonc] = pd.to_numeric(df[lonc], errors="coerce")
+        df[values.name] = pd.to_numeric(df[values.name], errors="coerce")
+        df.dropna(subset=[latc, lonc, values.name], inplace=True)
+        df = df[np.isfinite(df[latc]) & np.isfinite(df[lonc]) & np.isfinite(df[values.name])]
+
+        # Still nothing? skip
+        if df.empty:
+            st.warning("⚠️ No valid yield points after coordinate validation")
+            return None, None
+
+        # If fewer than 3 real points, skip heatmap entirely
+        if len(df) < 3:
+            st.warning(f"⚠️ Only {len(df)} valid points - need at least 3 for interpolation")
+            return None, None
+
+        st.info(f"✅ Processing {len(df)} validated yield points with true GPS coordinates")
+
+        # Use provided bounds (should be unified bounds from zones)
+        south, west, north, east = bounds
+
+        vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
+        if vmin == vmax:
+            vmax = vmin + 1.0
+
+        pts_lon = df[lonc].astype(float).values
+        pts_lat = df[latc].astype(float).values
+        vals_ok = df[values.name].astype(float).values
+        
+        # Debug: Show sample of actual coordinates being used
+        st.info(f"📍 Sample coordinates: lon={pts_lon[:3]}, lat={pts_lat[:3]}")
+
+        # CRITICAL: Yield grid bounds = actual yield data extent (source of truth)
+        # Compute grid strictly from yield coordinate ranges
+        xmin, xmax = df[lonc].min(), df[lonc].max()
+        ymin, ymax = df[latc].min(), df[latc].max()
+        
+        # Apply small buffer (2%) to avoid edge artifacts
+        lon_range = xmax - xmin
+        lat_range = ymax - ymin
+        buffer_pct = 0.02
+        xmin -= lon_range * buffer_pct
+        xmax += lon_range * buffer_pct
+        ymin -= lat_range * buffer_pct
+        ymax += lat_range * buffer_pct
+        
+        st.info(f"✅ Yield grid bounds from actual data: lon [{xmin:.6f}, {xmax:.6f}], lat [{ymin:.6f}, {ymax:.6f}]")
+        
+        # Zones are ONLY used as an optional clipping mask, not for grid generation
+        zones_gdf = st.session_state.get("zones_gdf")
+        field_polygon = None
+        if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+            field_polygon = zones_gdf.geometry.unary_union
+            st.info("✅ Zone polygon available - will apply as clipping mask after interpolation")
+        
+        # High resolution grid for swath-level detail
+        n = 500
+        lon_lin = np.linspace(xmin, xmax, n)
+        lat_lin = np.linspace(ymin, ymax, n)
+        lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
+
+        # Use NEAREST interpolation to preserve blocky yield texture (real combine passes)
+        # This eliminates artificial triangle banding and angular artifacts
+        grid = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
+        
+        st.info(f"✅ Interpolated {len(vals_ok)} yield points using nearest-neighbor method")
+
+        # ==========================================================
+        # HARVEST EXTENT MASK — Alpha shape (concave hull)
+        # ==========================================================
+        try:
+            from shapely.geometry import Point as ShapePoint
+            from shapely.vectorized import contains
+            
+            # Build GeoSeries of yield points
+            yield_points_geom = gpd.GeoSeries(
+                [ShapePoint(x, y) for x, y in zip(pts_lon, pts_lat)],
+                crs="EPSG:4326"
+            )
+            
+            # Use alpha shape (concave hull) for tight boundary fitting if available
+            if ALPHA_OK:
+                try:
+                    # Compute concave (alpha) hull — adjust alpha for smoothness
+                    alpha_value = 0.0025  # lower = tighter boundary, higher = smoother
+                    harvest_hull = alphashape.alphashape(yield_points_geom, alpha_value)
+                    
+                    st.info(f"✅ Created alpha-shape harvest boundary (α={alpha_value})")
+                    
+                except Exception as e:
+                    # Fallback to convex hull if alpha shape computation fails
+                    st.warning(f"⚠️ Alpha shape failed: {e} - using convex hull")
+                    harvest_hull = yield_points_geom.unary_union.convex_hull
+                    st.info("✅ Created convex hull around harvest extent")
+            else:
+                # Fallback to convex hull if alphashape not available
+                st.info("ℹ️ Using convex hull (alphashape library not available)")
+                harvest_hull = yield_points_geom.unary_union.convex_hull
+            
+            # Vectorized mask
+            harvest_mask = contains(harvest_hull, lon_grid, lat_grid)
+            
+            # Apply mask — remove grid cells outside harvested boundary
+            grid = np.where(harvest_mask, grid, np.nan)
+            
+            st.info("✅ Applied harvest extent mask — unharvested areas excluded")
+            
+        except Exception as e:
+            st.warning(f"Harvest extent mask failed, using full grid: {e}")
+
+        # Clip grid to field polygon if available (additional conditional masking)
+        if field_polygon is not None:
+            try:
+                from shapely.vectorized import contains
+                mask = contains(field_polygon, lon_grid, lat_grid)
+                grid = np.where(mask, grid, np.nan)
+                st.info("✅ Clipped yield heatmap to field polygon boundaries")
+            except Exception as e:
+                st.warning(f"Vectorized field clipping failed: {e}")
+
+        # Create professional yield colormap (red to green gradient)
+        yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
+            "yieldmap", ["#a50026", "#d73027", "#fdae61", "#ffffbf", "#a6d96a", "#1a9850"]
+        )
+        
+        # Use percentile-based normalization to remove outlier distortion
+        vmin = np.nanpercentile(vals_ok, 5)
+        vmax = np.nanpercentile(vals_ok, 95)
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+        
+        st.info(f"✅ Color range: {vmin:.1f} - {vmax:.1f} bu/ac (5th-95th percentile)")
+        
+        # Apply colormap with percentile normalization
+        rgba = yield_cmap(norm(grid))
+        rgba = np.flipud(rgba)
+        rgba = (rgba * 255).astype(np.uint8)
+
+        # Add opaque yield map overlay using actual yield data bounds
+        overlay_bounds = [[ymin, xmin], [ymax, xmax]]
+        
+        folium.raster_layers.ImageOverlay(
+            image=rgba,
+            bounds=overlay_bounds,
+            opacity=1.0,
+            name=name,
+            overlay=True,
+            show=show_default
+        ).add_to(m)
+        
+        st.info(f"✅ Added {name} overlay with true measured data extent")
+
+        return vmin, vmax
+
+    except Exception as e:
+        st.warning(f"Yield map overlay fallback triggered: {e}")
+        return None, None
+
+# ===========================
+# MAIN APP — HARDENED + STACKED LEGENDS
+# ===========================
+apply_compact_theme()
+_bootstrap_defaults()
+render_uploaders()
+render_fixed_inputs_and_strip()
+# Three collapsible input dropdowns ABOVE the map
+render_input_sections()
+st.markdown("---")
+
+# ---------- build base map ----------
+m = make_base_map()
+
+# ---------- STACKED LEGEND SYSTEM ----------
+def init_legend_rails(m):
+    """Injects fixed legend containers (top-left rail used)."""
+    rails_css = """
+    <style>
+      .legend-rail { position:absolute; z-index:9999; font-family:sans-serif; }
+      #legend-tl { top: 14px; left: 10px; width: 220px; }
+      .legend-card {
+        color: #fff; background: rgba(0,0,0,0.65);
+        padding: 6px 10px; border-radius: 6px; margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+        user-select: none;
+      }
+      .legend-title { font-weight: 600; margin-bottom: 4px; }
+      .legend-bar { height: 14px; border-radius: 2px; margin-bottom: 4px; }
+      .legend-minmax { display:flex; justify-content:space-between; font-size:12px; }
+    </style>
+    <div id="legend-tl" class="legend-rail"></div>
+    """
+    m.get_root().html.add_child(folium.Element(rails_css))
+    st.session_state.setdefault("_legend_counts", {"tl": 0})
+
+def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
+    """Adds a gradient legend to the chosen rail (top-left default)."""
+    if vmin is None or vmax is None:
+        return
+    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+    gradient_css = ", ".join(stops)
+    idx = st.session_state.get("_legend_counts", {}).get(corner, 0)
+    card_html = f"""
+    <div class="legend-card" id="legend-{corner}-{idx}">
+      <div class="legend-title">{name}</div>
+      <div class="legend-bar" style="background:linear-gradient(90deg, {gradient_css});"></div>
+      <div class="legend-minmax"><span>{vmin:.1f}</span><span>{vmax:.1f}</span></div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(f"""
+      <script>
+        (function() {{
+          var rail = document.getElementById("legend-{corner}");
+          if (rail) {{
+            rail.insertAdjacentHTML("beforeend", `{card_html}`);
+          }}
+        }})();
+      </script>
+    """))
+    st.session_state["_legend_counts"][corner] = idx + 1
+
+# Initialize the legend rail
+init_legend_rails(m)
+
+# ---------- WORKING ZONE LOGIC WITH AUTO-ZOOM ----------
+zones_gdf = st.session_state.get("zones_gdf")
+yield_gdf = st.session_state.get("_yield_gdf_raw")
+
+# Calculate map center and zoom based on available data
+map_center = [39.8283, -98.5795]  # US center fallback
+map_zoom = 5
+
+if yield_gdf is not None and not getattr(yield_gdf, "empty", True):
+    try:
+        # Use yield data bounds for map center and zoom
+        bounds = yield_gdf.total_bounds
+        map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+        map_zoom = 15
+        st.info(f"✅ Map centered on yield data: {map_center[0]:.4f}, {map_center[1]:.4f}")
+    except Exception as e:
+        st.warning(f"Could not calculate yield bounds: {e}")
+
+elif zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+    try:
+        # Fallback to zones if no yield data
+        bounds = zones_gdf.total_bounds
+        map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
+        map_zoom = 15
+        st.info(f"✅ Map centered on zones: {map_center[0]:.4f}, {map_center[1]:.4f}")
+    except Exception as e:
+        st.warning(f"Could not calculate zone bounds: {e}")
+
+# Update the map with proper center and zoom
+m.location = map_center
+m.zoom_start = map_zoom
+
+if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
+    try:
+        zones_gdf = zones_gdf.copy()
+        try:
+            zones_gdf["geometry"] = zones_gdf.geometry.buffer(0)
+        except Exception:
+            pass
+        
+        # Only explode if there are multi-part geometries and we want to split them
+        # Comment out explosion to keep original zone count
+        # try:
+        #     zones_gdf = zones_gdf.explode(index_parts=False, ignore_index=True)
+        # except TypeError:
+        #     zones_gdf = zones_gdf.explode().reset_index(drop=True)
+
+        palette = ["#FF0000", "#FF8C00", "#FFFF00", "#32CD32", "#006400",
+                   "#1E90FF", "#8A2BE2", "#FFC0CB", "#A52A2A", "#00CED1"]
+        unique_vals = list(dict.fromkeys(sorted(list(zones_gdf["Zone"].astype(str).unique()))))
+        color_map = {z: palette[i % len(palette)] for i, z in enumerate(unique_vals)}
+
+        # Add zone fill
+        folium.GeoJson(
+            zones_gdf,
+            name="Zones (Fill)",
+            style_function=lambda feature: {
+                "fillColor": color_map.get(str(feature["properties"].get("Zone", "")), "#808080"),
+                "color": "#202020",
+                "weight": 1,
+                "fillOpacity": 0.25,
+            },
+            tooltip=folium.GeoJsonTooltip(
+                fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
+            ),
+        ).add_to(m)
+
+        # Add zone boundaries with thick black lines
+        folium.GeoJson(
+            zones_gdf,
+            name="Zone Outlines (Top)",
+            style_function=lambda feature: {
+                "fillOpacity": 0,
+                "color": "#000000",
+                "weight": 3,
+                "opacity": 1.0,
+            },
+            tooltip=None
+        ).add_to(m)
+
+        legend_items = "".join(
+            f"<div style='display:flex;align-items:center;margin:2px 0;'>"
+            f"<div style='background:{color_map[z]};width:14px;height:14px;margin-right:6px;'></div>{z}</div>"
+            for z in unique_vals
+        )
+        legend_html = f"""
+        <div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
+                     font-family:sans-serif; font-size:13px; color:white;
+                     background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px; width:160px;">
+          <div style="font-weight:600; margin-bottom:4px; cursor:pointer;"
+               onclick="var x = document.getElementById('zone-legend-items');
+                        if (x.style.display === 'none') {{ x.style.display = 'block'; }}
+                        else {{ x.style.display = 'none'; }}">
+            Zone Colors ▼
+          </div>
+          <div id="zone-legend-items" style="display:block;">{legend_items}</div>
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
+    except Exception as e:
+        st.warning(f"Skipping zones overlay: {e}")
+
+# ---------- Prescription overlays ----------
+legend_ix = 0
+seed_gdf = st.session_state.get("seed_gdf")
+if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
+    add_prescription_overlay(m, seed_gdf, "Seed RX", plt.cm.Greens, legend_ix)
+    legend_ix += 1
+
+for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
+    if fgdf is not None and not fgdf.empty:
+        add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", plt.cm.Blues, legend_ix)
+        legend_ix += 1
+
+# ---------- Heatmaps (yield / profits) — FOOLPROOF ----------
+bounds = compute_bounds_for_heatmaps()
+ydf = st.session_state.get("yield_df")
+sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
+
+# =========================================================
+# DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
+# =========================================================
+df_for_maps = pd.DataFrame()
+
+if isinstance(ydf, (pd.DataFrame, gpd.GeoDataFrame)) and not ydf.empty:
+    try:
+        # Convert to regular DataFrame first - PRESERVE COORDINATES
+        if isinstance(ydf, gpd.GeoDataFrame):
+            # Keep all columns including Latitude/Longitude that were just created
+            df_for_maps = pd.DataFrame(ydf.drop(columns="geometry", errors="ignore"))
+        else:
+            df_for_maps = pd.DataFrame(ydf.copy())
+
+        # Use existing coordinate columns if available
+        if "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+            # Coordinates already exist, use them
+            pass
+        else:
+            # Extract coordinates from geometry if needed
+            if isinstance(ydf, gpd.GeoDataFrame) and "geometry" in ydf.columns:
+                try:
+                    reps = ydf.geometry.representative_point()
+                    df_for_maps["Longitude"] = reps.x
+                    df_for_maps["Latitude"] = reps.y
+                except Exception as e:
+                    st.warning(f"Coordinate extraction failed: {e}")
+                    df_for_maps["Longitude"], df_for_maps["Latitude"] = np.nan, np.nan
+
+        # Normalize coord column names if provided in CSV/JSON
+        lower_cols = {c.lower(): c for c in df_for_maps.columns}
+        if "longitude" in lower_cols and "Longitude" not in df_for_maps.columns:
+            df_for_maps.rename(columns={lower_cols["longitude"]: "Longitude"}, inplace=True)
+        if "latitude" in lower_cols and "Latitude" not in df_for_maps.columns:
+            df_for_maps.rename(columns={lower_cols["latitude"]: "Latitude"}, inplace=True)
+
+        # Detect/normalize yield column
+        yield_candidates = [
+            "yield", "dry_yield", "wet_yield", "yld_mass_dr", "yld_vol_dr",
+            "yld_mass_wt", "yld_vol_wt", "crop_flw_m", "yld_bu_ac", "prod_yield", "harvestyield"
+        ]
+        ycol = next((c for c in df_for_maps.columns if c.lower() in yield_candidates or "yld" in c.lower()), None)
+        if ycol and ycol != "Yield":
+            df_for_maps.rename(columns={ycol: "Yield"}, inplace=True)
+
+        # Ensure we have the required columns
+        if "Latitude" not in df_for_maps.columns:
+            df_for_maps["Latitude"] = np.nan
+        if "Longitude" not in df_for_maps.columns:
+            df_for_maps["Longitude"] = np.nan
+        if "Yield" not in df_for_maps.columns:
+            df_for_maps["Yield"] = 0.0
+
+        # Convert to numeric
+        df_for_maps["Latitude"] = pd.to_numeric(df_for_maps["Latitude"], errors="coerce")
+        df_for_maps["Longitude"] = pd.to_numeric(df_for_maps["Longitude"], errors="coerce")
+        df_for_maps["Yield"] = pd.to_numeric(df_for_maps["Yield"], errors="coerce").fillna(0)
+
+    except Exception as e:
+        st.warning(f"Data conversion failed: {e}")
+        df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 else:
-    boundary = MultiPoint(points).convex_hull
-    print("⚠️ alphashape not installed – using convex hull fallback.")
-```
+    # Fallback empty DF if ydf missing
+    df_for_maps = pd.DataFrame(columns=["Latitude", "Longitude", "Yield"])
 
----
+# =========================================================
+# SELECT ONLY ROWS WITH VALID COORDS FOR MAPPING (NO FULL WIPE)
+# =========================================================
+try:
+    if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        # Ensure columns are Series (not DataFrame)
+        lat_series = df_for_maps["Latitude"]
+        lon_series = df_for_maps["Longitude"]
+        
+        # Check if they are Series
+        if hasattr(lat_series, 'between') and hasattr(lon_series, 'between'):
+            valid_mask = (
+                lat_series.between(-90, 90)
+                & lon_series.between(-180, 180)
+                & lat_series.notna()
+                & lon_series.notna()
+            )
+            df_valid = df_for_maps.loc[valid_mask].copy()
+        else:
+            # Fallback: filter manually
+            df_valid = df_for_maps[
+                (df_for_maps["Latitude"] >= -90) & (df_for_maps["Latitude"] <= 90) &
+                (df_for_maps["Longitude"] >= -180) & (df_for_maps["Longitude"] <= 180) &
+                df_for_maps["Latitude"].notna() & df_for_maps["Longitude"].notna()
+            ].copy()
+        
+        st.write(f"DEBUG: Valid rows after filtering: {len(df_valid)}")
+        
+        if df_valid.empty:
+            st.warning("No valid coordinates detected — using full dataset for continuity.")
+            df_valid = df_for_maps.copy()
+    else:
+        st.warning("No Latitude/Longitude columns found — skipping coordinate validation.")
+        df_valid = df_for_maps.copy()
+except Exception as e:
+    st.warning(f"Coordinate validation failed: {e}")
+    df_valid = df_for_maps.copy()
 
-### 🔒 Why This Is “Web-Safe”
+if df_valid.empty:
+    st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
+else:
+    try:
+        # Clip extreme yield outliers (5–95%)
+        if df_valid["Yield"].dropna().size > 0:
+            low, high = np.nanpercentile(df_valid["Yield"], [5, 95])
+            if np.isfinite(low) and np.isfinite(high) and low < high:
+                df_valid["Yield"] = df_valid["Yield"].clip(lower=low, upper=high)
 
-* Runs automatically inside **Streamlit Cloud, Render, Cursor, Replit, etc.**
-* Installs quietly without user input.
-* If installation fails (no internet or permissions), the app **continues** with convex-hull masking — no map crash.
-* Keeps your **public web users** unaware of any backend dependency issues.
+        # Normalize metric conversions
+        if df_valid["Yield"].max() > 400:
+            df_valid["Yield"] = df_valid["Yield"] / 15.93
 
----
+        # Use flexible bounds calculation that works with any layer combination
+        bounds = compute_bounds_for_heatmaps()
+        
+        # If no bounds calculated, fall back to yield data bounds
+        if bounds == (25.0, -125.0, 49.0, -66.0) and "Latitude" in df_valid.columns and "Longitude" in df_valid.columns:
+            south = float(df_valid["Latitude"].min())
+            west = float(df_valid["Longitude"].min())
+            north = float(df_valid["Latitude"].max())
+            east = float(df_valid["Longitude"].max())
+            bounds = (south, west, north, east)
+    except Exception as e:
+        st.warning(f"Map bounds computation failed: {e}")
 
-If you confirm, I’ll splice this snippet into your **Cursor 2 baseline (Farm Profit Mapping Tool V4 — COMPACT + BULLETPROOF Patched)** at the exact safe position — just after your import block — so it’s permanently integrated.
-Would you like me to insert it automatically there now?
+    # =========================================================
+    # SAFE PROFIT METRICS
+    # =========================================================
+    try:
+        base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
+
+        fert_var = seed_var = 0.0
+        for d in st.session_state.get("fert_layers_store", {}).values():
+            if isinstance(d, pd.DataFrame) and not d.empty:
+                fert_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
+
+        for d in st.session_state.get("seed_layers_store", {}).values():
+            if isinstance(d, pd.DataFrame) and not d.empty:
+                seed_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
+
+        fx = st.session_state.get("fixed_products", pd.DataFrame())
+        fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
+
+        if "Yield" in df_for_maps.columns:
+            df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
+            df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
+                base_expenses_per_acre + fert_var + seed_var
+            )
+            df_for_maps["NetProfit_Fixed"] = df_for_maps["Revenue_per_acre"] - (
+                base_expenses_per_acre + fixed_costs
+            )
+        else:
+            df_for_maps["Revenue_per_acre"] = 0.0
+            df_for_maps["NetProfit_Variable"] = 0.0
+            df_for_maps["NetProfit_Fixed"] = 0.0
+    except Exception as e:
+        st.warning(f"Profit calculation fallback triggered: {e}")
+        for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
+            df_for_maps[c] = 0.0
+
+    # =========================================================
+    # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
+    # =========================================================
+    def safe_overlay(colname, title, cmap, show_default):
+        if colname not in df_for_maps.columns or df_for_maps.empty:
+            return None, None
+        try:
+            return add_heatmap_overlay(
+                m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
+            )
+        except Exception as e:
+            st.warning(f"Overlay '{title}' failed: {e}")
+            return None, None
+
+    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
+    if ymin is not None:
+        add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
+        st.info(f"✅ Yield heatmap added: {ymin:.1f} - {ymax:.1f} bu/ac")
+    else:
+        st.warning("❌ Yield heatmap failed to render")
+
+    vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    if vmin is not None:
+        add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
+
+    fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    if fmin is not None:
+        add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
+
+# Final fit using all active layers - prioritize yield data if available
+try:
+    # First try to use yield data bounds directly
+    if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
+        lat_vals = df_for_maps["Latitude"].dropna()
+        lon_vals = df_for_maps["Longitude"].dropna()
+        if len(lat_vals) > 0 and len(lon_vals) > 0:
+            south, north = lat_vals.min(), lat_vals.max()
+            west, east = lon_vals.min(), lon_vals.max()
+            st.info(f"✅ Map bounds from yield data: lat [{south:.6f}, {north:.6f}], lon [{west:.6f}, {east:.6f}]")
+        else:
+            south, west, north, east = compute_bounds_for_heatmaps()
+    else:
+        south, west, north, east = compute_bounds_for_heatmaps()
+    
+    m.fit_bounds([[south, west], [north, east]])
+except Exception as e:
+    st.warning(f"Auto-zoom fallback failed: {e}")
+
+# Add layer control to make layers toggleable
+folium.LayerControl().add_to(m)
+
+st_folium(m, use_container_width=True, height=600, key="stable_map")
+
+# =========================================================
+# PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
+# =========================================================
+def render_profit_summary():
+    st.header("Profit Summary")
+
+    # ---------- helpers ----------
+    def fmt_money(x):
+        try:
+            return f"${x:,.2f}"
+        except Exception:
+            return x
+
+    def color_profit(val):
+        try:
+            v = float(val)
+        except Exception:
+            return "color:white;"
+        if v > 0:
+            return "color:limegreen;font-weight:bold;"
+        elif v < 0:
+            return "color:#ff4d4d;font-weight:bold;"
+        else:
+            return "font-weight:bold;color:white;"
+
+    def render_static_table(df: pd.DataFrame, title: str):
+        """Render static HTML table — no scrollbars, fully expanded."""
+        if df is None or df.empty:
+            st.info(f"No data available for {title}.")
+            return
+        # Build header
+        html = f"<h5 style='margin-top:10px;margin-bottom:6px;'>{title}</h5>"
+        html += """
+        <style>
+        .static-table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+        .static-table th, .static-table td {
+            border:1px solid #444; padding:4px 6px; text-align:right;
+        }
+        .static-table th {
+            background-color:#111; color:white; font-weight:600; text-align:left;
+        }
+        .static-table td:first-child, .static-table th:first-child { text-align:left; }
+        </style>
+        <table class='static-table'>
+        <thead><tr>""" + "".join(f"<th>{c}</th>" for c in df.columns) + "</tr></thead><tbody>"
+
+        # Build rows with conditional coloring
+        for _, row in df.iterrows():
+            html += "<tr>"
+            for c, v in row.items():
+                val = fmt_money(v) if isinstance(v, (int, float)) else v
+                style = color_profit(v) if "Profit" in c or "Rate" in c else ""
+                html += f"<td style='{style}'>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        st.markdown(html, unsafe_allow_html=True)
+
+    # ---------- Safe defaults ----------
+    expenses = st.session_state.get("expenses_dict", {})
+    base_exp = float(
+        st.session_state.get(
+            "base_expenses_per_acre",
+            sum(expenses.values()) if expenses else 0.0,
+        )
+    )
+    corn_yield  = float(st.session_state.get("corn_yield", 200))
+    corn_price  = float(st.session_state.get("corn_price", 5))
+    bean_yield  = float(st.session_state.get("bean_yield", 60))
+    bean_price  = float(st.session_state.get("bean_price", 12))
+    target_yield = float(st.session_state.get("target_yield", 200))
+    sell_price   = float(st.session_state.get("sell_price", corn_price))
+
+    # ---------- Profit math ----------
+    revenue_per_acre = target_yield * sell_price
+    fixed_inputs = base_exp
+
+    # variable-rate (from RX products)
+    fert_costs_var = seed_costs_var = 0.0
+    df_fert = st.session_state.get("fert_products")
+    if isinstance(df_fert, pd.DataFrame) and "CostPerAcre" in df_fert.columns:
+        fert_costs_var = pd.to_numeric(df_fert["CostPerAcre"], errors="coerce").sum()
+    df_seed = st.session_state.get("seed_products")
+    if isinstance(df_seed, pd.DataFrame) and "CostPerAcre" in df_seed.columns:
+        seed_costs_var = pd.to_numeric(df_seed["CostPerAcre"], errors="coerce").sum()
+    expenses_var = fixed_inputs + fert_costs_var + seed_costs_var
+    profit_var   = revenue_per_acre - expenses_var
+
+    # fixed-rate (from flat products)
+    fert_costs_fix = seed_costs_fix = 0.0
+    df_fix = st.session_state.get("fixed_products")
+    if isinstance(df_fix, pd.DataFrame):
+        if "Type" in df_fix.columns and "$/ac" in df_fix.columns:
+            fert_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Fertilizer", "$/ac"], errors="coerce").sum()
+            seed_costs_fix = pd.to_numeric(df_fix.loc[df_fix["Type"] == "Seed", "$/ac"], errors="coerce").sum()
+        elif "$/ac" in df_fix.columns:
+            fert_costs_fix = seed_costs_fix = pd.to_numeric(df_fix["$/ac"], errors="coerce").sum()
+    expenses_fix = fixed_inputs + fert_costs_fix + seed_costs_fix
+    profit_fix   = revenue_per_acre - expenses_fix
+
+    # ---------- Tables ----------
+    comparison = pd.DataFrame(
+        {
+            "Metric": ["Revenue ($/ac)", "Expenses ($/ac)", "Profit ($/ac)"],
+            "Breakeven Budget": [revenue_per_acre, fixed_inputs, revenue_per_acre - fixed_inputs],
+            "Variable Rate":    [revenue_per_acre, expenses_var,  profit_var],
+            "Fixed Rate":       [revenue_per_acre, expenses_fix,  profit_fix],
+        }
+    )
+
+    cornsoy = pd.DataFrame(
+        {
+            "Crop": ["Corn", "Soybeans"],
+            "Yield (bu/ac)":      [corn_yield, bean_yield],
+            "Sell Price ($/bu)":  [corn_price, bean_price],
+        }
+    )
+    cornsoy["Revenue ($/ac)"]      = cornsoy["Yield (bu/ac)"] * cornsoy["Sell Price ($/bu)"]
+    cornsoy["Fixed Inputs ($/ac)"] = base_exp
+    cornsoy["Profit ($/ac)"]       = cornsoy["Revenue ($/ac)"] - cornsoy["Fixed Inputs ($/ac)"]
+
+    fixed_df = pd.DataFrame(list(expenses.items()), columns=["Expense", "$/ac"])
+    if not fixed_df.empty:
+        total_row = pd.DataFrame([{"Expense": "Total Fixed Costs", "$/ac": fixed_df["$/ac"].sum()}])
+        fixed_df = pd.concat([fixed_df, total_row], ignore_index=True)
+
+    # ---------- Layout ----------
+    left, right = st.columns([2, 1], gap="large")
+
+    with left:
+        render_static_table(comparison, "Profit Comparison")
+
+        with st.expander("Show Calculation Formulas", expanded=False):
+            st.markdown("""
+            <div style="display:flex;flex-wrap:wrap;gap:6px;
+                        font-size:0.75rem;line-height:1.1rem;">
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Breakeven Budget</b><br>
+                (Target Yield × Sell Price) − Fixed Inputs
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Variable Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Var Seed + Var Fert)
+              </div>
+              <div style="flex:1;min-width:180px;border:1px solid #444;
+                          border-radius:6px;padding:5px;background-color:#111;">
+                <b>Fixed Rate</b><br>
+                (Target Yield × Sell Price) − (Fixed Inputs + Fixed Seed + Fixed Fert)
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        render_static_table(cornsoy, "Corn vs Soybean Profitability")
+
+    with right:
+        render_static_table(fixed_df, "Fixed Input Costs")
+
+# ---------- render ----------
+render_profit_summary()
