@@ -568,44 +568,34 @@ def render_uploaders():
                                                                         ref_source = "fertilizer"
                                                                         break
                                                         
-                                                        st.info(f"Using reference point from {ref_source}: {ref_lat:.4f}, {ref_lon:.4f}")
-                                                        
                                                         # Convert GPS distance/angle to lat/lon with proper field coverage
-                                                        import math
                                                         from shapely.geometry import Point
                                                         
-                                                        # More accurate feet to degrees conversion
-                                                        feet_to_degrees = 1.0 / 364000
-                                                        
-                                                        # Get coordinate ranges
-                                                        distances = gdf['Distance_f'].values
-                                                        angles = gdf['Track_deg_'].values
-                                                        
-                                                        # Convert to radians
-                                                        angles_rad = np.radians(angles)
-                                                        
-                                                        # Create a more realistic field coverage pattern
-                                                        # Use a reasonable field size (e.g., 1 mile x 1 mile)
-                                                        field_size_degrees = 0.015  # ~1 mile in degrees
-                                                        
-                                                        # Normalize distances to 0-1 range
-                                                        dist_min, dist_max = distances.min(), distances.max()
-                                                        if dist_max > dist_min:
-                                                            norm_distances = (distances - dist_min) / (dist_max - dist_min)
+                                                        # Rebuild coordinates relative to field polygon center
+                                                        # Use zones_gdf total_bounds for reference frame and scaling
+                                                        if zones_gdf is not None and not zones_gdf.empty:
+                                                            xmin, ymin, xmax, ymax = zones_gdf.total_bounds
+                                                            ref_lon = (xmin + xmax) / 2
+                                                            ref_lat = (ymin + ymax) / 2
+                                                            scale_lon = (xmax - xmin) * 0.5
+                                                            scale_lat = (ymax - ymin) * 0.5
                                                         else:
-                                                            norm_distances = np.ones_like(distances) * 0.5
+                                                            scale_lon = scale_lat = 0.005
                                                         
-                                                        # Create field coverage with proper aspect ratio
-                                                        dx = norm_distances * field_size_degrees * np.sin(angles_rad)
-                                                        dy = norm_distances * field_size_degrees * np.cos(angles_rad)
+                                                        # Convert angles to radians
+                                                        angles_rad = np.radians(gdf["Track_deg_"].astype(float))
+                                                        distances = pd.to_numeric(gdf["Distance_f"], errors="coerce").fillna(0)
                                                         
-                                                        # Calculate final coordinates
-                                                        lons = ref_lon + dx
-                                                        lats = ref_lat + dy
+                                                        # Normalize distances (0–1) across full dataset
+                                                        dist_min, dist_max = distances.min(), distances.max()
+                                                        norm_distances = (distances - dist_min) / (dist_max - dist_min + 1e-9)
                                                         
-                                                        # Create point geometries
+                                                        # Rebuild lat/lon pattern oriented correctly (sin for X, cos for Y)
+                                                        lons = ref_lon + (norm_distances - 0.5) * scale_lon * np.sin(angles_rad)
+                                                        lats = ref_lat + (norm_distances - 0.5) * scale_lat * np.cos(angles_rad)
+                                                        
                                                         gdf.geometry = [Point(lon, lat) for lon, lat in zip(lons, lats)]
-                                                        st.info(f"✅ Created geometries from GPS distance/angle data (ref: {ref_lat:.4f}, {ref_lon:.4f})")
+                                                        st.info(f"✅ Reconstructed yield coordinates aligned to zone field bounds")
                                                         
                                                     except Exception as gps_error:
                                                         st.error(f"GPS conversion failed: {gps_error}")
