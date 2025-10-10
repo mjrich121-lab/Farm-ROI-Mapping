@@ -526,30 +526,80 @@ def render_uploaders():
                             if has_valid_coords:
                                 # Skip all geometry repair - we have valid coordinates
                                 st.info(f"✅ Using existing valid geographic coordinates from {yf.name}")
-                            elif gdf.geometry.is_empty.all():
-                                st.warning(f"All geometries are empty in {yf.name}")
-                                st.info("Attempting to repair geometries...")
+                            elif gdf.geometry.is_empty.all() or not gdf.geometry.geom_type.isin(["Point"]).all():
+                                st.warning(f"Geometries are empty or not Point type in {yf.name}")
+                                st.info(f"Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
+                                st.info("Checking for coordinate columns in attribute table...")
                                 
-                                # Try multiple repair methods
-                                try:
-                                    # Method 1: Buffer repair
-                                    gdf.geometry = gdf.geometry.buffer(0)
-                                    if not gdf.geometry.is_empty.all():
-                                        st.info("✅ Repaired geometries using buffer method")
-                                    else:
-                                        # Method 2: Try to reconstruct from bounds if available
-                                        if hasattr(gdf, 'bounds') and not gdf.bounds.isnull().all().all():
-                                            st.info("Attempting to reconstruct geometries from bounds...")
-                                            # This is a fallback - create point geometries from bounds center
-                                            bounds = gdf.bounds
-                                            centers_lon = (bounds['minx'] + bounds['maxx']) / 2
-                                            centers_lat = (bounds['miny'] + bounds['maxy']) / 2
-                                            from shapely.geometry import Point
-                                            gdf.geometry = [Point(lon, lat) for lon, lat in zip(centers_lon, centers_lat)]
-                                            st.info("✅ Created point geometries from bounds")
+                                # PRIORITY: Extract coordinates from attribute table (common in John Deere/Ag Leader files)
+                                coord_candidates = [c.lower() for c in gdf.columns]
+                                lat_col = None
+                                lon_col = None
+                                
+                                # Look for common coordinate column patterns
+                                for c in gdf.columns:
+                                    c_lower = c.lower()
+                                    # Latitude candidates
+                                    if lat_col is None and (c_lower in ['y', 'lat', 'latitude', 'northing'] or 
+                                                            c_lower.startswith('y_') or 
+                                                            'latitude' in c_lower or 'lat' == c_lower):
+                                        lat_col = c
+                                    # Longitude candidates  
+                                    if lon_col is None and (c_lower in ['x', 'lon', 'long', 'longitude', 'easting'] or 
+                                                            c_lower.startswith('x_') or 
+                                                            'longitude' in c_lower or 'lon' == c_lower):
+                                        lon_col = c
+                                
+                                if lat_col and lon_col:
+                                    try:
+                                        gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
+                                        gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
+                                        gdf = gdf.dropna(subset=["Latitude", "Longitude"])
+                                        
+                                        # Validate that these are geographic coordinates
+                                        if (gdf["Latitude"].min() >= -90 and gdf["Latitude"].max() <= 90 and
+                                            gdf["Longitude"].min() >= -180 and gdf["Longitude"].max() <= 180):
+                                            st.info(f"✅ Using coordinate columns from attribute table: {lat_col}, {lon_col}")
+                                            st.info(f"✅ Extracted {len(gdf)} valid GPS points")
+                                            
+                                            # Create geometry from these coordinates
+                                            gdf = gpd.GeoDataFrame(
+                                                gdf, 
+                                                geometry=gpd.points_from_xy(gdf["Longitude"], gdf["Latitude"]), 
+                                                crs="EPSG:4326"
+                                            )
+                                            has_valid_coords = True
                                         else:
-                                            # Method 3: Check if there are coordinate columns in the attribute data
-                                            st.info("Checking for coordinate columns in attribute data...")
+                                            st.warning(f"⚠️ Columns {lat_col}, {lon_col} don't contain valid geographic coordinates")
+                                    except Exception as e:
+                                        st.warning(f"Failed to extract from attribute columns: {e}")
+                                
+                                if not has_valid_coords:
+                                    st.warning("⚠️ No explicit Lat/Lon columns found in attribute table")
+                                    st.info("Attempting geometry repair...")
+                                
+                                # Only try geometry repair if we don't have valid coords
+                                if not has_valid_coords:
+                                    # Try multiple repair methods
+                                    try:
+                                        # Method 1: Buffer repair
+                                        gdf.geometry = gdf.geometry.buffer(0)
+                                        if not gdf.geometry.is_empty.all():
+                                            st.info("✅ Repaired geometries using buffer method")
+                                        else:
+                                            # Method 2: Try to reconstruct from bounds if available
+                                            if hasattr(gdf, 'bounds') and not gdf.bounds.isnull().all().all():
+                                                st.info("Attempting to reconstruct geometries from bounds...")
+                                                # This is a fallback - create point geometries from bounds center
+                                                bounds = gdf.bounds
+                                                centers_lon = (bounds['minx'] + bounds['maxx']) / 2
+                                                centers_lat = (bounds['miny'] + bounds['maxy']) / 2
+                                                from shapely.geometry import Point
+                                                gdf.geometry = [Point(lon, lat) for lon, lat in zip(centers_lon, centers_lat)]
+                                                st.info("✅ Created point geometries from bounds")
+                                            else:
+                                                # Method 3: Continue with previous logic
+                                                st.info("Checking for other coordinate columns in attribute data...")
                                             coord_cols = []
                                             for col in gdf.columns:
                                                 col_lower = col.lower()
@@ -575,8 +625,10 @@ def render_uploaders():
                                                     continue
                                             else:
                                                 # Method 4: Try to convert GPS distance/angle to coordinates
-                                                st.info("No coordinate columns found. Checking for GPS distance/angle data...")
-                                                if 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
+                                                # ONLY if we don't already have valid coords from attribute table
+                                                if not has_valid_coords:
+                                                    st.info("No coordinate columns found. Checking for GPS distance/angle data...")
+                                                if not has_valid_coords and 'Distance_f' in gdf.columns and 'Track_deg_' in gdf.columns:
                                                     st.info("Found GPS distance/angle columns. Attempting coordinate conversion...")
                                                     try:
                                                         # Use field center from any available layer, with smart fallback
@@ -695,10 +747,10 @@ def render_uploaders():
                                                     st.info(f"Available columns: {list(gdf.columns)}")
                                                     messages.append(f"{yf.name}: empty geometries — skipped.")
                                                     continue
-                                except Exception as repair_error:
-                                    st.error(f"Geometry repair failed: {repair_error}")
-                                    messages.append(f"{yf.name}: geometry repair failed — skipped.")
-                                    continue
+                                    except Exception as repair_error:
+                                        st.error(f"Geometry repair failed: {repair_error}")
+                                        messages.append(f"{yf.name}: geometry repair failed — skipped.")
+                                        continue
                             
                             # Extract coordinates using representative points ONLY if we don't have valid ones
                             if not has_valid_coords:
