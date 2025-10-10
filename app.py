@@ -200,15 +200,27 @@ def load_vector_file(uploaded_file):
         except Exception:
             pass
 
-        # geometry hardening
+        # geometry hardening - SKIP for Point geometries (buffer corrupts them)
         try:
-            gdf["geometry"] = gdf.geometry.buffer(0)
+            # Only apply buffer to Polygon/MultiPolygon geometries
+            if not gdf.geometry.geom_type.isin(["Point", "MultiPoint"]).all():
+                gdf["geometry"] = gdf.geometry.buffer(0)
+                st.info("✅ Applied buffer(0) to polygon geometries")
+            else:
+                st.info("✅ Skipping buffer for Point geometries (preserves coordinates)")
         except Exception:
             pass
+        
+        # Only explode MultiPolygon/MultiPoint - NOT regular Points
         try:
-            gdf = gdf.explode(index_parts=False, ignore_index=True)
+            if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
+                gdf = gdf.explode(index_parts=False, ignore_index=True)
+                st.info("✅ Exploded multi-part geometries")
+            else:
+                st.info("✅ Skipping explode for Point geometries")
         except TypeError:
-            gdf = gdf.explode().reset_index(drop=True)
+            if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
+                gdf = gdf.explode().reset_index(drop=True)
 
         return gdf
 
