@@ -1079,28 +1079,64 @@ def render_input_sections():
     fert_products = sorted(set(fert_products))
     seed_products = sorted(set(seed_products))
 
-    # Auto-calculate Units Applied from uploaded RX maps
+    # Auto-calculate Units Applied from uploaded RX maps (area-weighted)
     fert_units_map = {}
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
-            # Try to find rate column
             rate_col = next((c for c in gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
             if rate_col:
-                total_units = pd.to_numeric(gdf[rate_col], errors="coerce").sum()
-                fert_units_map[key] = total_units
+                try:
+                    # Area-weighted calculation
+                    gdf_copy = gdf.copy()
+                    if gdf_copy.crs is None:
+                        gdf_copy.set_crs(epsg=4326, inplace=True)
+                    if gdf_copy.crs.is_geographic:
+                        gdf_copy = gdf_copy.to_crs(epsg=5070)
+                    
+                    gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                    total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                    fert_units_map[key] = round(total_units, 2)
+                except Exception:
+                    # Fallback to mean rate * total acres
+                    mean_rate = pd.to_numeric(gdf[rate_col], errors="coerce").mean()
+                    total_acres = st.session_state.get("base_acres", 1.0)
+                    fert_units_map[key] = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
     
     seed_units_total = 0.0
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         rate_col = next((c for c in seed_gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
         if rate_col:
-            seed_units_total = pd.to_numeric(seed_gdf[rate_col], errors="coerce").sum()
+            try:
+                # Area-weighted calculation
+                gdf_copy = seed_gdf.copy()
+                if gdf_copy.crs is None:
+                    gdf_copy.set_crs(epsg=4326, inplace=True)
+                if gdf_copy.crs.is_geographic:
+                    gdf_copy = gdf_copy.to_crs(epsg=5070)
+                
+                gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+                gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                seed_units_total = round((gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum(), 2)
+            except Exception:
+                # Fallback to mean rate * total acres
+                mean_rate = pd.to_numeric(seed_gdf[rate_col], errors="coerce").mean()
+                total_acres = st.session_state.get("base_acres", 1.0)
+                seed_units_total = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
     
     # Build editor rows from detected products with auto-filled units
+    # Link fertilizer products to RX maps by matching names
     all_variable_inputs = []
     for p in fert_products:
-        units = fert_units_map.get(p, 0.0)
+        units = 0.0
+        # Try to match product name to RX map key
+        for key, total in fert_units_map.items():
+            if p.lower() in key.lower() or key.lower() in p.lower():
+                units = total
+                break
         all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": units, "Price per Unit ($)": 0.0})
+    
     for p in seed_products:
         all_variable_inputs.append({"Type": "Seed", "Product": p, "Units Applied": seed_units_total, "Price per Unit ($)": 0.0})
     
@@ -1362,7 +1398,7 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
             except Exception:
                 fill = "#808080"
         return {"stroke": False, "opacity": 0, "weight": 0,
-                "fillColor": fill, "fillOpacity": 0.55}
+                "fillColor": fill, "fillOpacity": 0.6}
 
     fields, aliases = [], []
     if product_col: fields.append(product_col); aliases.append("Product")
@@ -2011,14 +2047,10 @@ folium.LayerControl().add_to(m)
 # Add CSS for transparent legend backgrounds
 st.markdown("""
 <style>
-.legend, .leaflet-control-layers, .branca-colormap, .legend-card {
+.legend, .leaflet-control-layers, .branca-colormap {
     background-color: rgba(255,255,255,0.0) !important;
     color: white !important;
     box-shadow: none !important;
-}
-#legend-tl .legend-card {
-    background-color: rgba(0,0,0,0.65) !important;
-    margin-bottom: 10px !important;
 }
 </style>
 """, unsafe_allow_html=True)
