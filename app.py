@@ -2126,11 +2126,12 @@ except Exception:
 # Add layer control to make layers toggleable
 folium.LayerControl().add_to(m)
 
-# === Inject Transparent Legend CSS directly into Folium map ===
+# === Folium legend styling (true transparency + spacing) ===
 legend_css = """
 <style>
 .legend, .leaflet-control-layers, .branca-colormap, .legend-control {
-    background-color: rgba(0,0,0,0.0) !important;
+    background: transparent !important;
+    background-color: rgba(255,255,255,0.0) !important;
     box-shadow: none !important;
     border: none !important;
     color: white !important;
@@ -2140,17 +2141,21 @@ legend_css = """
 .leaflet-top.leaflet-left .branca-colormap {
     margin-top: 20px !important;
     margin-left: 20px !important;
+    position: relative !important;
 }
-.leaflet-top.leaflet-left .branca-colormap + .branca-colormap {
-    margin-top: 100px !important;
+.leaflet-top.leaflet-left .branca-colormap + .branca-colormap,
+.leaflet-top.leaflet-left .legend + .branca-colormap,
+.leaflet-top.leaflet-left .branca-colormap + .legend {
+    margin-top: 140px !important;   /* stronger vertical offset */
 }
 .leaflet-control, .branca-colormap {
     z-index: 9999 !important;
+    display: block !important;
+    float: none !important;
+    clear: both !important;
 }
 </style>
 """
-
-# Inject CSS into map's HTML (inside iframe)
 m.get_root().header.add_child(folium.Element(legend_css))
 
 # Dynamic map key for refresh on file upload (controlled)
