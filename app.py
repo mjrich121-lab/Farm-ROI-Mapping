@@ -1096,12 +1096,22 @@ def render_input_sections():
                     gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
                     gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
                     total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                    
+                    # Normalize scale if unrealistically large
+                    if total_units > 100000:
+                        total_acres = st.session_state.get("base_acres", 1.0)
+                        if total_acres > 0:
+                            total_units = total_units / total_acres
+                    
                     fert_units_map[key] = round(total_units, 2)
                 except Exception:
-                    # Fallback to mean rate * total acres
-                    mean_rate = pd.to_numeric(gdf[rate_col], errors="coerce").mean()
-                    total_acres = st.session_state.get("base_acres", 1.0)
-                    fert_units_map[key] = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
+                    # Fallback to mean rate * total acres (silent)
+                    try:
+                        mean_rate = pd.to_numeric(gdf[rate_col], errors="coerce").mean()
+                        total_acres = st.session_state.get("base_acres", 1.0)
+                        fert_units_map[key] = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
+                    except Exception:
+                        fert_units_map[key] = 0.0
     
     seed_units_total = 0.0
     seed_gdf = st.session_state.get("seed_gdf")
@@ -1118,12 +1128,23 @@ def render_input_sections():
                 
                 gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
                 gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                seed_units_total = round((gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum(), 2)
+                seed_units_total = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                
+                # Normalize scale if unrealistically large
+                if seed_units_total > 100000:
+                    total_acres = st.session_state.get("base_acres", 1.0)
+                    if total_acres > 0:
+                        seed_units_total = seed_units_total / total_acres
+                
+                seed_units_total = round(seed_units_total, 2)
             except Exception:
-                # Fallback to mean rate * total acres
-                mean_rate = pd.to_numeric(seed_gdf[rate_col], errors="coerce").mean()
-                total_acres = st.session_state.get("base_acres", 1.0)
-                seed_units_total = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
+                # Fallback to mean rate * total acres (silent)
+                try:
+                    mean_rate = pd.to_numeric(seed_gdf[rate_col], errors="coerce").mean()
+                    total_acres = st.session_state.get("base_acres", 1.0)
+                    seed_units_total = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
+                except Exception:
+                    seed_units_total = 0.0
     
     # Build editor rows from detected products with auto-filled units
     # Link fertilizer products to RX maps by matching names
@@ -1144,6 +1165,20 @@ def render_input_sections():
         all_variable_inputs = [{
             "Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0
         }]
+    
+    # Add Total Field Acres summary row
+    zones_gdf = st.session_state.get("zones_gdf")
+    if zones_gdf is not None and not zones_gdf.empty:
+        total_acres = zones_gdf["Override Acres"].sum()
+    else:
+        total_acres = st.session_state.get("base_acres", 0.0)
+    
+    all_variable_inputs.append({
+        "Type": "Summary",
+        "Product": "Total Field Acres",
+        "Units Applied": round(total_acres, 2),
+        "Price per Unit ($)": 0.0
+    })
 
     cols = st.columns(2, gap="small")
 
@@ -1172,12 +1207,18 @@ def render_input_sections():
                 height=auto_height(rx_df)
             ).fillna(0.0)
 
-            edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
+            # Calculate total cost (exclude Summary row)
+            edited["Total Cost ($)"] = edited.apply(
+                lambda row: row["Units Applied"] * row["Price per Unit ($)"] if row["Type"] != "Summary" else 0.0,
+                axis=1
+            )
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
-            st.session_state["variable_rate_inputs"] = edited
+            # Filter out Summary row for cost calculations
+            cost_rows = edited[edited["Type"] != "Summary"]
+            st.session_state["variable_rate_inputs"] = cost_rows
             st.session_state["variable_rate_cost_per_acre"] = (
-                float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
+                float(cost_rows["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
 
     # -------------------------------------------------
@@ -1398,7 +1439,7 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
             except Exception:
                 fill = "#808080"
         return {"stroke": False, "opacity": 0, "weight": 0,
-                "fillColor": fill, "fillOpacity": 0.6}
+                "fillColor": fill, "fillOpacity": 0.55}
 
     fields, aliases = [], []
     if product_col: fields.append(product_col); aliases.append("Product")
@@ -2044,13 +2085,17 @@ except Exception:
 # Add layer control to make layers toggleable
 folium.LayerControl().add_to(m)
 
-# Add CSS for transparent legend backgrounds
+# Add CSS for transparent legend backgrounds and fixed positioning
 st.markdown("""
 <style>
 .legend, .leaflet-control-layers, .branca-colormap {
     background-color: rgba(255,255,255,0.0) !important;
     color: white !important;
     box-shadow: none !important;
+    position: fixed !important;
+}
+#legend-tl, #zone-legend {
+    position: fixed !important;
 }
 </style>
 """, unsafe_allow_html=True)
