@@ -1083,68 +1083,48 @@ def render_input_sections():
     fert_units_map = {}
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
-            rate_col = next((c for c in gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-            if rate_col:
-                try:
-                    # Area-weighted calculation
-                    gdf_copy = gdf.copy()
-                    if gdf_copy.crs is None:
-                        gdf_copy.set_crs(epsg=4326, inplace=True)
-                    if gdf_copy.crs.is_geographic:
-                        gdf_copy = gdf_copy.to_crs(epsg=5070)
-                    
-                    gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
-                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                    total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
-                    
-                    # Normalize scale if unrealistically large
-                    if total_units > 100000:
-                        total_acres = st.session_state.get("base_acres", 1.0)
-                        if total_acres > 0:
-                            total_units = total_units / total_acres
-                    
-                    fert_units_map[key] = round(total_units, 2)
-                except Exception:
-                    # Fallback to mean rate * total acres (silent)
-                    try:
-                        mean_rate = pd.to_numeric(gdf[rate_col], errors="coerce").mean()
-                        total_acres = st.session_state.get("base_acres", 1.0)
-                        fert_units_map[key] = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
-                    except Exception:
-                        fert_units_map[key] = 0.0
-    
-    seed_units_total = 0.0
-    seed_gdf = st.session_state.get("seed_gdf")
-    if seed_gdf is not None and not seed_gdf.empty:
-        rate_col = next((c for c in seed_gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-        if rate_col:
             try:
-                # Area-weighted calculation
-                gdf_copy = seed_gdf.copy()
+                # Accurate area-weighted total units
+                gdf_copy = gdf.copy()
                 if gdf_copy.crs is None:
                     gdf_copy.set_crs(epsg=4326, inplace=True)
                 if gdf_copy.crs.is_geographic:
                     gdf_copy = gdf_copy.to_crs(epsg=5070)
                 
                 gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
-                gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                seed_units_total = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
-                
-                # Normalize scale if unrealistically large
-                if seed_units_total > 100000:
-                    total_acres = st.session_state.get("base_acres", 1.0)
-                    if total_acres > 0:
-                        seed_units_total = seed_units_total / total_acres
-                
-                seed_units_total = round(seed_units_total, 2)
+                rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+                if rate_col:
+                    mean_rate = pd.to_numeric(gdf_copy[rate_col], errors="coerce").mean()
+                    total_acres = gdf_copy["area_acres"].sum()
+                    total_units = round(mean_rate * total_acres, 2)
+                    fert_units_map[key] = total_units
+                else:
+                    fert_units_map[key] = 0.0
             except Exception:
-                # Fallback to mean rate * total acres (silent)
-                try:
-                    mean_rate = pd.to_numeric(seed_gdf[rate_col], errors="coerce").mean()
-                    total_acres = st.session_state.get("base_acres", 1.0)
-                    seed_units_total = round(mean_rate * total_acres, 2) if not pd.isna(mean_rate) else 0.0
-                except Exception:
-                    seed_units_total = 0.0
+                fert_units_map[key] = 0.0
+    
+    seed_units_total = 0.0
+    seed_gdf = st.session_state.get("seed_gdf")
+    if seed_gdf is not None and not seed_gdf.empty:
+        try:
+            # Accurate area-weighted total units
+            gdf_copy = seed_gdf.copy()
+            if gdf_copy.crs is None:
+                gdf_copy.set_crs(epsg=4326, inplace=True)
+            if gdf_copy.crs.is_geographic:
+                gdf_copy = gdf_copy.to_crs(epsg=5070)
+            
+            gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+            rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+            if rate_col:
+                mean_rate = pd.to_numeric(gdf_copy[rate_col], errors="coerce").mean()
+                total_acres = gdf_copy["area_acres"].sum()
+                total_units = round(mean_rate * total_acres, 2)
+                seed_units_total = total_units
+            else:
+                seed_units_total = 0.0
+        except Exception:
+            seed_units_total = 0.0
     
     # Build editor rows from detected products with auto-filled units
     # Link fertilizer products to RX maps by matching names
@@ -1165,20 +1145,6 @@ def render_input_sections():
         all_variable_inputs = [{
             "Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0
         }]
-    
-    # Add Total Field Acres summary row
-    zones_gdf = st.session_state.get("zones_gdf")
-    if zones_gdf is not None and not zones_gdf.empty:
-        total_acres = zones_gdf["Override Acres"].sum()
-    else:
-        total_acres = st.session_state.get("base_acres", 0.0)
-    
-    all_variable_inputs.append({
-        "Type": "Summary",
-        "Product": "Total Field Acres",
-        "Units Applied": round(total_acres, 2),
-        "Price per Unit ($)": 0.0
-    })
 
     cols = st.columns(2, gap="small")
 
@@ -1207,18 +1173,13 @@ def render_input_sections():
                 height=auto_height(rx_df)
             ).fillna(0.0)
 
-            # Calculate total cost (exclude Summary row)
-            edited["Total Cost ($)"] = edited.apply(
-                lambda row: row["Units Applied"] * row["Price per Unit ($)"] if row["Type"] != "Summary" else 0.0,
-                axis=1
-            )
+            # Calculate total cost
+            edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
-            # Filter out Summary row for cost calculations
-            cost_rows = edited[edited["Type"] != "Summary"]
-            st.session_state["variable_rate_inputs"] = cost_rows
+            st.session_state["variable_rate_inputs"] = edited
             st.session_state["variable_rate_cost_per_acre"] = (
-                float(cost_rows["Total Cost ($)"].sum()) / max(base_acres, 1.0)
+                float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
 
     # -------------------------------------------------
@@ -1251,17 +1212,6 @@ def render_input_sections():
 
             edited_flat["Cost per Acre ($/ac)"] = (
                 edited_flat["Rate (units/ac)"] * edited_flat["Price per Unit ($)"]
-            )
-
-            st.dataframe(
-                edited_flat.style.format({
-                    "Rate (units/ac)": "{:,.4f}",
-                    "Price per Unit ($)": "${:,.2f}",
-                    "Cost per Acre ($/ac)": "${:,.2f}",
-                }),
-                use_container_width=True,
-                hide_index=True,
-                height=auto_height(edited_flat)
             )
 
             # Persist in state for Section 9 math
