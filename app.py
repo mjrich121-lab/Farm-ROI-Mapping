@@ -1097,7 +1097,7 @@ def render_input_sections():
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
             try:
-                # Accurate area-weighted total units
+                # True total applied material: sum(rate × area)
                 gdf_copy = gdf.copy()
                 if gdf_copy.crs is None:
                     gdf_copy.set_crs(epsg=4326, inplace=True)
@@ -1107,10 +1107,9 @@ def render_input_sections():
                 gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
                 rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
                 if rate_col:
-                    mean_rate = pd.to_numeric(gdf_copy[rate_col], errors="coerce").mean()
-                    total_acres = gdf_copy["area_acres"].sum()
-                    total_units = round(mean_rate * total_acres, 2)
-                    fert_units_map[key] = total_units
+                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                    total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                    fert_units_map[key] = round(total_units, 2)
                 else:
                     fert_units_map[key] = 0.0
             except Exception:
@@ -1120,7 +1119,7 @@ def render_input_sections():
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         try:
-            # Accurate area-weighted total units
+            # True total seeds applied: sum(rate × area)
             gdf_copy = seed_gdf.copy()
             if gdf_copy.crs is None:
                 gdf_copy.set_crs(epsg=4326, inplace=True)
@@ -1130,9 +1129,12 @@ def render_input_sections():
             gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
             rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
             if rate_col:
-                mean_rate = pd.to_numeric(gdf_copy[rate_col], errors="coerce").mean()
-                total_acres = gdf_copy["area_acres"].sum()
-                total_units = round(mean_rate * total_acres, 2)
+                gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                total_seeds = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                
+                # Convert total seeds → seed units (bags)
+                seeds_per_unit = st.session_state.get("seeds_per_unit", 80000)  # default = corn
+                total_units = round(total_seeds / seeds_per_unit, 2)
                 seed_units_total = total_units
             else:
                 seed_units_total = 0.0
@@ -1140,13 +1142,15 @@ def render_input_sections():
             seed_units_total = 0.0
     
     # Build editor rows from detected products with auto-filled units
-    # Link fertilizer products to RX maps by matching names
+    # Link fertilizer products to RX maps by matching names (flexible)
     all_variable_inputs = []
     for p in fert_products:
         units = 0.0
-        # Try to match product name to RX map key
+        # Flexible matching: remove special chars and spaces
+        p_clean = p.replace("%", "").replace(" ", "").lower()
         for key, total in fert_units_map.items():
-            if p.lower() in key.lower() or key.lower() in p.lower():
+            key_clean = key.replace("_", "").replace("-", "").lower()
+            if p_clean in key_clean or key_clean in p_clean:
                 units = total
                 break
         all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": units, "Price per Unit ($)": 0.0})
@@ -1194,6 +1198,21 @@ def render_input_sections():
             st.session_state["variable_rate_cost_per_acre"] = (
                 float(edited["Total Cost ($)"].sum()) / max(base_acres, 1.0)
             )
+            
+            # Add Seeds per Unit control
+            st.markdown("---")
+            st.markdown("**Seed Unit Settings**")
+            st.caption("Adjust the number of seeds per unit for conversion (default 80,000 for corn, 140,000 for soybeans).")
+            new_val = st.number_input(
+                "Seeds per Unit",
+                min_value=10000,
+                max_value=200000,
+                value=st.session_state.get("seeds_per_unit", 80000),
+                step=1000,
+                label_visibility="collapsed",
+                key="seeds_per_unit_input"
+            )
+            st.session_state["seeds_per_unit"] = new_val
 
     # -------------------------------------------------
     # 2) FLAT RATE INPUTS
@@ -2064,7 +2083,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Dynamic map key for refresh on file upload
-map_key = f"map_{st.session_state.get('map_refresh_trigger', 0)}"
+map_key = f"map_{st.session_state.get('yield_file_name', '')}_{st.session_state.get('seed_file_name', '')}_{st.session_state.get('fert_file_names', '')}_{st.session_state.get('map_refresh_trigger', 0)}"
 st_folium(m, use_container_width=True, height=600, key=map_key)
 
 # =========================================================
