@@ -419,6 +419,10 @@ def render_uploaders():
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
                                      key="up_zone", accept_multiple_files=False)
         if zone_file:
+            # Track zone file name for map refresh
+            st.session_state["zone_file_name"] = zone_file.name
+            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            
             zones_gdf = load_vector_file(zone_file)
             if zones_gdf is not None and not zones_gdf.empty:
                 # Look for zone ID column first
@@ -478,6 +482,9 @@ def render_uploaders():
         st.session_state["yield_df"] = pd.DataFrame()
 
         if yield_files:
+            # Track yield file names for map refresh
+            st.session_state["yield_file_name"] = "_".join([f.name for f in yield_files])
+            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
             frames, messages = [], []
 
             YIELD_PREFS = [
@@ -927,6 +934,9 @@ def render_uploaders():
         st.session_state["fert_gdfs"] = {}
 
         if fert_files:
+            # Track fert file names for map refresh
+            st.session_state["fert_file_names"] = "_".join([f.name for f in fert_files])
+            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
             summary = []
             for f in fert_files:
                 try:
@@ -959,6 +969,9 @@ def render_uploaders():
         st.session_state["seed_gdf"] = None
 
         if seed_files:
+            # Track seed file names for map refresh
+            st.session_state["seed_file_name"] = "_".join([f.name for f in seed_files])
+            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
             summary = []
             last_gdf = None
             for f in seed_files:
@@ -2050,7 +2063,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st_folium(m, use_container_width=True, height=600, key="stable_map")
+# Dynamic map key for refresh on file upload
+map_key = f"map_{st.session_state.get('map_refresh_trigger', 0)}"
+st_folium(m, use_container_width=True, height=600, key=map_key)
 
 # =========================================================
 # PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
