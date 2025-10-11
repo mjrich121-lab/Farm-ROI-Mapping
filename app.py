@@ -1107,37 +1107,38 @@ def render_input_sections():
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
             try:
-                # CRS-safe area normalization
+                # Robust fertilizer normalization (ft² / m² auto-detect)
                 gdf_copy = gdf.copy()
                 
                 try:
-                    # Define CRS if missing
                     if gdf_copy.crs is None:
                         gdf_copy = gdf_copy.set_crs("EPSG:4326")
-                    
-                    epsg = gdf_copy.crs.to_epsg() or 0
-                    
-                    # Convert only if geographic (degrees)
-                    if epsg in (4326, 4269):
+                    if gdf_copy.crs.is_geographic:
                         gdf_copy = gdf_copy.to_crs(epsg=5070)
-                        projected = True
-                    else:
-                        projected = False
-                    
-                    # Compute acres from m² if projected, else assume already acres
-                    area_factor = 0.000247105 if projected else 1.0
-                    gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
-                    
-                    rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-                    if rate_col:
-                        gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                        total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
-                        fert_units_map[key] = round(total_units, 2)
-                    else:
-                        fert_units_map[key] = 0.0
-                        
                 except Exception:
+                    pass
+                
+                # Determine true area factor
+                gdf_copy["raw_area"] = gdf_copy.geometry.area
+                mean_area = gdf_copy["raw_area"].mean()
+                
+                # Detect if polygons are likely in ft² or m²
+                if mean_area > 43560:      # ~1 acre in ft²
+                    area_factor = 2.2957e-5   # ft² → acres
+                else:
+                    area_factor = 0.000247105 # m² → acres
+                
+                gdf_copy["area_acres"] = gdf_copy["raw_area"] * area_factor
+                
+                # Calculate total units applied
+                rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+                if rate_col:
+                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                    total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                    fert_units_map[key] = round(total_units, 2)
+                else:
                     fert_units_map[key] = 0.0
+                        
             except Exception:
                 fert_units_map[key] = 0.0
     
@@ -1145,41 +1146,42 @@ def render_input_sections():
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         try:
-            # CRS-safe area normalization
+            # Robust seed normalization (ft² / m² auto-detect)
             gdf_copy = seed_gdf.copy()
             
             try:
-                # Define CRS if missing
                 if gdf_copy.crs is None:
                     gdf_copy = gdf_copy.set_crs("EPSG:4326")
-                
-                epsg = gdf_copy.crs.to_epsg() or 0
-                
-                # Convert only if geographic (degrees)
-                if epsg in (4326, 4269):
+                if gdf_copy.crs.is_geographic:
                     gdf_copy = gdf_copy.to_crs(epsg=5070)
-                    projected = True
-                else:
-                    projected = False
-                
-                # Compute acres from m² if projected, else assume already acres
-                area_factor = 0.000247105 if projected else 1.0
-                gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
-                
-                rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-                if rate_col:
-                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                    total_seeds = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
-                    
-                    # Convert total seeds → seed units (bags)
-                    seeds_per_unit = st.session_state.get("seeds_per_unit", 80000)  # default = corn
-                    total_units = round(total_seeds / seeds_per_unit, 2)
-                    seed_units_total = total_units
-                else:
-                    seed_units_total = 0.0
-                    
             except Exception:
+                pass
+            
+            # Determine true area factor
+            gdf_copy["raw_area"] = gdf_copy.geometry.area
+            mean_area = gdf_copy["raw_area"].mean()
+            
+            # Detect if polygons are likely in ft² or m²
+            if mean_area > 43560:      # ~1 acre in ft²
+                area_factor = 2.2957e-5   # ft² → acres
+            else:
+                area_factor = 0.000247105 # m² → acres
+            
+            gdf_copy["area_acres"] = gdf_copy["raw_area"] * area_factor
+            
+            # Calculate total units applied
+            rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+            if rate_col:
+                gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                total_seeds = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                
+                # Convert total seeds → seed units (bags)
+                seeds_per_unit = st.session_state.get("seeds_per_unit", 80000)  # default = corn
+                total_units = round(total_seeds / seeds_per_unit, 2)
+                seed_units_total = total_units
+            else:
                 seed_units_total = 0.0
+                    
         except Exception:
             seed_units_total = 0.0
     
@@ -2126,33 +2128,44 @@ except Exception:
 # Add layer control to make layers toggleable
 folium.LayerControl().add_to(m)
 
-# === Folium legend styling (true transparency + spacing) ===
+# === FINAL Legend CSS Override (absolute transparency + enforced stacking) ===
 legend_css = """
 <style>
+/* Completely transparent legends inside the Folium iframe */
+.leaflet-control br,
 .legend, .leaflet-control-layers, .branca-colormap, .legend-control {
-    background: transparent !important;
-    background-color: rgba(255,255,255,0.0) !important;
+    background: none !important;
+    background-color: transparent !important;
     box-shadow: none !important;
     border: none !important;
     color: white !important;
     font-size: 13px !important;
+    backdrop-filter: none !important;      /* disables Chrome dark blur */
+    opacity: 1.0 !important;
 }
+
+/* Separate and pin legends vertically */
 .leaflet-top.leaflet-left .legend,
 .leaflet-top.leaflet-left .branca-colormap {
     margin-top: 20px !important;
     margin-left: 20px !important;
     position: relative !important;
-}
-.leaflet-top.leaflet-left .branca-colormap + .branca-colormap,
-.leaflet-top.leaflet-left .legend + .branca-colormap,
-.leaflet-top.leaflet-left .branca-colormap + .legend {
-    margin-top: 140px !important;   /* stronger vertical offset */
-}
-.leaflet-control, .branca-colormap {
-    z-index: 9999 !important;
     display: block !important;
     float: none !important;
     clear: both !important;
+}
+
+/* Add fixed vertical gap between every legend block */
+.leaflet-top.leaflet-left .legend + .legend,
+.leaflet-top.leaflet-left .legend + .branca-colormap,
+.leaflet-top.leaflet-left .branca-colormap + .legend,
+.leaflet-top.leaflet-left .branca-colormap + .branca-colormap {
+    margin-top: 160px !important;   /* slightly larger than before */
+}
+
+/* Ensure these rules override Folium/Leaflet defaults */
+.leaflet-control, .branca-colormap {
+    z-index: 99999 !important;
 }
 </style>
 """
