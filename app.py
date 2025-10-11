@@ -1,3 +1,5 @@
+# rebuild trigger
+
 # =========================================================
 # Farm Profit Mapping Tool V4 - WORKING LOGIC + COMPACT LAYOUT
 # =========================================================
