@@ -1107,29 +1107,36 @@ def render_input_sections():
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
             try:
-                # Ensure consistent projection for area-weighted total units
+                # CRS-safe area normalization
                 gdf_copy = gdf.copy()
                 
                 try:
-                    # Auto-detect projection type
+                    # Define CRS if missing
                     if gdf_copy.crs is None:
                         gdf_copy = gdf_copy.set_crs("EPSG:4326")
-                    if gdf_copy.crs.is_geographic:
+                    
+                    epsg = gdf_copy.crs.to_epsg() or 0
+                    
+                    # Convert only if geographic (degrees)
+                    if epsg in (4326, 4269):
                         gdf_copy = gdf_copy.to_crs(epsg=5070)
+                        projected = True
+                    else:
+                        projected = False
+                    
+                    # Compute acres from m² if projected, else assume already acres
+                    area_factor = 0.000247105 if projected else 1.0
+                    gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
+                    
+                    rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+                    if rate_col:
+                        gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                        total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                        fert_units_map[key] = round(total_units, 2)
+                    else:
+                        fert_units_map[key] = 0.0
+                        
                 except Exception:
-                    pass  # Fail-safe fallback
-                
-                # Compute area in acres directly (always from meters²)
-                area_factor = 0.000247105 if gdf_copy.crs.to_epsg() in [5070, 3857] else 1.0
-                gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
-                
-                # Identify rate column
-                rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-                if rate_col:
-                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                    total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
-                    fert_units_map[key] = round(total_units, 2)
-                else:
                     fert_units_map[key] = 0.0
             except Exception:
                 fert_units_map[key] = 0.0
@@ -1138,33 +1145,40 @@ def render_input_sections():
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         try:
-            # Ensure consistent projection for area-weighted total units
+            # CRS-safe area normalization
             gdf_copy = seed_gdf.copy()
             
             try:
-                # Auto-detect projection type
+                # Define CRS if missing
                 if gdf_copy.crs is None:
                     gdf_copy = gdf_copy.set_crs("EPSG:4326")
-                if gdf_copy.crs.is_geographic:
-                    gdf_copy = gdf_copy.to_crs(epsg=5070)
-            except Exception:
-                pass  # Fail-safe fallback
-            
-            # Compute area in acres directly (always from meters²)
-            area_factor = 0.000247105 if gdf_copy.crs.to_epsg() in [5070, 3857] else 1.0
-            gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
-            
-            # Identify rate column
-            rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
-            if rate_col:
-                gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                total_seeds = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
                 
-                # Convert total seeds → seed units (bags)
-                seeds_per_unit = st.session_state.get("seeds_per_unit", 80000)  # default = corn
-                total_units = round(total_seeds / seeds_per_unit, 2)
-                seed_units_total = total_units
-            else:
+                epsg = gdf_copy.crs.to_epsg() or 0
+                
+                # Convert only if geographic (degrees)
+                if epsg in (4326, 4269):
+                    gdf_copy = gdf_copy.to_crs(epsg=5070)
+                    projected = True
+                else:
+                    projected = False
+                
+                # Compute acres from m² if projected, else assume already acres
+                area_factor = 0.000247105 if projected else 1.0
+                gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
+                
+                rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+                if rate_col:
+                    gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                    total_seeds = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
+                    
+                    # Convert total seeds → seed units (bags)
+                    seeds_per_unit = st.session_state.get("seeds_per_unit", 80000)  # default = corn
+                    total_units = round(total_seeds / seeds_per_unit, 2)
+                    seed_units_total = total_units
+                else:
+                    seed_units_total = 0.0
+                    
+            except Exception:
                 seed_units_total = 0.0
         except Exception:
             seed_units_total = 0.0
