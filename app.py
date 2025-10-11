@@ -1107,17 +1107,23 @@ def render_input_sections():
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
             try:
-                # True total applied material: sum(rate × area)
+                # Ensure projected CRS for accurate area
                 gdf_copy = gdf.copy()
-                if gdf_copy.crs is None:
-                    gdf_copy.set_crs(epsg=4326, inplace=True)
-                if gdf_copy.crs.is_geographic:
+                try:
+                    if gdf_copy.crs is None or gdf_copy.crs.is_geographic:
+                        gdf_copy = gdf_copy.set_crs("EPSG:4326", allow_override=True).to_crs(epsg=5070)
+                except Exception:
                     gdf_copy = gdf_copy.to_crs(epsg=5070)
                 
+                # Compute true acres
                 gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+                
+                # Safe numeric rate conversion
                 rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
                 if rate_col:
                     gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
+                    
+                    # Compute true total applied (rate × area)
                     total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
                     fert_units_map[key] = round(total_units, 2)
                 else:
@@ -1129,14 +1135,18 @@ def render_input_sections():
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         try:
-            # True total seeds applied: sum(rate × area)
+            # Ensure projected CRS for accurate area
             gdf_copy = seed_gdf.copy()
-            if gdf_copy.crs is None:
-                gdf_copy.set_crs(epsg=4326, inplace=True)
-            if gdf_copy.crs.is_geographic:
+            try:
+                if gdf_copy.crs is None or gdf_copy.crs.is_geographic:
+                    gdf_copy = gdf_copy.set_crs("EPSG:4326", allow_override=True).to_crs(epsg=5070)
+            except Exception:
                 gdf_copy = gdf_copy.to_crs(epsg=5070)
             
+            # Compute true acres
             gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+            
+            # Safe numeric rate conversion
             rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
             if rate_col:
                 gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
@@ -2097,14 +2107,28 @@ folium.LayerControl().add_to(m)
 # Add CSS for transparent legend backgrounds and fixed positioning
 st.markdown("""
 <style>
-.legend, .leaflet-control-layers, .branca-colormap {
-    background-color: rgba(255,255,255,0.0) !important;
-    color: white !important;
+/* Force transparent legend backgrounds */
+.legend, .leaflet-control-layers, .branca-colormap, .legend-control {
+    background-color: rgba(0,0,0,0.0) !important;
     box-shadow: none !important;
-    position: fixed !important;
+    border: none !important;
+    color: white !important;
+    font-size: 13px !important;
 }
-#legend-tl, #zone-legend {
-    position: fixed !important;
+
+/* Stack legends vertically with spacing */
+.leaflet-top.leaflet-left .legend,
+.leaflet-top.leaflet-left .branca-colormap {
+    margin-top: 20px !important;
+    margin-left: 20px !important;
+}
+.leaflet-top.leaflet-left .branca-colormap + .branca-colormap {
+    margin-top: 100px !important;
+}
+
+/* Ensure proper z-index */
+.leaflet-control, .branca-colormap {
+    z-index: 9999 !important;
 }
 </style>
 """, unsafe_allow_html=True)
