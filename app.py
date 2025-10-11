@@ -52,11 +52,7 @@ def ensure_alphashape():
 alphashape = ensure_alphashape()
 ALPHA_OK = alphashape is not None
 
-# Debug: Show alphashape status
-if ALPHA_OK:
-    st.info(f"✅ alphashape module loaded successfully (version: {getattr(alphashape, '__version__', 'unknown')})")
-else:
-    st.warning("⚠️ alphashape module not available - using convex hull fallback for harvest boundaries")
+# Alphashape status (silent unless needed)
 
 # Clear caches
 st.cache_data.clear()
@@ -285,9 +281,6 @@ def load_vector_file(uploaded_file):
             # Only apply buffer to Polygon/MultiPolygon geometries
             if not gdf.geometry.geom_type.isin(["Point", "MultiPoint"]).all():
                 gdf["geometry"] = gdf.geometry.buffer(0)
-                st.info("✅ Applied buffer(0) to polygon geometries")
-            else:
-                st.info("✅ Skipping buffer for Point geometries (preserves coordinates)")
         except Exception:
             pass
         
@@ -295,9 +288,6 @@ def load_vector_file(uploaded_file):
         try:
             if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
                 gdf = gdf.explode(index_parts=False, ignore_index=True)
-                st.info("✅ Exploded multi-part geometries")
-            else:
-                st.info("✅ Skipping explode for Point geometries")
         except TypeError:
             if gdf.geometry.geom_type.isin(["MultiPolygon", "MultiPoint", "MultiLineString"]).any():
                 gdf = gdf.explode().reset_index(drop=True)
@@ -431,9 +421,6 @@ def render_uploaders():
         if zone_file:
             zones_gdf = load_vector_file(zone_file)
             if zones_gdf is not None and not zones_gdf.empty:
-                st.info(f"✅ Loaded zones: {len(zones_gdf)} features")
-                st.info(f"Zone columns: {list(zones_gdf.columns)}")
-                
                 # Look for zone ID column first
                 zone_col = next((c for c in ["Zone_ID", "zone_id", "ZONE_ID", "Zone", "zone", "ZONE", "Name", "name"]
                                  if c in zones_gdf.columns), None)
@@ -443,14 +430,10 @@ def render_uploaders():
                 
                 # Group by zone ID to combine features with same zone
                 if zone_col in zones_gdf.columns:
-                    st.info(f"Grouping {len(zones_gdf)} features by {zone_col}")
                     zones_gdf = zones_gdf.dissolve(by=zone_col, aggfunc='first')
                     zones_gdf["Zone"] = zones_gdf.index
-                    st.info(f"✅ Grouped into {len(zones_gdf)} zones")
                 else:
                     zones_gdf["Zone"] = zones_gdf[zone_col]
-                
-                st.info(f"Zone values: {sorted(zones_gdf['Zone'].unique())}")
 
                 g2 = zones_gdf.copy()
                 if g2.crs is None:
@@ -564,20 +547,12 @@ def render_uploaders():
                             messages.append(f"{yf.name}: could not load geometry — skipped.")
                             continue
                         
-                        # Debug: show what's in the shapefile
-                        st.info(f"✅ Loaded yield shapefile: {len(gdf)} features")
-                        st.info(f"📋 Available columns: {list(gdf.columns)}")
-                        st.info(f"🔍 Geometry types (initial): {gdf.geometry.geom_type.value_counts().to_dict()}")
-                        st.info(f"📍 Empty geometries: {gdf.geometry.is_empty.sum()}")
-                        st.info(f"🗺️ CRS: {gdf.crs}")
-
-                        # ✅ Ensure WGS84 CRS
+                        # Ensure WGS84 CRS
                         if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
                             try:
                                 gdf = gdf.to_crs(epsg=4326)
-                                st.info("✅ Converted to EPSG:4326")
                             except Exception as e:
-                                st.warning(f"CRS conversion failed for {yf.name}: {e}")
+                                st.error(f"CRS conversion failed for {yf.name}: {e}")
 
                         # ======================================================
                         # ABSOLUTE PRIORITY: Extract coordinates from geometry
@@ -588,15 +563,11 @@ def render_uploaders():
                         if gdf.geometry.geom_type.isin(["Point"]).any():
                             # Filter to only Point geometries if mixed
                             if not gdf.geometry.geom_type.isin(["Point"]).all():
-                                st.warning(f"⚠️ Mixed geometry types detected - filtering to Points only")
                                 gdf = gdf[gdf.geometry.geom_type == "Point"].copy()
-                                st.info(f"✅ Filtered to {len(gdf)} Point geometries")
                             
                             # Check for empty geometries
                             if gdf.geometry.is_empty.any():
-                                st.warning(f"⚠️ {gdf.geometry.is_empty.sum()} empty geometries - removing them")
                                 gdf = gdf[~gdf.geometry.is_empty].copy()
-                                st.info(f"✅ Retained {len(gdf)} non-empty Point geometries")
                             
                             if len(gdf) > 0:
                                 try:
@@ -604,28 +575,17 @@ def render_uploaders():
                                     gdf["Longitude"] = gdf.geometry.x
                                     gdf["Latitude"] = gdf.geometry.y
                                     
-                                    # Verify coordinate ranges
-                                    lon_min, lon_max = gdf["Longitude"].min(), gdf["Longitude"].max()
-                                    lat_min, lat_max = gdf["Latitude"].min(), gdf["Latitude"].max()
-                                    
-                                    st.success(f"✅ Using {len(gdf)} true GPS points from Point geometry (EPSG:4326)")
-                                    st.success(f"📍 Coordinate range: lon [{lon_min:.6f}, {lon_max:.6f}], lat [{lat_min:.6f}, {lat_max:.6f}]")
-                                    st.info(f"📍 Sample coordinates: {list(zip(gdf['Longitude'].head(3).values, gdf['Latitude'].head(3).values))}")
-                                    
                                     # Ensure CRS is set
                                     if gdf.crs is None:
                                         gdf = gdf.set_crs("EPSG:4326", allow_override=True)
-                                        st.info("✅ Set CRS to EPSG:4326")
                                     
                                     has_valid_coords = True
-                                    st.success("✅ TRUE COORDINATES EXTRACTED - Skipping all synthetic reconstruction")
                                     
                                 except Exception as e:
-                                    st.error(f"❌ Failed to extract coordinates from Point geometry: {e}")
+                                    st.error(f"Failed to extract coordinates from Point geometry: {e}")
                         
                         # PRIORITY 2: Check for X/Y columns in attribute table
                         if not has_valid_coords and "X" in gdf.columns and "Y" in gdf.columns:
-                            st.info("✅ Found X and Y columns in attribute table")
                             try:
                                 gdf["Longitude"] = pd.to_numeric(gdf["X"], errors="coerce")
                                 gdf["Latitude"] = pd.to_numeric(gdf["Y"], errors="coerce")
@@ -641,12 +601,10 @@ def render_uploaders():
                                         crs="EPSG:4326"
                                     )
                                     has_valid_coords = True
-                                    st.success(f"✅ Extracted {len(gdf)} points from X/Y attribute columns")
-                                    st.info(f"📍 Coordinate range: lon [{gdf['Longitude'].min():.6f}, {gdf['Longitude'].max():.6f}], lat [{gdf['Latitude'].min():.6f}, {gdf['Latitude'].max():.6f}]")
                                 else:
-                                    st.error(f"❌ X/Y columns contain invalid coordinate ranges")
+                                    st.error(f"X/Y columns contain invalid coordinate ranges")
                             except Exception as e:
-                                st.error(f"❌ Failed to extract from X/Y columns: {e}")
+                                st.error(f"Failed to extract from X/Y columns: {e}")
                         
                         # PRIORITY 3: Check for other coordinate column names
                         if not has_valid_coords:
@@ -659,7 +617,6 @@ def render_uploaders():
                                     lon_col = c
                             
                             if lat_col and lon_col:
-                                st.info(f"✅ Found coordinate columns: {lon_col}, {lat_col}")
                                 try:
                                     gdf["Longitude"] = pd.to_numeric(gdf[lon_col], errors="coerce")
                                     gdf["Latitude"] = pd.to_numeric(gdf[lat_col], errors="coerce")
@@ -673,22 +630,16 @@ def render_uploaders():
                                             crs="EPSG:4326"
                                         )
                                         has_valid_coords = True
-                                        st.success(f"✅ Extracted {len(gdf)} points from {lon_col}, {lat_col} columns")
                                 except Exception as e:
-                                    st.error(f"❌ Failed to extract from {lon_col}, {lat_col}: {e}")
+                                    st.error(f"Failed to extract from {lon_col}, {lat_col}: {e}")
                         
                         # Final check: Do we have valid coordinates?
                         if not has_valid_coords:
-                            st.error(f"❌ No valid Point geometry or coordinate columns found")
-                            st.error(f"   Geometry types: {gdf.geometry.geom_type.value_counts().to_dict()}")
-                            st.error(f"   Available columns: {list(gdf.columns)[:20]}")
-                            st.error(f"   ⚠️ Synthetic reconstruction will be used - results will be INACCURATE")
+                            st.error(f"No valid coordinates found in {yf.name} - reconstruction may be inaccurate")
 
-                        # ✅ All coordinate extraction complete above - now handle fallback reconstruction
+                        # All coordinate extraction complete above - now handle fallback reconstruction
                         try:
-                            if has_valid_coords:
-                                st.info("✅ TRUE COORDINATES LOADED - All reconstruction and repair paths DISABLED")
-                            elif not has_valid_coords:
+                            if not has_valid_coords:
                                     # Try multiple repair methods
                                     try:
                                         # Method 1: Buffer repair
@@ -1529,19 +1480,11 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         
         # Check if columns exist
         if latc not in df.columns or lonc not in df.columns:
-            st.warning("⚠️ No valid geographic coordinates found in yield file; cannot render map.")
             return None, None
         
         # Validate that columns contain real geographic coordinates
-        if not is_valid_lat(df[latc]):
-            st.warning(f"⚠️ Column '{latc}' does not contain valid latitude values (-90 to 90)")
+        if not is_valid_lat(df[latc]) or not is_valid_lon(df[lonc]):
             return None, None
-        
-        if not is_valid_lon(df[lonc]):
-            st.warning(f"⚠️ Column '{lonc}' does not contain valid longitude values (-180 to 180)")
-            return None, None
-        
-        st.info(f"✅ Validated geographic coordinates: '{latc}' and '{lonc}'")
         
         # Sanitize and keep only good rows
         df = df.copy()
@@ -1552,18 +1495,10 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         df = df[np.isfinite(df[latc]) & np.isfinite(df[lonc]) & np.isfinite(df[values.name])]
 
         # Still nothing? skip
-        if df.empty:
-            st.warning("⚠️ No valid yield points after coordinate validation")
+        if df.empty or len(df) < 3:
             return None, None
 
-        # If fewer than 3 real points, skip heatmap entirely
-        if len(df) < 3:
-            st.warning(f"⚠️ Only {len(df)} valid points - need at least 3 for interpolation")
-            return None, None
-
-        st.info(f"✅ Processing {len(df)} validated yield points with true GPS coordinates")
-
-        # Use provided bounds (should be unified bounds from zones)
+        # Use provided bounds
         south, west, north, east = bounds
 
         vmin, vmax = float(df[values.name].min()), float(df[values.name].max())
@@ -1573,12 +1508,8 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         pts_lon = df[lonc].astype(float).values
         pts_lat = df[latc].astype(float).values
         vals_ok = df[values.name].astype(float).values
-        
-        # Debug: Show sample of actual coordinates being used
-        st.info(f"📍 Sample coordinates: lon={pts_lon[:3]}, lat={pts_lat[:3]}")
 
-        # CRITICAL: Yield grid bounds = actual yield data extent (source of truth)
-        # Compute grid strictly from yield coordinate ranges
+        # Yield grid bounds = actual yield data extent (source of truth)
         xmin, xmax = df[lonc].min(), df[lonc].max()
         ymin, ymax = df[latc].min(), df[latc].max()
         
@@ -1591,14 +1522,11 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         ymin -= lat_range * buffer_pct
         ymax += lat_range * buffer_pct
         
-        st.info(f"✅ Yield grid bounds from actual data: lon [{xmin:.6f}, {xmax:.6f}], lat [{ymin:.6f}, {ymax:.6f}]")
-        
         # Zones are ONLY used as an optional clipping mask, not for grid generation
         zones_gdf = st.session_state.get("zones_gdf")
         field_polygon = None
         if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
             field_polygon = zones_gdf.geometry.unary_union
-            st.info("✅ Zone polygon available - will apply as clipping mask after interpolation")
         
         # High resolution grid for swath-level detail
         n = 500
@@ -1606,63 +1534,42 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         lat_lin = np.linspace(ymin, ymax, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
 
-        # Use NEAREST interpolation to preserve blocky yield texture (real combine passes)
-        # This eliminates artificial triangle banding and angular artifacts
+        # Use NEAREST interpolation to preserve blocky yield texture
         grid = griddata((pts_lon, pts_lat), vals_ok, (lon_grid, lat_grid), method="nearest")
-        
-        st.info(f"✅ Interpolated {len(vals_ok)} yield points using nearest-neighbor method")
 
-        # ==========================================================
-        # HARVEST EXTENT MASK — Alpha shape (concave hull)
-        # ==========================================================
+        # Harvest extent mask - alpha shape (concave hull)
         try:
             from shapely.geometry import Point as ShapePoint
             from shapely.vectorized import contains
             
-            # Build GeoSeries of yield points
             yield_points_geom = gpd.GeoSeries(
                 [ShapePoint(x, y) for x, y in zip(pts_lon, pts_lat)],
                 crs="EPSG:4326"
             )
             
-            # === HARVEST EXTENT BOUNDARY (Bulletproof) ===
             if ALPHA_OK and alphashape is not None:
                 try:
-                    # Compute concave (alpha) hull — adjust alpha for smoothness
-                    alpha_value = 0.0025  # lower = tighter boundary, higher = smoother
+                    alpha_value = 0.0025
                     harvest_hull = alphashape.alphashape(yield_points_geom, alpha_value)
-                    
-                    st.info(f"✅ Created alpha-shape harvest boundary (α={alpha_value})")
-                    
-                except Exception as e:
-                    # Fallback to convex hull if alpha shape computation fails
-                    st.warning(f"⚠️ Alpha shape failed: {str(e)[:60]} - using convex hull")
+                except Exception:
                     harvest_hull = yield_points_geom.unary_union.convex_hull
             else:
-                # Fallback to convex hull if alphashape not available
-                st.info("ℹ️ Using convex hull (alphashape not available)")
                 harvest_hull = yield_points_geom.unary_union.convex_hull
             
-            # Vectorized mask
             harvest_mask = contains(harvest_hull, lon_grid, lat_grid)
-            
-            # Apply mask — remove grid cells outside harvested boundary
             grid = np.where(harvest_mask, grid, np.nan)
             
-            st.info("✅ Applied harvest extent mask — unharvested areas excluded")
-            
-        except Exception as e:
-            st.warning(f"Harvest extent mask failed, using full grid: {e}")
+        except Exception:
+            pass
 
-        # Clip grid to field polygon if available (additional conditional masking)
+        # Clip grid to field polygon if available
         if field_polygon is not None:
             try:
                 from shapely.vectorized import contains
                 mask = contains(field_polygon, lon_grid, lat_grid)
                 grid = np.where(mask, grid, np.nan)
-                st.info("✅ Clipped yield heatmap to field polygon boundaries")
-            except Exception as e:
-                st.warning(f"Vectorized field clipping failed: {e}")
+            except Exception:
+                pass
 
         # Create professional yield colormap (red to green gradient)
         yield_cmap = mpl_colors.LinearSegmentedColormap.from_list(
@@ -1674,14 +1581,12 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         vmax = np.nanpercentile(vals_ok, 95)
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
         
-        st.info(f"✅ Color range: {vmin:.1f} - {vmax:.1f} bu/ac (5th-95th percentile)")
-        
         # Apply colormap with percentile normalization
         rgba = yield_cmap(norm(grid))
         rgba = np.flipud(rgba)
         rgba = (rgba * 255).astype(np.uint8)
 
-        # Add opaque yield map overlay using actual yield data bounds
+        # Add yield map overlay
         overlay_bounds = [[ymin, xmin], [ymax, xmax]]
         
         folium.raster_layers.ImageOverlay(
@@ -1692,8 +1597,6 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             overlay=True,
             show=show_default
         ).add_to(m)
-        
-        st.info(f"✅ Added {name} overlay with true measured data extent")
 
         return vmin, vmax
 
@@ -2067,9 +1970,6 @@ else:
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     if ymin is not None:
         add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
-        st.info(f"✅ Yield heatmap added: {ymin:.1f} - {ymax:.1f} bu/ac")
-    else:
-        st.warning("❌ Yield heatmap failed to render")
 
     vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
     if vmin is not None:
@@ -2079,27 +1979,39 @@ else:
     if fmin is not None:
         add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
 
-# Final fit using all active layers - prioritize yield data if available
+# Final fit using all active layers
 try:
-    # First try to use yield data bounds directly
     if not df_for_maps.empty and "Latitude" in df_for_maps.columns and "Longitude" in df_for_maps.columns:
         lat_vals = df_for_maps["Latitude"].dropna()
         lon_vals = df_for_maps["Longitude"].dropna()
         if len(lat_vals) > 0 and len(lon_vals) > 0:
             south, north = lat_vals.min(), lat_vals.max()
             west, east = lon_vals.min(), lon_vals.max()
-            st.info(f"✅ Map bounds from yield data: lat [{south:.6f}, {north:.6f}], lon [{west:.6f}, {east:.6f}]")
         else:
             south, west, north, east = compute_bounds_for_heatmaps()
     else:
         south, west, north, east = compute_bounds_for_heatmaps()
     
     m.fit_bounds([[south, west], [north, east]])
-except Exception as e:
-    st.warning(f"Auto-zoom fallback failed: {e}")
+except Exception:
+    pass
 
 # Add layer control to make layers toggleable
 folium.LayerControl().add_to(m)
+
+# Add CSS for transparent legend backgrounds
+st.markdown("""
+<style>
+.legend, .leaflet-control-layers, .branca-colormap {
+    background-color: rgba(0,0,0,0) !important;
+    color: white !important;
+    box-shadow: none !important;
+}
+.legend-card {
+    background-color: rgba(0,0,0,0.7) !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st_folium(m, use_container_width=True, height=600, key="stable_map")
 
