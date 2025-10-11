@@ -1079,11 +1079,31 @@ def render_input_sections():
     fert_products = sorted(set(fert_products))
     seed_products = sorted(set(seed_products))
 
-    # Build editor rows from detected products
-    all_variable_inputs = (
-        [{"Type": "Fertilizer", "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in fert_products] +
-        [{"Type": "Seed",       "Product": p, "Units Applied": 0.0, "Price per Unit ($)": 0.0} for p in seed_products]
-    )
+    # Auto-calculate Units Applied from uploaded RX maps
+    fert_units_map = {}
+    for key, gdf in st.session_state.get("fert_gdfs", {}).items():
+        if gdf is not None and not gdf.empty:
+            # Try to find rate column
+            rate_col = next((c for c in gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+            if rate_col:
+                total_units = pd.to_numeric(gdf[rate_col], errors="coerce").sum()
+                fert_units_map[key] = total_units
+    
+    seed_units_total = 0.0
+    seed_gdf = st.session_state.get("seed_gdf")
+    if seed_gdf is not None and not seed_gdf.empty:
+        rate_col = next((c for c in seed_gdf.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
+        if rate_col:
+            seed_units_total = pd.to_numeric(seed_gdf[rate_col], errors="coerce").sum()
+    
+    # Build editor rows from detected products with auto-filled units
+    all_variable_inputs = []
+    for p in fert_products:
+        units = fert_units_map.get(p, 0.0)
+        all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": units, "Price per Unit ($)": 0.0})
+    for p in seed_products:
+        all_variable_inputs.append({"Type": "Seed", "Product": p, "Units Applied": seed_units_total, "Price per Unit ($)": 0.0})
+    
     if not all_variable_inputs:
         all_variable_inputs = [{
             "Type": "Fertilizer", "Product": "", "Units Applied": 0.0, "Price per Unit ($)": 0.0
@@ -1117,17 +1137,6 @@ def render_input_sections():
             ).fillna(0.0)
 
             edited["Total Cost ($)"] = edited["Units Applied"] * edited["Price per Unit ($)"]
-
-            st.dataframe(
-                edited.style.format({
-                    "Units Applied": "{:,.4f}",
-                    "Price per Unit ($)": "${:,.2f}",
-                    "Total Cost ($)": "${:,.2f}",
-                }),
-                use_container_width=True,
-                hide_index=True,
-                height=auto_height(edited)
-            )
 
             base_acres = float(st.session_state.get("base_acres", 1.0))
             st.session_state["variable_rate_inputs"] = edited
@@ -1201,7 +1210,7 @@ def make_base_map():
             attr="CartoDB",
             prefer_canvas=True,
             control_scale=False,
-            zoom_control=True,
+            zoom_control=False,
         )
 
         # Try to add Esri imagery (optional, best quality)
@@ -2002,13 +2011,14 @@ folium.LayerControl().add_to(m)
 # Add CSS for transparent legend backgrounds
 st.markdown("""
 <style>
-.legend, .leaflet-control-layers, .branca-colormap {
-    background-color: rgba(0,0,0,0) !important;
+.legend, .leaflet-control-layers, .branca-colormap, .legend-card {
+    background-color: rgba(255,255,255,0.0) !important;
     color: white !important;
     box-shadow: none !important;
 }
-.legend-card {
-    background-color: rgba(0,0,0,0.7) !important;
+#legend-tl .legend-card {
+    background-color: rgba(0,0,0,0.65) !important;
+    margin-bottom: 10px !important;
 }
 </style>
 """, unsafe_allow_html=True)
