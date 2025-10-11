@@ -1,5 +1,3 @@
-# rebuild trigger
-
 # =========================================================
 # Farm Profit Mapping Tool V4 - WORKING LOGIC + COMPACT LAYOUT
 # =========================================================
@@ -63,6 +61,48 @@ else:
 # Clear caches
 st.cache_data.clear()
 st.cache_resource.clear()
+
+# ===========================
+# COORDINATE NORMALIZATION & BOUNDARY HELPERS
+# ===========================
+from shapely.geometry import MultiPoint
+
+def normalize_coordinates(df):
+    """Standardize coordinate columns and return df, lon_col, lat_col"""
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    lat_col, lon_col = None, None
+    for c in df.columns:
+        if c.startswith("lat"):
+            lat_col = c
+        elif c.startswith("lon") or c.startswith("long"):
+            lon_col = c
+    if not lat_col and "latitude" in df.columns: 
+        lat_col = "latitude"
+    if not lon_col and "longitude" in df.columns: 
+        lon_col = "longitude"
+    return df, lon_col, lat_col
+
+def build_field_boundary(df, lon_col, lat_col, alpha_val=0.0025):
+    """Build a concave (alpha-shape) or convex boundary from GPS points."""
+    if df is None or df.empty or lon_col not in df.columns or lat_col not in df.columns:
+        return None
+    
+    # Filter valid coordinates
+    valid_df = df[[lon_col, lat_col]].dropna()
+    if len(valid_df) < 3:
+        return None
+    
+    pts = list(zip(valid_df[lon_col], valid_df[lat_col]))
+    
+    if ALPHA_OK and alphashape is not None:
+        try:
+            hull = alphashape.alphashape(pts, alpha_val)
+            return hull
+        except Exception as e:
+            st.warning(f"⚠️ Alpha-shape failed ({str(e)[:50]}) - using convex hull fallback")
+    
+    # Convex hull fallback
+    return MultiPoint(pts).convex_hull
 
 # ===========================
 # COMPACT THEME + LAYOUT
