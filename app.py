@@ -419,9 +419,10 @@ def render_uploaders():
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
                                      key="up_zone", accept_multiple_files=False)
         if zone_file:
-            # Track zone file name for map refresh
-            st.session_state["zone_file_name"] = zone_file.name
-            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            # Track zone file name for map refresh (only if changed)
+            if zone_file.name != st.session_state.get("zone_file_name"):
+                st.session_state["zone_file_name"] = zone_file.name
+                st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
             
             zones_gdf = load_vector_file(zone_file)
             if zones_gdf is not None and not zones_gdf.empty:
@@ -482,9 +483,12 @@ def render_uploaders():
         st.session_state["yield_df"] = pd.DataFrame()
 
         if yield_files:
-            # Track yield file names for map refresh
-            st.session_state["yield_file_name"] = "_".join([f.name for f in yield_files])
-            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            # Track yield file names for map refresh (only if changed)
+            joined = "_".join([f.name for f in yield_files])
+            if joined != st.session_state.get("yield_file_name"):
+                st.session_state["yield_file_name"] = joined
+                st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            
             frames, messages = [], []
 
             YIELD_PREFS = [
@@ -934,9 +938,12 @@ def render_uploaders():
         st.session_state["fert_gdfs"] = {}
 
         if fert_files:
-            # Track fert file names for map refresh
-            st.session_state["fert_file_names"] = "_".join([f.name for f in fert_files])
-            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            # Track fert file names for map refresh (only if changed)
+            joined = "_".join([f.name for f in fert_files])
+            if joined != st.session_state.get("fert_file_names"):
+                st.session_state["fert_file_names"] = joined
+                st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            
             summary = []
             for f in fert_files:
                 try:
@@ -969,9 +976,12 @@ def render_uploaders():
         st.session_state["seed_gdf"] = None
 
         if seed_files:
-            # Track seed file names for map refresh
-            st.session_state["seed_file_name"] = "_".join([f.name for f in seed_files])
-            st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            # Track seed file names for map refresh (only if changed)
+            joined = "_".join([f.name for f in seed_files])
+            if joined != st.session_state.get("seed_file_name"):
+                st.session_state["seed_file_name"] = joined
+                st.session_state["map_refresh_trigger"] = st.session_state.get("map_refresh_trigger", 0) + 1
+            
             summary = []
             last_gdf = None
             for f in seed_files:
@@ -1142,18 +1152,30 @@ def render_input_sections():
             seed_units_total = 0.0
     
     # Build editor rows from detected products with auto-filled units
-    # Link fertilizer products to RX maps by matching names (flexible)
+    # Link fertilizer products to RX maps by matching names (fuzzy matching)
+    import re
+    
     all_variable_inputs = []
     for p in fert_products:
         units = 0.0
-        # Flexible matching: remove special chars and spaces
-        p_clean = p.replace("%", "").replace(" ", "").lower()
+        # Remove all non-alphanumeric characters for matching
+        p_clean = re.sub(r'[^a-zA-Z0-9]', '', p).lower()
+        
         for key, total in fert_units_map.items():
-            key_clean = key.replace("_", "").replace("-", "").lower()
-            if p_clean in key_clean or key_clean in p_clean:
+            key_clean = re.sub(r'[^a-zA-Z0-9]', '', key).lower()
+            
+            # Flexible matching with special cases for common names
+            if (
+                p_clean in key_clean
+                or key_clean in p_clean
+                or (("uan" in p_clean or "n" in p_clean) and "n" in key_clean and len(key_clean) <= 20)
+                or (("map" in p_clean or "phosphorus" in p_clean) and "map" in key_clean)
+                or (("pot" in p_clean or "potash" in p_clean or "k" in p_clean) and "pot" in key_clean)
+            ):
                 units = total
                 break
-        all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": units, "Price per Unit ($)": 0.0})
+        
+        all_variable_inputs.append({"Type": "Fertilizer", "Product": p, "Units Applied": round(units, 2), "Price per Unit ($)": 0.0})
     
     for p in seed_products:
         all_variable_inputs.append({"Type": "Seed", "Product": p, "Units Applied": seed_units_total, "Price per Unit ($)": 0.0})
@@ -1840,15 +1862,20 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         st.warning(f"Skipping zones overlay: {e}")
 
 # ---------- Prescription overlays ----------
+# Distinct color palettes for fertilizer RX layers
+palette_options = [plt.cm.Blues, plt.cm.Purples, plt.cm.Oranges, plt.cm.Greys]
+
 legend_ix = 0
 seed_gdf = st.session_state.get("seed_gdf")
 if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
     add_prescription_overlay(m, seed_gdf, "Seed RX", plt.cm.Greens, legend_ix)
     legend_ix += 1
 
-for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
+for idx, (k, fgdf) in enumerate(st.session_state.get("fert_gdfs", {}).items()):
     if fgdf is not None and not fgdf.empty:
-        add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", plt.cm.Blues, legend_ix)
+        # Use distinct colormap for each fertilizer layer
+        cmap = palette_options[idx % len(palette_options)]
+        add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", cmap, legend_ix)
         legend_ix += 1
 
 # ---------- Heatmaps (yield / profits) — FOOLPROOF ----------
@@ -2082,8 +2109,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Dynamic map key for refresh on file upload
-map_key = f"map_{st.session_state.get('yield_file_name', '')}_{st.session_state.get('seed_file_name', '')}_{st.session_state.get('fert_file_names', '')}_{st.session_state.get('map_refresh_trigger', 0)}"
+# Dynamic map key for refresh on file upload (controlled)
+map_key = f"main_map_{st.session_state.get('map_refresh_trigger', 0)}"
 st_folium(m, use_container_width=True, height=600, key=map_key)
 
 # =========================================================
