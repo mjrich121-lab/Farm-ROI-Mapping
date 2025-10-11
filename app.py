@@ -1107,23 +1107,26 @@ def render_input_sections():
     for key, gdf in st.session_state.get("fert_gdfs", {}).items():
         if gdf is not None and not gdf.empty:
             try:
-                # Ensure projected CRS for accurate area
+                # Ensure consistent projection for area-weighted total units
                 gdf_copy = gdf.copy()
+                
                 try:
-                    if gdf_copy.crs is None or gdf_copy.crs.is_geographic:
-                        gdf_copy = gdf_copy.set_crs("EPSG:4326", allow_override=True).to_crs(epsg=5070)
+                    # Auto-detect projection type
+                    if gdf_copy.crs is None:
+                        gdf_copy = gdf_copy.set_crs("EPSG:4326")
+                    if gdf_copy.crs.is_geographic:
+                        gdf_copy = gdf_copy.to_crs(epsg=5070)
                 except Exception:
-                    gdf_copy = gdf_copy.to_crs(epsg=5070)
+                    pass  # Fail-safe fallback
                 
-                # Compute true acres
-                gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+                # Compute area in acres directly (always from meters²)
+                area_factor = 0.000247105 if gdf_copy.crs.to_epsg() in [5070, 3857] else 1.0
+                gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
                 
-                # Safe numeric rate conversion
+                # Identify rate column
                 rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
                 if rate_col:
                     gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
-                    
-                    # Compute true total applied (rate × area)
                     total_units = (gdf_copy["rate_numeric"] * gdf_copy["area_acres"]).sum()
                     fert_units_map[key] = round(total_units, 2)
                 else:
@@ -1135,18 +1138,23 @@ def render_input_sections():
     seed_gdf = st.session_state.get("seed_gdf")
     if seed_gdf is not None and not seed_gdf.empty:
         try:
-            # Ensure projected CRS for accurate area
+            # Ensure consistent projection for area-weighted total units
             gdf_copy = seed_gdf.copy()
+            
             try:
-                if gdf_copy.crs is None or gdf_copy.crs.is_geographic:
-                    gdf_copy = gdf_copy.set_crs("EPSG:4326", allow_override=True).to_crs(epsg=5070)
+                # Auto-detect projection type
+                if gdf_copy.crs is None:
+                    gdf_copy = gdf_copy.set_crs("EPSG:4326")
+                if gdf_copy.crs.is_geographic:
+                    gdf_copy = gdf_copy.to_crs(epsg=5070)
             except Exception:
-                gdf_copy = gdf_copy.to_crs(epsg=5070)
+                pass  # Fail-safe fallback
             
-            # Compute true acres
-            gdf_copy["area_acres"] = gdf_copy.geometry.area * 0.000247105
+            # Compute area in acres directly (always from meters²)
+            area_factor = 0.000247105 if gdf_copy.crs.to_epsg() in [5070, 3857] else 1.0
+            gdf_copy["area_acres"] = gdf_copy.geometry.area * area_factor
             
-            # Safe numeric rate conversion
+            # Identify rate column
             rate_col = next((c for c in gdf_copy.columns if "rate" in c.lower() or "tgt" in c.lower()), None)
             if rate_col:
                 gdf_copy["rate_numeric"] = pd.to_numeric(gdf_copy[rate_col], errors="coerce").fillna(0)
@@ -2104,10 +2112,9 @@ except Exception:
 # Add layer control to make layers toggleable
 folium.LayerControl().add_to(m)
 
-# Add CSS for transparent legend backgrounds and fixed positioning
-st.markdown("""
+# === Inject Transparent Legend CSS directly into Folium map ===
+legend_css = """
 <style>
-/* Force transparent legend backgrounds */
 .legend, .leaflet-control-layers, .branca-colormap, .legend-control {
     background-color: rgba(0,0,0,0.0) !important;
     box-shadow: none !important;
@@ -2115,8 +2122,6 @@ st.markdown("""
     color: white !important;
     font-size: 13px !important;
 }
-
-/* Stack legends vertically with spacing */
 .leaflet-top.leaflet-left .legend,
 .leaflet-top.leaflet-left .branca-colormap {
     margin-top: 20px !important;
@@ -2125,13 +2130,14 @@ st.markdown("""
 .leaflet-top.leaflet-left .branca-colormap + .branca-colormap {
     margin-top: 100px !important;
 }
-
-/* Ensure proper z-index */
 .leaflet-control, .branca-colormap {
     z-index: 9999 !important;
 }
 </style>
-""", unsafe_allow_html=True)
+"""
+
+# Inject CSS into map's HTML (inside iframe)
+m.get_root().header.add_child(folium.Element(legend_css))
 
 # Dynamic map key for refresh on file upload (controlled)
 map_key = f"main_map_{st.session_state.get('map_refresh_trigger', 0)}"
