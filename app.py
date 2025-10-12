@@ -1747,12 +1747,21 @@ def init_legend_rails(m):
     """Injects fixed legend containers (top-left rail used)."""
     rails_css = """
     <style>
-      .legend-rail { position:absolute; z-index:9999; font-family:sans-serif; }
+      .legend-rail { 
+        position:absolute; 
+        z-index:9999; 
+        font-family:sans-serif; 
+        display:flex; 
+        flex-direction:column; 
+        gap:10px;
+      }
       #legend-tl { top: 14px; left: 10px; width: 220px; }
       .legend-card {
-        color: #fff; background: rgba(0,0,0,0.65);
-        padding: 6px 10px; border-radius: 6px; margin-bottom: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+        color: #fff; 
+        background: rgba(255,255,255,0.0);
+        padding: 6px 10px; 
+        border-radius: 6px;
+        box-shadow: none;
         user-select: none;
       }
       .legend-title { font-weight: 600; margin-bottom: 4px; }
@@ -1807,7 +1816,6 @@ if yield_gdf is not None and not getattr(yield_gdf, "empty", True):
         bounds = yield_gdf.total_bounds
         map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         map_zoom = 15
-        st.info(f"✅ Map centered on yield data: {map_center[0]:.4f}, {map_center[1]:.4f}")
     except Exception as e:
         st.warning(f"Could not calculate yield bounds: {e}")
 
@@ -1817,7 +1825,6 @@ elif zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         bounds = zones_gdf.total_bounds
         map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         map_zoom = 15
-        st.info(f"✅ Map centered on zones: {map_center[0]:.4f}, {map_center[1]:.4f}")
     except Exception as e:
         st.warning(f"Could not calculate zone bounds: {e}")
 
@@ -1881,7 +1888,7 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         legend_html = f"""
         <div id="zone-legend" style="position:absolute; bottom:20px; right:20px; z-index:9999;
                      font-family:sans-serif; font-size:13px; color:white;
-                     background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px; width:160px;">
+                     background-color: rgba(255,255,255,0.0); padding:6px 10px; border-radius:5px; width:160px;">
           <div style="font-weight:600; margin-bottom:4px; cursor:pointer;"
                onclick="var x = document.getElementById('zone-legend-items');
                         if (x.style.display === 'none') {{ x.style.display = 'block'; }}
@@ -2008,8 +2015,6 @@ try:
                 df_for_maps["Latitude"].notna() & df_for_maps["Longitude"].notna()
             ].copy()
         
-        st.write(f"DEBUG: Valid rows after filtering: {len(df_valid)}")
-        
         if df_valid.empty:
             st.warning("No valid coordinates detected — using full dataset for continuity.")
             df_valid = df_for_maps.copy()
@@ -2135,12 +2140,12 @@ legend_css = """
 .leaflet-control br,
 .legend, .leaflet-control-layers, .branca-colormap, .legend-control {
     background: none !important;
-    background-color: transparent !important;
+    background-color: rgba(255,255,255,0.0) !important;
     box-shadow: none !important;
     border: none !important;
     color: white !important;
     font-size: 13px !important;
-    backdrop-filter: none !important;      /* disables Chrome dark blur */
+    backdrop-filter: none !important;
     opacity: 1.0 !important;
 }
 
@@ -2160,12 +2165,12 @@ legend_css = """
 .leaflet-top.leaflet-left .legend + .branca-colormap,
 .leaflet-top.leaflet-left .branca-colormap + .legend,
 .leaflet-top.leaflet-left .branca-colormap + .branca-colormap {
-    margin-top: 160px !important;   /* slightly larger than before */
+    margin-top: 12px !important;
 }
 
 /* Ensure these rules override Folium/Leaflet defaults */
 .leaflet-control, .branca-colormap {
-    z-index: 99999 !important;
+    z-index: 9999 !important;
 }
 </style>
 """
