@@ -945,26 +945,42 @@ def render_uploaders():
         )
         st.session_state["sell_price"] = sell_price
         
-        st.markdown(
-            """
-            <style>
-            /* Shrink sell price box */
-            div[data-baseweb="input"] input {
-                height: 28px !important;
-                font-size: 13px !important;
-                padding: 2px 6px !important;
-            }
-            /* Compact alert banners */
-            [data-testid="stAlert"] {
-                font-size: 13px !important;
-                padding: 6px 10px !important;
-                margin-bottom: 4px !important;
-                border-radius: 6px !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown("""
+<style>
+
+/* === FINAL COMPACTNESS PASS === */
+
+/* Sell Price input field - match mini controls */
+div[data-baseweb="input"] input {
+    height: 26px !important;
+    font-size: 13px !important;
+    padding: 1px 6px !important;
+    line-height: 1.1 !important;
+}
+
+/* Compact label and container */
+div[data-baseweb="form-control-container"] {
+    margin-top: 0px !important;
+    margin-bottom: 2px !important;
+}
+
+/* Compact alert banners */
+[data-testid="stAlert"] {
+    font-size: 12.5px !important;
+    line-height: 1.1 !important;
+    padding: 5px 8px !important;
+    margin-bottom: 3px !important;
+    border-radius: 5px !important;
+}
+
+/* Compact dataframe tables */
+[data-testid="stDataFrameContainer"] {
+    height: auto !important;
+    max-height: 120px !important;
+    overflow: hidden !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
