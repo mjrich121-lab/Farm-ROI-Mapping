@@ -928,6 +928,22 @@ def render_uploaders():
                 st.error("❌ No valid yield data found.\n" + "\n".join(messages))
         else:
             st.caption("No yield files uploaded.")
+        
+        # === Compact Sell Price Input (integrated into Yield section) ===
+        st.markdown("**Crop Sell Price ($/bu)**", help="Required for profit map generation")
+        
+        if "sell_price" not in st.session_state:
+            st.session_state["sell_price"] = 0.0
+        
+        sell_price = st.number_input(
+            "Crop Sell Price ($/bu)",
+            min_value=0.0,
+            value=float(st.session_state["sell_price"]),
+            step=0.1,
+            key="sell_price_input",
+            label_visibility="collapsed"
+        )
+        st.session_state["sell_price"] = sell_price
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
@@ -2120,22 +2136,6 @@ if not df_valid.empty:
         st.warning(f"Profit calculation fallback triggered: {e}")
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
             df_for_maps[c] = 0.0
-
-    # === Compact Profit Controls (auto-refresh) ===
-    if "sell_price" not in st.session_state:
-        st.session_state["sell_price"] = 0.0
-    
-    sell_price = st.number_input(
-        "Crop Sell Price ($/bu)",
-        min_value=0.0,
-        value=float(st.session_state["sell_price"]),
-        step=0.1,
-        key="sell_price_input",
-        label_visibility="visible"
-    )
-    
-    # Auto-update on change (no button)
-    st.session_state["sell_price"] = sell_price
 
     # =========================================================
     # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
