@@ -949,10 +949,18 @@ def render_uploaders():
         st.markdown("""
 <style>
 
-/* === COMPACT STYLING — UPLOAD AREA ONLY === */
-.upload-scope [data-testid="stAlert"] {
+/* ==============================================================
+   COMPACT STYLING — UPLOAD AREA ONLY (.upload-scope)
+   ============================================================== */
+
+/* Target all nested containers under .upload-scope */
+.upload-scope :is([data-testid="stAlert"], [data-testid="stDataFrameContainer"], [data-testid="stNumberInput"]) {
     font-size: 12.5px !important;
     line-height: 1.05 !important;
+}
+
+/* --- Alert banners --- */
+.upload-scope [data-testid="stAlert"] {
     padding: 4px 8px !important;
     margin: 2px 0 !important;
     border-radius: 4px !important;
@@ -962,6 +970,7 @@ def render_uploaders():
     margin: 0 !important;
 }
 
+/* --- DataFrames (Zone/Yield tables) --- */
 .upload-scope [data-testid="stDataFrameContainer"] {
     height: auto !important;
     max-height: 115px !important;
@@ -969,6 +978,7 @@ def render_uploaders():
     margin-bottom: 0 !important;
 }
 
+/* --- Number inputs (Sell Price) --- */
 .upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
     height: 22px !important;
     font-size: 13px !important;
@@ -982,7 +992,13 @@ def render_uploaders():
     margin: 0 !important;
 }
 
-/* Ensure styles don't leak below */
+/* --- Ensure inner Streamlit sections inherit styling --- */
+.upload-scope section[data-testid="stHorizontalBlock"] * {
+    font-size: inherit !important;
+    line-height: inherit !important;
+}
+
+/* --- Protect all other sections (Fixed Inputs, Profit Summary, etc.) --- */
 section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stAlert"],
 section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stDataFrameContainer"],
 section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stNumberInput"] {
