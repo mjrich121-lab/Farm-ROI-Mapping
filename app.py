@@ -1380,23 +1380,39 @@ def make_base_map():
         return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
 
 def add_gradient_legend(m, name, vmin, vmax, cmap, index):
-    top_offset = 20 + (index * 80)
+    """Adds a gradient legend to the unified stacking rail (transparent, no hardcoded offsets)."""
+    if vmin is None or vmax is None:
+        return
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
-    legend_html = f"""
-    <div style="position:absolute; top:{top_offset}px; left:10px; z-index:9999;
-                font-family:sans-serif; font-size:12px; color:white;
-                background-color: rgba(0,0,0,0.65); padding:6px 10px; border-radius:5px;
-                width:180px;">
-      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
-      <div style="height:14px; background:linear-gradient(90deg, {gradient_css});
-                  border-radius:2px; margin-bottom:4px;"></div>
-      <div style="display:flex; justify-content:space-between;">
-        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
-      </div>
+    
+    # Get current legend count for unique ID
+    corner = "tl"
+    idx = st.session_state.get("_legend_counts", {}).get(corner, 0)
+    
+    # Build legend card HTML with transparent background
+    card_html = f"""
+    <div class="legend-card" id="legend-{corner}-{idx}">
+      <div class="legend-title">{name}</div>
+      <div class="legend-bar" style="background:linear-gradient(90deg, {gradient_css});"></div>
+      <div class="legend-minmax"><span>{vmin:.1f}</span><span>{vmax:.1f}</span></div>
     </div>
     """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    
+    # Append to the unified legend rail (same as add_gradient_legend_pos)
+    m.get_root().html.add_child(folium.Element(f"""
+      <script>
+        (function() {{
+          var rail = document.getElementById("legend-{corner}");
+          if (rail) {{
+            rail.insertAdjacentHTML("beforeend", `{card_html}`);
+          }}
+        }})();
+      </script>
+    """))
+    
+    # Increment legend counter
+    st.session_state["_legend_counts"][corner] = idx + 1
 
 def detect_rate_type(gdf):
     try:
