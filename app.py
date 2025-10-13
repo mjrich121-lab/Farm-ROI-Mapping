@@ -1044,13 +1044,25 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                # --- Final no-scroll calibration ---
+                # --- Dynamic height: scale with row count ---
                 fert_df = pd.DataFrame(summary)
                 nrows_fert = len(fert_df)
                 row_h = 28
                 header_h = 36
-                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
-                height_calc_fert = int(header_h + (nrows_fert * row_h) + true_pad)
+                
+                # Adaptive padding: smaller for short tables, larger for big ones
+                if nrows_fert <= 1:
+                    pad = 14         # Tight for 1 file
+                elif nrows_fert == 2:
+                    pad = 10         # Slightly smaller gap
+                elif nrows_fert == 3:
+                    pad = 6
+                elif nrows_fert == 4:
+                    pad = 4
+                else:
+                    pad = 2          # Full 5+ files → minimal padding, no scroll
+                
+                height_calc_fert = int(header_h + (nrows_fert * row_h) + pad)
                 
                 st.dataframe(fert_df, use_container_width=True,
                              hide_index=True, height=height_calc_fert)
@@ -1094,13 +1106,25 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                # --- Final no-scroll calibration ---
+                # --- Dynamic height: scale with row count ---
                 seed_df = pd.DataFrame(summary)
                 nrows_seed = len(seed_df)
                 row_h = 28
                 header_h = 36
-                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
-                height_calc_seed = int(header_h + (nrows_seed * row_h) + true_pad)
+                
+                # Adaptive padding: smaller for short tables, larger for big ones
+                if nrows_seed <= 1:
+                    pad = 14         # Tight for 1 file
+                elif nrows_seed == 2:
+                    pad = 10         # Slightly smaller gap
+                elif nrows_seed == 3:
+                    pad = 6
+                elif nrows_seed == 4:
+                    pad = 4
+                else:
+                    pad = 2          # Full 5+ files → minimal padding, no scroll
+                
+                height_calc_seed = int(header_h + (nrows_seed * row_h) + pad)
                 
                 st.dataframe(seed_df, use_container_width=True,
                              hide_index=True, height=height_calc_seed)
