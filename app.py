@@ -450,12 +450,13 @@ def render_uploaders():
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
                 
-                # --- Adaptive table height: show all zones without scroll ---
+                # --- Dynamic table height: ensure full rows visible, no scroll ---
                 nrows = len(disp)
-                row_h = 28          # per-row pixel height
-                header_h = 36       # header height
-                pad = 18            # was 10 — adds small buffer for Streamlit's internal padding
-                dynamic_height = int(header_h + nrows * row_h + pad)
+                row_h = 28        # per-row pixel height
+                header_h = 36     # header height
+                base_pad = 24     # slightly higher buffer (was 22)
+                scroll_guard = 2 if nrows >= 5 else 0  # tiny top offset Streamlit adds
+                dynamic_height = int(header_h + (nrows * row_h) + base_pad + scroll_guard)
                 
                 edited = st.data_editor(
                     disp,
