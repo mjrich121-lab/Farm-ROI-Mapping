@@ -454,7 +454,7 @@ def render_uploaders():
                 nrows = len(disp)
                 row_h = 28          # per-row pixel height
                 header_h = 36       # header height
-                pad = 10            # buffer space
+                pad = 18            # was 10 — adds small buffer for Streamlit's internal padding
                 dynamic_height = int(header_h + nrows * row_h + pad)
                 
                 edited = st.data_editor(
@@ -983,6 +983,8 @@ def render_uploaders():
             st.caption("No yield files uploaded.")
         
         # === Compact Sell Price Input (integrated into Yield section) ===
+        # Reduce vertical spacing above Sell Price label
+        st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
         st.markdown("**Crop Sell Price ($/bu)**")
         
         # Place input in a narrow left column to avoid full-width stretch
