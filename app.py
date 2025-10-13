@@ -2393,7 +2393,11 @@ except Exception:
     pass
 
 # Add layer control to make layers toggleable
-folium.LayerControl().add_to(m)
+folium.LayerControl(collapsed=False).add_to(m)
+
+# --- LAYER VISIBILITY: Profit ON by default, others OFF ---
+# (Note: Folium layers are already added with show=True/False in safe_overlay calls)
+# This just sets the visual hierarchy via z-index if needed
 
 # === FINAL Legend CSS Override (absolute transparency + enforced stacking) ===
 legend_css = """
@@ -2444,36 +2448,59 @@ m.get_root().header.add_child(folium.Element(legend_css))
 # MULTI-LAYER HOVER INSPECTOR (value + units)
 # ==========================================================
 
-# Inject client-side hover handler
+# Inject client-side hover handler with priority sorting
 hover_script = """
 <script>
 function roundValue(v){return Math.round((v + Number.EPSILON) * 10) / 10;}
 
 function attachMultiHover(map){
   let popup = L.popup({closeButton:false, autoPan:false, className:'multi-layer-popup'});
+  
+  // Priority order for layer display
+  const priorityOrder = ["profit", "yield", "zone"];
+  
   map.on('mousemove', function(e){
     const latlng = e.latlng;
-    let info = [];
+    let layerInfo = [];
 
     map.eachLayer(l => {
       // ImageOverlay or GeoJSON with bounds
       if (l.options && l.options.name && l.getBounds && l.getBounds().contains(latlng)) {
         let label = l.options.name;
         let unit = l.options.unit || '';
+        let priority = 99;
+        
+        // Determine priority based on layer name
+        const nameLower = label.toLowerCase();
+        for (let i = 0; i < priorityOrder.length; i++) {
+          if (nameLower.includes(priorityOrder[i])) {
+            priority = i;
+            break;
+          }
+        }
+        
         // Attempt to extract pixel value if rasterized
         try {
+          let displayText = '';
           if (l._url && l._image && l._image.complete){
             // skip heavy pixel read; show placeholder
-            info.push(label + ' — value visible on map' + (unit ? ' (' + unit + ')' : ''));
+            displayText = label + ' — value visible on map' + (unit ? ' (' + unit + ')' : '');
           } else if (l.feature && l.feature.properties){
             let vals = Object.values(l.feature.properties).slice(0,3).join(', ');
-            info.push(label + ': ' + vals + (unit ? ' ' + unit : ''));
+            displayText = label + ': ' + vals + (unit ? ' ' + unit : '');
           } else {
-            info.push(label);
+            displayText = label;
           }
-        } catch(err){info.push(label);}
+          layerInfo.push({priority: priority, text: displayText});
+        } catch(err){
+          layerInfo.push({priority: priority, text: label});
+        }
       }
     });
+
+    // Sort by priority (profit first, then yield, then zone, then others)
+    layerInfo.sort((a, b) => a.priority - b.priority);
+    let info = layerInfo.map(item => item.text);
 
     if (info.length > 0){
       popup
@@ -2484,6 +2511,11 @@ function attachMultiHover(map){
     } else {
       map.closePopup(popup);
     }
+  });
+  
+  // Fade out on mouseout
+  map.on('mouseout', function(){
+    setTimeout(()=>{map.closePopup(popup);}, 300);
   });
 }
 
