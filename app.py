@@ -1555,7 +1555,7 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     seq = next(i for i, legend in enumerate(sorted_legends) if legend["name"] == name)
     
     # Calculate top offset based on priority order with proper spacing
-    offset = 10 + seq * 90  # adjust for legend height
+    offset = 20 + seq * 95  # adjust for legend height
     
     print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
 
@@ -1767,7 +1767,9 @@ def add_legend_html(m: folium.Map, html: str, offset: int = 10):
         color:white;
         padding:6px 10px;
         border-radius:6px;
-        font-size:13px;">
+        font-size:13px;
+        line-height:1.3;
+        pointer-events:none;">
       {html}
     </div>
     """
@@ -1942,13 +1944,11 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
         script_element._template = Template(overlay_script)
         m.get_root().add_child(script_element)
         
-        # Create synthetic GeoJSON hover layer for profit/yield overlays
+        # Create invisible GeoJSON hover layer for profit/yield overlays
         if "profit" in name.lower() or "yield" in name.lower():
-            # Sample points from the grid at regular intervals for hover detection
+            # Build hover points from data
             hover_points = []
-            step = max(1, len(df) // 200)  # Sample ~200 points for performance
-            
-            for idx in range(0, len(df), step):
+            for idx in range(len(df)):
                 try:
                     lat_val = df.iloc[idx][latc]
                     lon_val = df.iloc[idx][lonc]
@@ -1966,12 +1966,13 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
             if hover_points:
                 hover_geojson = folium.GeoJson(
                     {"type": "FeatureCollection", "features": hover_points},
-                    name=f"{name}",
-                    show=show_default,
-                    style_function=lambda x: {'fillOpacity': 0, 'opacity': 0, 'weight': 0},
-                    tooltip=folium.GeoJsonTooltip(fields=[name], aliases=[name])
+                    name=f"{name} (Hover)",
+                    show=False,
+                    style_function=lambda x: {"opacity": 0, "fillOpacity": 0},
+                    highlight_function=None,
+                    tooltip=None
                 )
-                hover_geojson.add_to(m)
+                m.add_child(hover_geojson)
 
         return vmin, vmax
 
