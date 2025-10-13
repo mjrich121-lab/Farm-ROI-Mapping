@@ -948,37 +948,47 @@ def render_uploaders():
         st.markdown("""
 <style>
 
-/* === FINAL COMPACTNESS PASS === */
+/* === FINAL ENFORCEMENT: COMPACT INPUT + ALERTS === */
 
-/* Sell Price input field - match mini controls */
-div[data-baseweb="input"] input {
-    height: 26px !important;
+/* Fully compress Sell Price field including nested flex wrappers */
+div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+    height: 24px !important;
     font-size: 13px !important;
     padding: 1px 6px !important;
-    line-height: 1.1 !important;
+    line-height: 1.0 !important;
 }
-
-/* Compact label and container */
-div[data-baseweb="form-control-container"] {
+div[data-testid="stNumberInput"] > div:first-child {
     margin-top: 0px !important;
     margin-bottom: 2px !important;
 }
+div[data-testid="stNumberInput"] label {
+    font-size: 13px !important;
+    margin-bottom: 2px !important;
+}
 
-/* Compact alert banners */
+/* Compact all alert banners */
 [data-testid="stAlert"] {
     font-size: 12.5px !important;
-    line-height: 1.1 !important;
-    padding: 5px 8px !important;
-    margin-bottom: 3px !important;
-    border-radius: 5px !important;
+    line-height: 1.05 !important;
+    padding: 4px 8px !important;
+    margin-bottom: 2px !important;
+    border-radius: 4px !important;
 }
 
-/* Compact dataframe tables */
+/* Flatten inner alert content */
+[data-testid="stAlert"] div {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Compact DataFrame containers (no scrollbars) */
 [data-testid="stDataFrameContainer"] {
     height: auto !important;
-    max-height: 120px !important;
+    max-height: 110px !important;
     overflow: hidden !important;
+    margin-bottom: 0 !important;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
