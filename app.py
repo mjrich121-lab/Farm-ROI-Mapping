@@ -455,7 +455,7 @@ def render_uploaders():
                 row_h = 28
                 header_h = 36
                 true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
-                height_calc = int(header_h + (nrows * row_h) + true_pad)
+                height_calc = int(header_h + (nrows * row_h) + true_pad + 10)  # +10px compensation
                 
                 edited = st.data_editor(
                     disp,
@@ -1864,16 +1864,15 @@ _bootstrap_defaults()
 # Suppress phantom scrollbars in DataFrames
 st.markdown("""
 <style>
-/* Remove vertical + horizontal ghost scrollbars from dataframes */
+/* 🔒 Universal dataframe scrollbar suppression */
 [data-testid="stDataFrameScrollableContainer"] {
-    overflow: hidden !important;
+    overflow-y: hidden !important;
+    overflow-x: hidden !important;
     height: auto !important;
 }
-/* Disable the WebKit scroll track itself */
 [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar {
     display: none !important;
 }
-/* Lock font scaling for consistency */
 [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
     font-size: 13px !important;
     line-height: 1.1 !important;
