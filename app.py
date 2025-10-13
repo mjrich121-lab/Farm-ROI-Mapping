@@ -1554,22 +1554,19 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     sorted_legends = sorted(st.session_state["_legend_priorities"], key=lambda x: x["priority"])
     seq = next(i for i, legend in enumerate(sorted_legends) if legend["name"] == name)
     
-    # Calculate top offset based on priority order
-    top_offset = 20 + (seq * 92)
-    if top_offset > 520:   # when >6–7 legends, start compacting
-        top_offset = 20 + (seq * 78)
+    # Calculate top offset based on priority order with proper spacing
+    offset = 10 + seq * 90  # adjust for legend height
     
-    print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, top_offset will be {top_offset}px")
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
              for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
 
-    # Transparent background, battleship gray text with subtle glow
-    legend_html = f"""
+    # Legend content without positioning (will be positioned by add_legend_html)
+    legend_content = f"""
     <div style="
-        position:absolute; top:{top_offset}px; left:10px; z-index:9999;
         font-family:sans-serif; font-size:12px; color:#b0b3b8;
         text-shadow:0 0 3px rgba(0,0,0,0.5); font-weight:500;
         background: rgba(255,255,255,0.0); padding:6px 10px; border-radius:6px;
@@ -1582,7 +1579,7 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
       </div>
     </div>
     """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    add_legend_html(m, legend_content, offset)
 
 def detect_rate_type(gdf):
     try:
@@ -1757,10 +1754,15 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-def add_legend_html(m: folium.Map, html: str):
-    """Helper function to add legend HTML using proper Template handling"""
+def add_legend_html(m: folium.Map, html: str, offset: int = 10):
+    """Helper function to add legend HTML using proper Template handling with vertical spacing"""
+    legend_html = f"""
+    <div class="legend-control" style="position:absolute; top:{offset}px; left:20px; z-index:9999;">
+      {html}
+    </div>
+    """
     legend = MacroElement()
-    legend._template = Template(html)
+    legend._template = Template(legend_html)
     m.get_root().add_child(legend)
 
 def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index=1000):
@@ -2521,16 +2523,16 @@ m.get_root().header.add_child(folium.Element(legend_css))
 # =========================================================
 
 # --- AUTO-TOGGLE DEFAULTS ---
-st.session_state.setdefault("layer_visibility", {})
-vis = st.session_state["layer_visibility"]
-for k in list(st.session_state.keys()):
-    if k.endswith("_layer"):
-        vis.setdefault(k, False)
-
-for k in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]:
-    if k in st.session_state:
-        vis[k] = True
-st.session_state["layer_visibility"] = vis
+defaults = {
+    "profit_layer": True,
+    "yield_layer": True,
+    "zones_layer": True,
+    "zones_outline_layer": True,
+    "fert_layer": False,
+    "seed_layer": False
+}
+for k, v in defaults.items():
+    st.session_state[k] = v
 
 # Enforce visual stack order
 def _front(key):
@@ -2547,127 +2549,66 @@ for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]
 hover_js = """
 <script>
 (function(){
-  const order = ["profit","yield","zone"];
-  const popup = L.popup({autoPan:false, closeButton:false});
-  
-  // Extract value from heatmap overlay using pixel sampling
-  function getHeatmapValue(overlay, latlng) {
-    try {
-      // For ImageOverlay, we need to sample the pixel data
-      if (overlay instanceof L.ImageOverlay) {
-        const bounds = overlay.getBounds();
-        const sw = bounds.getSouthWest();
-        const ne = bounds.getNorthEast();
-        
-        // Check if point is within overlay bounds
-        if (latlng.lat >= sw.lat && latlng.lat <= ne.lat && 
-            latlng.lng >= sw.lng && latlng.lng <= ne.lng) {
-          
-          // Calculate normalized position within overlay
-          const x = (latlng.lng - sw.lng) / (ne.lng - sw.lng);
-          const y = 1 - (latlng.lat - sw.lat) / (ne.lat - sw.lat);
-          
-          // Sample from the stored data if available
-          const name = overlay.options.name || "";
-          if (window.overlayData && window.overlayData[name]) {
-            const data = window.overlayData[name];
-            const gridX = Math.floor(x * (data.width - 1));
-            const gridY = Math.floor(y * (data.height - 1));
-            const value = data.values[gridY * data.width + gridX];
-            if (value !== undefined && !isNaN(value)) {
-              return value;
-            }
-          }
-        }
-      }
-    } catch(e) {
-      console.log("Heatmap value extraction error:", e);
-    }
-    return null;
-  }
-  
-  // Extract value from GeoJSON layer
-  function getGeoJSONValue(layer, latlng) {
-    let v = null;
-    if (layer instanceof L.GeoJSON) {
-      layer.eachLayer(f => {
-        if (f.getBounds && f.getBounds().contains(latlng)) {
-          const p = f.feature?.properties || {};
-          for (const k in p) {
-            if (typeof p[k] === 'number' && !isNaN(p[k])) {
-              v = p[k];
-              break;
-            }
-          }
-        }
-      });
-    }
-    return v;
-  }
-  
-  function show(e, lines) {
-    popup.setLatLng(e.latlng)
-      .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
-      .openOn(window.map);
-  }
-  function hide() {
-    setTimeout(() => window.map.closePopup(popup), 300);
-  }
-  
   window.addEventListener("load", () => {
     setTimeout(() => {
       if (!window.map) return;
       
-      window.map.on('mousemove', e => {
-        const layers = Object.values(window.map._layers);
-        const info = [];
-        
-        layers.forEach(l => {
-          const name = (l.options?.name || "").toLowerCase();
-          let p = 99;
-          for (let i = 0; i < order.length; i++) {
-            if (name.includes(order[i])) {
-              p = i;
-              break;
-            }
+      let currentPopup = null;
+      
+      window.map.on("mousemove", function(e) {
+        let info = [];
+        const latlng = e.latlng;
+        const priority = ["profit","yield","zone"];
+
+        window.map.eachLayer(function(layer) {
+          if (!layer.options || !layer.options.name) return;
+          const name = layer.options.name.toLowerCase();
+          let val = null;
+
+          if (layer instanceof L.GeoJSON) {
+            layer.eachLayer(function(f) {
+              if (f.getBounds && f.getBounds().contains(latlng)) {
+                const p = f.feature?.properties || {};
+                for (const k in p) {
+                  if (typeof p[k] === "number") {
+                    val = p[k].toFixed(1);
+                    break;
+                  }
+                }
+              }
+            });
           }
-          
-          let v = null;
-          
-          // Try heatmap value first (for profit/yield overlays)
-          if (name.includes("profit") || name.includes("yield")) {
-            v = getHeatmapValue(l, e.latlng);
-          }
-          
-          // Try GeoJSON value for zones and prescriptions
-          if (v === null) {
-            v = getGeoJSONValue(l, e.latlng);
-          }
-          
-          if (v !== null) {
-            // Format display names
-            let displayName = l.options.name || "";
-            if (displayName.includes("Variable Rate Profit")) {
-              displayName = "Variable Rate Profit ($/ac)";
-            } else if (displayName.includes("Yield")) {
-              displayName = "Yield (bu/ac)";
-            } else if (displayName.includes("Zone")) {
-              displayName = "Zone";
-            }
-            
-            info.push({p: p, t: `${displayName}: ${v.toFixed(1)}`});
-          }
+
+          if (val !== null) info.push(`${layer.options.name}: ${val}`);
         });
-        
-        if (info.length) {
-          info.sort((a, b) => a.p - b.p);
-          show(e, info.map(i => i.t).join("<br>"));
-        } else {
-          hide();
+
+        info.sort((a,b)=>{
+          const ai = priority.findIndex(p=>a.toLowerCase().includes(p));
+          const bi = priority.findIndex(p=>b.toLowerCase().includes(p));
+          return (ai===-1?99:ai)-(bi===-1?99:bi);
+        });
+
+        if (info.length){
+          if (currentPopup) {
+            window.map.closePopup(currentPopup);
+          }
+          currentPopup = L.popup({offset:L.point(10,-10),closeButton:false,className:"multi-layer-popup"})
+            .setLatLng(latlng)
+            .setContent(info.join("<br>"))
+            .openOn(window.map);
         }
       });
       
-      window.map.on('mouseout', hide);
+      window.map.on('mouseout', function() {
+        if (currentPopup) {
+          setTimeout(() => {
+            if (currentPopup) {
+              window.map.closePopup(currentPopup);
+              currentPopup = null;
+            }
+          }, 300);
+        }
+      });
     }, 600);
   });
 })();
@@ -2704,6 +2645,18 @@ print(f"=== LEGEND HTML PREVIEW START (found {len(legend_snips)} lines) ===")
 for l in legend_snips[:20]:
     print(l)
 print("=== LEGEND HTML PREVIEW END ===")
+
+# Force correct visual stacking
+layer_order = [
+    "Variable Rate Profit ($/ac)",
+    "Yield (bu/ac)",
+    "Zones (Fill)",
+    "Zone Outlines (Top)"
+]
+for name in layer_order:
+    for layer in m._children.values():
+        if getattr(layer, "name", None) == name:
+            layer.add_to(m)
 
 st_folium(m, use_container_width=True, height=600, key=map_key)
 
