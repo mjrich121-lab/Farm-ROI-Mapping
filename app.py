@@ -948,45 +948,51 @@ def render_uploaders():
         st.markdown("""
 <style>
 
-/* === FINAL ENFORCEMENT: COMPACT INPUT + ALERTS === */
+/* === FINAL COMPACT + HARMONIZED LAYOUT === */
 
-/* Fully compress Sell Price field including nested flex wrappers */
+/* Sell Price Input (tight) */
+div[data-testid="stNumberInput"] > div > div > div {
+    min-height: 22px !important;
+    height: 22px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
 div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-    height: 24px !important;
+    height: 20px !important;
     font-size: 13px !important;
-    padding: 1px 6px !important;
+    padding: 0 5px !important;
     line-height: 1.0 !important;
 }
-div[data-testid="stNumberInput"] > div:first-child {
-    margin-top: 0px !important;
-    margin-bottom: 2px !important;
-}
-div[data-testid="stNumberInput"] label {
-    font-size: 13px !important;
-    margin-bottom: 2px !important;
-}
 
-/* Compact all alert banners */
+/* Alert banners - uniform compact sizing on all sides */
 [data-testid="stAlert"] {
     font-size: 12.5px !important;
     line-height: 1.05 !important;
-    padding: 4px 8px !important;
+    padding: 4px 8px 4px 8px !important;  /* equal top/bottom */
+    margin-top: 2px !important;
     margin-bottom: 2px !important;
     border-radius: 4px !important;
 }
 
-/* Flatten inner alert content */
+/* Compact inner banner content */
 [data-testid="stAlert"] div {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-/* Compact DataFrame containers (no scrollbars) */
+/* Fix DataFrame / Zone table scrolling */
 [data-testid="stDataFrameContainer"] {
     height: auto !important;
-    max-height: 110px !important;
+    max-height: 115px !important;
     overflow: hidden !important;
     margin-bottom: 0 !important;
+}
+
+/* Prevent phantom padding inside columns */
+div[data-testid="stVerticalBlock"] {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin: 0 !important;
 }
 
 </style>
