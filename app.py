@@ -1379,40 +1379,46 @@ def make_base_map():
         st.error(f"Map fallback triggered: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
 
-def add_gradient_legend(m, name, vmin, vmax, cmap, index):
-    """Adds a gradient legend to the unified stacking rail (transparent, no hardcoded offsets)."""
+def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
+    """
+    Non-JS legend renderer: uses absolute positioning with an internal counter
+    so cards stack reliably without any runtime DOM manipulation.
+    """
     if vmin is None or vmax is None:
         return
-    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%" for i in range(0, 101, 10)]
+
+    # Ensure counter exists and use it when index is not provided
+    st.session_state.setdefault("_legend_counts", {"tl": 0})
+    seq = index if isinstance(index, int) else st.session_state["_legend_counts"]["tl"]
+
+    # Fixed vertical spacing per card (px). 84 is tight but safe.
+    top_offset = 14 + (seq * 84)
+
+    # Build gradient stops
+    stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
+             for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
-    
-    # Get current legend count for unique ID
-    corner = "tl"
-    idx = st.session_state.get("_legend_counts", {}).get(corner, 0)
-    
-    # Build legend card HTML with transparent background
-    card_html = f"""
-    <div class="legend-card" id="legend-{corner}-{idx}">
-      <div class="legend-title">{name}</div>
-      <div class="legend-bar" style="background:linear-gradient(90deg, {gradient_css});"></div>
-      <div class="legend-minmax"><span>{vmin:.1f}</span><span>{vmax:.1f}</span></div>
+
+    # Transparent, no shadow, white text only
+    legend_html = f"""
+    <div style="
+        position:absolute; top:{top_offset}px; left:10px; z-index:9999;
+        font-family:sans-serif; font-size:12px; color:#ffffff;
+        background: rgba(255,255,255,0.0); padding:6px 10px; border-radius:6px;
+        box-shadow:none; border:none; width:220px;">
+      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
+      <div style="height:14px; border-radius:2px; margin-bottom:4px;
+                  background:linear-gradient(90deg, {gradient_css});"></div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>{vmin:.1f}</span><span>{vmax:.1f}</span>
+      </div>
     </div>
     """
-    
-    # Append to the unified legend rail (same as add_gradient_legend_pos)
-    m.get_root().html.add_child(folium.Element(f"""
-      <script>
-        (function() {{
-          var rail = document.getElementById("legend-{corner}");
-          if (rail) {{
-            rail.insertAdjacentHTML("beforeend", `{card_html}`);
-          }}
-        }})();
-      </script>
-    """))
-    
-    # Increment legend counter
-    st.session_state["_legend_counts"][corner] = idx + 1
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    # Increment internal sequence only when we owned it
+    if index is None:
+        st.session_state["_legend_counts"]["tl"] = seq + 1
 
 def detect_rate_type(gdf):
     try:
@@ -1669,7 +1675,7 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
             field_polygon = zones_gdf.geometry.unary_union
         
         # High resolution grid for swath-level detail
-        n = 500
+        n = 350  # was 500; visual quality holds, load time improves
         lon_lin = np.linspace(xmin, xmax, n)
         lat_lin = np.linspace(ymin, ymax, n)
         lon_grid, lat_grid = np.meshgrid(lon_lin, lat_lin)
@@ -2116,15 +2122,15 @@ if not df_valid.empty:
 
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     if ymin is not None:
-        add_gradient_legend_pos(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn, corner="tl")
+        add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
 
     vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
     if vmin is not None:
-        add_gradient_legend_pos(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn, corner="tl")
+        add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
 
     fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
     if fmin is not None:
-        add_gradient_legend_pos(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn, corner="tl")
+        add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
 
 # Final fit using all active layers
 try:
