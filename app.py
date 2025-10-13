@@ -411,6 +411,7 @@ def _bootstrap_defaults():
 # =========================================================
 def render_uploaders():
     st.subheader("Upload Maps")
+    st.markdown('<div id="upload-scope">', unsafe_allow_html=True)
     u1, u2, u3, u4 = st.columns(4)
 
     # ------------------------- ZONES -------------------------
@@ -948,51 +949,44 @@ def render_uploaders():
         st.markdown("""
 <style>
 
-/* === FINAL COMPACT + HARMONIZED LAYOUT === */
-
-/* Sell Price Input (tight) */
-div[data-testid="stNumberInput"] > div > div > div {
-    min-height: 22px !important;
-    height: 22px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}
-div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-    height: 20px !important;
-    font-size: 13px !important;
-    padding: 0 5px !important;
-    line-height: 1.0 !important;
-}
-
-/* Alert banners - uniform compact sizing on all sides */
-[data-testid="stAlert"] {
+/* === COMPACT STYLING — UPLOAD AREA ONLY === */
+#upload-scope [data-testid="stAlert"] {
     font-size: 12.5px !important;
     line-height: 1.05 !important;
-    padding: 4px 8px 4px 8px !important;  /* equal top/bottom */
-    margin-top: 2px !important;
-    margin-bottom: 2px !important;
+    padding: 4px 8px !important;
+    margin: 2px 0 !important;
     border-radius: 4px !important;
 }
-
-/* Compact inner banner content */
-[data-testid="stAlert"] div {
+#upload-scope [data-testid="stAlert"] div {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-/* Fix DataFrame / Zone table scrolling */
-[data-testid="stDataFrameContainer"] {
+#upload-scope [data-testid="stDataFrameContainer"] {
     height: auto !important;
     max-height: 115px !important;
     overflow: hidden !important;
     margin-bottom: 0 !important;
 }
 
-/* Prevent phantom padding inside columns */
-div[data-testid="stVerticalBlock"] {
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
+#upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+    height: 22px !important;
+    font-size: 13px !important;
+    padding: 0 5px !important;
+    line-height: 1.0 !important;
+}
+#upload-scope div[data-testid="stNumberInput"] > div > div > div {
+    min-height: 22px !important;
+    height: 22px !important;
+    padding: 0 !important;
     margin: 0 !important;
+}
+
+/* Prevent bleed into other sections */
+section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stDataFrameContainer"],
+section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stAlert"],
+section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stNumberInput"] {
+    all: unset !important;
 }
 
 </style>
@@ -1077,6 +1071,8 @@ div[data-testid="stVerticalBlock"] {
                 st.error("No valid seed RX maps detected.")
         else:
             st.caption("No seed files uploaded.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ===========================
 # UI: Fixed inputs + Variable/Flat/CornSoy strip
