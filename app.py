@@ -1861,23 +1861,43 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 apply_compact_theme()
 _bootstrap_defaults()
 
-# Suppress phantom scrollbars in DataFrames
+# ==============================================================
+# 🔒 FINAL SCROLLBAR REMOVAL — applies to all data editors
+# ==============================================================
 st.markdown("""
 <style>
-/* 🔒 Universal dataframe scrollbar suppression */
+/* Step 1 — Disable all overflow in dataframe containers */
 [data-testid="stDataFrameScrollableContainer"] {
-    overflow-y: hidden !important;
-    overflow-x: hidden !important;
+    overflow: hidden !important;
     height: auto !important;
+    scrollbar-width: none !important;    /* Firefox */
 }
+
+/* Step 2 — Hide WebKit scrollbars (Chrome, Edge, Safari) */
 [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar {
     display: none !important;
 }
-[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+
+/* Step 3 — Lock visual alignment and text sizing */
+[data-testid="stDataFrame"] td,
+[data-testid="stDataFrame"] th {
     font-size: 13px !important;
     line-height: 1.1 !important;
+    border: none !important;
 }
 </style>
+
+<script>
+/* Step 4 — JS fallback: forcibly remove scrollbars at runtime */
+window.addEventListener("load", () => {
+  const frames = document.querySelectorAll('[data-testid="stDataFrameScrollableContainer"]');
+  frames.forEach(f => {
+    f.style.overflow = "hidden";
+    f.style.scrollbarWidth = "none";
+    f.style.height = "auto";
+  });
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Canonical default for sell price
