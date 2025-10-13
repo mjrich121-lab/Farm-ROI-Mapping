@@ -1135,6 +1135,25 @@ div[data-testid="stDataFrame"]:has([aria-describedby*="seed"])
         else:
             st.caption("No seed files uploaded.")
 
+# ==============================================================
+# Scoped fix: remove Streamlit region padding under upload tables
+# ==============================================================
+st.markdown("""
+<style>
+/* Remove bottom padding + shadow for all top-row data editors */
+div[data-testid="stDataFrame"][data-baseweb][aria-describedby*="zones_editor"],
+div[data-testid="stDataFrame"][data-baseweb][aria-describedby*="fert_summary_editor"],
+div[data-testid="stDataFrame"][data-baseweb][aria-describedby*="seed_summary_editor"] {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    box-shadow: none !important;
+}
+div[data-testid="stVerticalBlock"] > div:has(> [data-testid="stDataFrame"]) {
+    margin-bottom: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ===========================
 # UI: Fixed inputs + Variable/Flat/CornSoy strip
 # ===========================
