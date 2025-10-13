@@ -411,40 +411,10 @@ def _bootstrap_defaults():
 # =========================================================
 def render_uploaders():
     st.subheader("Upload Maps")
-    st.markdown('<div class="upload-scope">', unsafe_allow_html=True)
-    
-    # ==============================================================
-    # 1. COMPACT CSS — inject per column (Zone / Yield / Fert / Seed)
-    # ==============================================================
-    compact_css = """
-<style>
-[data-testid="stAlert"] {
-    font-size: 12.3px !important;
-    line-height: 1.0 !important;
-    padding: 2px 5px !important;       /* Tightest padding yet */
-    margin: 2px 0 !important;
-    border-radius: 4px !important;
-    min-height: 18px !important;       /* ↓ from 20px */
-}
-[data-testid="stDataFrameContainer"] {
-    height: 100px !important;          /* Exact cap to eliminate scroll */
-    overflow: hidden !important;
-    margin-bottom: 0 !important;
-}
-div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-    height: 22px !important;
-    font-size: 13px !important;
-    padding: 0 4px !important;
-    line-height: 1.0 !important;
-}
-</style>
-"""
-    
     u1, u2, u3, u4 = st.columns(4)
 
     # ------------------------- ZONES -------------------------
     with u1:
-        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
                                      key="up_zone", accept_multiple_files=False)
@@ -487,7 +457,7 @@ div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
                         "Override Acres": st.column_config.NumberColumn(format="%.2f"),
                     },
-                    height=df_px_height(len(disp)),
+                    height=110,
                 )
                 edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
                     .fillna(edited["Calculated Acres"])
@@ -504,7 +474,6 @@ div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
 
     # ------------------------- YIELD -------------------------
     with u2:
-        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
             "Yield", type=["zip", "shp", "geojson", "json", "csv"],
@@ -954,31 +923,59 @@ div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
                 else:
                     st.session_state["yield_df"] = combo.copy()
 
-                st.success("✅ Yield loaded successfully.\n" + "\n".join(messages))
+                # Compact pill for "loaded successfully"
+                st.markdown(
+                    f"""
+                    <div style="
+                        display:inline-block;
+                        background:#1f4d33;
+                        color:#d6ffdf;
+                        padding:4px 8px;
+                        border-radius:6px;
+                        font-size:12.5px;
+                        margin:2px 0;
+                    ">
+                        ✅ Yield loaded: <b>{len(frames)} file(s)</b>, {len(combo):,} points
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
             else:
-                st.error("❌ No valid yield data found.\n" + "\n".join(messages))
+                st.markdown(
+                    f"""
+                    <div style="
+                        display:inline-block;
+                        background:#4d1f1f;
+                        color:#ffd6d6;
+                        padding:4px 8px;
+                        border-radius:6px;
+                        font-size:12.5px;
+                        margin:2px 0;
+                    ">
+                        ❌ No valid yield data found
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
         else:
             st.caption("No yield files uploaded.")
         
         # === Compact Sell Price Input (integrated into Yield section) ===
-        st.markdown("**Crop Sell Price ($/bu)**", help="Required for profit map generation")
+        st.markdown("**Crop Sell Price ($/bu)**")
         
-        if "sell_price" not in st.session_state:
-            st.session_state["sell_price"] = 0.0
-        
-        sell_price = st.number_input(
-            "Crop Sell Price ($/bu)",
+        sell_price_val = st.number_input(
+            label="Crop Sell Price ($/bu)",
             min_value=0.0,
-            value=float(st.session_state["sell_price"]),
+            value=float(st.session_state.get("sell_price", 0.0)),  # always 0.0 on first run
             step=0.1,
-            key="sell_price_input",
-            label_visibility="collapsed"
+            key="sell_price_v2",               # NEW key = no sticky 5.00
+            label_visibility="collapsed",
+            format="%.2f"
         )
-        st.session_state["sell_price"] = sell_price
+        st.session_state["sell_price"] = float(sell_price_val)
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
-        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         fert_files = st.file_uploader("Fert", type=["csv", "geojson", "json", "zip"],
                                       key="up_fert", accept_multiple_files=True)
@@ -1017,7 +1014,6 @@ div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
 
     # ------------------------- SEED -------------------------
     with u4:
-        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         seed_files = st.file_uploader("Seed", type=["csv", "geojson", "json", "zip"],
                                       key="up_seed", accept_multiple_files=True)
@@ -1057,8 +1053,6 @@ div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
                 st.error("No valid seed RX maps detected.")
         else:
             st.caption("No seed files uploaded.")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ===========================
 # UI: Fixed inputs + Variable/Flat/CornSoy strip
@@ -1812,15 +1806,15 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 apply_compact_theme()
 _bootstrap_defaults()
 
-# ==============================================================
-# 0. SESSION DEFAULTS — enforce reset for fresh app loads
-# ==============================================================
+# Canonical default for sell price
 if "sell_price" not in st.session_state:
     st.session_state["sell_price"] = 0.0
-elif st.session_state.get("reset_defaults", True):
-    st.session_state["sell_price"] = 0.0
-    st.session_state["reset_defaults"] = False
-# ==============================================================
+
+# One-time migration: retire the old widget key that held 5.00
+# (Don't clear the whole session; just drop this sticky key.)
+for old_key in ("sell_price_input", "sell_price_old"):
+    if old_key in st.session_state:
+        del st.session_state[old_key]
 
 render_uploaders()
 render_fixed_inputs_and_strip()
