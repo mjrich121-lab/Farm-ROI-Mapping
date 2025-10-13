@@ -149,6 +149,16 @@ def auto_height(df: pd.DataFrame, row_h: int = 36, header: int = 44, pad: int = 
 def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) -> int:
     return int(header + max(1, nrows) * row_h + pad)
 
+# ---- Data editor height helper (matches Streamlit's real row metrics) ----
+def editor_height(num_rows: int) -> int:
+    # Visual metrics measured from the current theme:
+    HEADER = 42   # px  (includes header row + top border)
+    ROW    = 34   # px  (body row height incl. row border)
+    PAD    = 12   # px  (bottom padding so last row is never clipped)
+    if num_rows < 1:
+        num_rows = 1
+    return int(HEADER + num_rows * ROW + PAD)
+
 def find_col(df: pd.DataFrame, names) -> Optional[str]:
     if df is None or df.empty:
         return None
@@ -450,23 +460,28 @@ def render_uploaders():
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
                 
-                # --- Simple uniform height ---
-                row_h = 28
-                header_h = 36
-                base_pad = 12
-                height_calc = int(header_h + (len(disp) * row_h) + base_pad)
-                
                 edited = st.data_editor(
                     disp,
-                    num_rows="fixed", hide_index=True, use_container_width=True,
+                    num_rows="fixed", hide_index=True, 
+                    height=editor_height(len(disp)),
+                    use_container_width=True,
                     column_config={
                         "Zone": st.column_config.TextColumn(disabled=True),
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
                         "Override Acres": st.column_config.NumberColumn(format="%.2f"),
                     },
-                    height=height_calc,
                     key="zones_editor"
                 )
+                
+                st.markdown("""
+<style>
+/* Hide the vertical scrollbar track for this specific editor only */
+div[data-testid="stDataFrame"][data-baseweb][aria-describedby*="zones_editor"] 
+  [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar { display:none; }
+div[data-testid="stDataFrame"][data-baseweb][aria-describedby*="zones_editor"] 
+  [data-testid="stDataFrameScrollableContainer"] { scrollbar-width: none; overflow: hidden; }
+</style>
+""", unsafe_allow_html=True)
                 edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
                     .fillna(edited["Calculated Acres"])
                 zones_gdf["Override Acres"] = edited["Override Acres"].astype(float).values
@@ -1043,15 +1058,22 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                # --- Simple uniform height ---
                 fert_df = pd.DataFrame(summary)
-                row_h = 28
-                header_h = 36
-                base_pad = 12
-                height_calc_fert = int(header_h + (len(fert_df) * row_h) + base_pad)
                 
-                st.dataframe(fert_df, use_container_width=True,
-                             hide_index=True, height=height_calc_fert)
+                st.dataframe(fert_df, 
+                             hide_index=True,
+                             height=editor_height(len(fert_df)),
+                             use_container_width=True)
+                
+                st.markdown("""
+<style>
+/* Hide the vertical scrollbar track for this specific editor only */
+div[data-testid="stDataFrame"]:has([aria-describedby*="fert"]) 
+  [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar { display:none; }
+div[data-testid="stDataFrame"]:has([aria-describedby*="fert"]) 
+  [data-testid="stDataFrameScrollableContainer"] { scrollbar-width: none; overflow: hidden; }
+</style>
+""", unsafe_allow_html=True)
             else:
                 st.error("No valid fertilizer RX maps detected.")
         else:
@@ -1092,15 +1114,22 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                # --- Simple uniform height ---
                 seed_df = pd.DataFrame(summary)
-                row_h = 28
-                header_h = 36
-                base_pad = 12
-                height_calc_seed = int(header_h + (len(seed_df) * row_h) + base_pad)
                 
-                st.dataframe(seed_df, use_container_width=True,
-                             hide_index=True, height=height_calc_seed)
+                st.dataframe(seed_df,
+                             hide_index=True,
+                             height=editor_height(len(seed_df)),
+                             use_container_width=True)
+                
+                st.markdown("""
+<style>
+/* Hide the vertical scrollbar track for this specific editor only */
+div[data-testid="stDataFrame"]:has([aria-describedby*="seed"]) 
+  [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar { display:none; }
+div[data-testid="stDataFrame"]:has([aria-describedby*="seed"]) 
+  [data-testid="stDataFrameScrollableContainer"] { scrollbar-width: none; overflow: hidden; }
+</style>
+""", unsafe_allow_html=True)
             else:
                 st.error("No valid seed RX maps detected.")
         else:
