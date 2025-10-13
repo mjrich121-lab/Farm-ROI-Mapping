@@ -1815,6 +1815,9 @@ def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
     """))
     st.session_state["_legend_counts"][corner] = idx + 1
 
+# Reset legend counter to prevent duplicates on rerun
+st.session_state["_legend_counts"] = {"tl": 0}
+
 # Initialize the legend rail
 init_legend_rails(m)
 
@@ -1832,8 +1835,8 @@ if yield_gdf is not None and not getattr(yield_gdf, "empty", True):
         bounds = yield_gdf.total_bounds
         map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         map_zoom = 15
-    except Exception as e:
-        st.warning(f"Could not calculate yield bounds: {e}")
+    except Exception:
+        pass
 
 elif zones_gdf is not None and not getattr(zones_gdf, "empty", True):
     try:
@@ -1841,8 +1844,8 @@ elif zones_gdf is not None and not getattr(zones_gdf, "empty", True):
         bounds = zones_gdf.total_bounds
         map_center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         map_zoom = 15
-    except Exception as e:
-        st.warning(f"Could not calculate zone bounds: {e}")
+    except Exception:
+        pass
 
 # Update the map with proper center and zoom
 m.location = map_center
@@ -2032,18 +2035,13 @@ try:
             ].copy()
         
         if df_valid.empty:
-            st.warning("No valid coordinates detected — using full dataset for continuity.")
             df_valid = df_for_maps.copy()
     else:
-        st.warning("No Latitude/Longitude columns found — skipping coordinate validation.")
         df_valid = df_for_maps.copy()
-except Exception as e:
-    st.warning(f"Coordinate validation failed: {e}")
+except Exception:
     df_valid = df_for_maps.copy()
 
-if df_valid.empty:
-    st.warning("Yield dataframe is empty after coordinate validation — skipping heatmap rendering.")
-else:
+if not df_valid.empty:
     try:
         # Clip extreme yield outliers (5–95%)
         if df_valid["Yield"].dropna().size > 0:
@@ -2065,8 +2063,8 @@ else:
             north = float(df_valid["Latitude"].max())
             east = float(df_valid["Longitude"].max())
             bounds = (south, west, north, east)
-    except Exception as e:
-        st.warning(f"Map bounds computation failed: {e}")
+    except Exception:
+        pass
 
     # =========================================================
     # SAFE PROFIT METRICS
@@ -2113,8 +2111,7 @@ else:
             return add_heatmap_overlay(
                 m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
             )
-        except Exception as e:
-            st.warning(f"Overlay '{title}' failed: {e}")
+        except Exception:
             return None, None
 
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
