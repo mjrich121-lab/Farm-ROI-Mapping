@@ -1524,25 +1524,42 @@ def make_base_map():
         st.error(f"Map fallback triggered: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
 
-def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
+def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     """
-    Non-JS legend renderer: uses absolute positioning with an internal counter
-    so cards stack reliably without any runtime DOM manipulation.
+    Priority-based legend renderer: legends stack in priority order
+    Profit (priority 1) > Yield (priority 2) > Others (priority 99)
     """
     if vmin is None or vmax is None:
         print(f"DEBUG: add_gradient_legend() skipped for '{name}' (vmin={vmin}, vmax={vmax})")
         return
 
-    # Ensure counter exists - always use the shared counter for continuous stacking
-    st.session_state.setdefault("_legend_counts", {"tl": 0})
-    seq = st.session_state["_legend_counts"]["tl"]
-
-    # Auto-scaling spacing: compress when many legends present to prevent clipping
+    # Initialize legend priority tracking
+    if "_legend_priorities" not in st.session_state:
+        st.session_state["_legend_priorities"] = []
+    
+    # Set priority based on layer name
+    if "profit" in name.lower():
+        priority = 1
+    elif "yield" in name.lower():
+        priority = 2
+    elif "zone" in name.lower():
+        priority = 3
+    else:
+        priority = 99
+    
+    # Track this legend's priority
+    st.session_state["_legend_priorities"].append({"name": name, "priority": priority, "vmin": vmin, "vmax": vmax, "cmap": cmap})
+    
+    # Sort legends by priority and calculate position
+    sorted_legends = sorted(st.session_state["_legend_priorities"], key=lambda x: x["priority"])
+    seq = next(i for i, legend in enumerate(sorted_legends) if legend["name"] == name)
+    
+    # Calculate top offset based on priority order
     top_offset = 20 + (seq * 92)
     if top_offset > 520:   # when >6–7 legends, start compacting
         top_offset = 20 + (seq * 78)
     
-    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {top_offset}px")
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, top_offset will be {top_offset}px")
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
@@ -1566,9 +1583,6 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
-
-    # ALWAYS increment counter for continuous stacking
-    st.session_state["_legend_counts"]["tl"] = seq + 1
 
 def detect_rate_type(gdf):
     try:
@@ -1743,7 +1757,7 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
+def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index=1000):
     try:
         # Bail if nothing to draw
         if df is None or df.empty:
@@ -1885,14 +1899,47 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
         # Add yield map overlay
         overlay_bounds = [[ymin, xmin], [ymax, xmax]]
         
-        folium.raster_layers.ImageOverlay(
+        # Create overlay with z-index for layer ordering
+        overlay = folium.raster_layers.ImageOverlay(
             image=rgba,
             bounds=overlay_bounds,
             opacity=1.0,
             name=name,
             overlay=True,
             show=show_default
-        ).add_to(m)
+        )
+        
+        # Add z-index control and data storage for hover sampling
+        overlay._template = folium.Template("""
+        {% macro script(this, kwargs) %}
+        {{this._parent.get_name()}}.on('add', function() {
+            if (this._container) {
+                this._container.style.zIndex = {{ z_index }};
+            }
+            // Store grid data for hover sampling
+            if (window.overlayData === undefined) {
+                window.overlayData = {};
+            }
+            window.overlayData["{{ name }}"] = {
+                width: {{ grid_width }},
+                height: {{ grid_height }},
+                values: {{ grid_values }},
+                vmin: {{ vmin }},
+                vmax: {{ vmax }}
+            };
+        });
+        {% endmacro %}
+        """)
+        overlay._template._env.globals.update({
+            'z_index': z_index,
+            'grid_width': grid.shape[1],
+            'grid_height': grid.shape[0],
+            'grid_values': grid.flatten().tolist(),
+            'vmin': vmin,
+            'vmax': vmax
+        })
+        
+        overlay.add_to(m)
 
         return vmin, vmax
 
@@ -2026,9 +2073,9 @@ def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
     """))
     st.session_state["_legend_counts"][corner] = idx + 1
 
-# Reset legend counter to prevent duplicates on rerun
-st.session_state["_legend_counts"] = {"tl": 0}
-print(f"DEBUG: Legend counter reset to {st.session_state['_legend_counts']}")
+# Reset legend priorities to ensure proper ordering on each render
+st.session_state["_legend_priorities"] = []
+print(f"DEBUG: Legend priorities reset for proper ordering")
 
 # Initialize the legend rail
 init_legend_rails(m)
@@ -2282,26 +2329,41 @@ if not df_valid.empty:
         pass
 
     # =========================================================
-    # SAFE PROFIT METRICS
+    # DYNAMIC PROFIT METRICS - RECALCULATES ON EVERY INPUT CHANGE
     # =========================================================
     try:
-        base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
+        # Calculate base expenses from fixed inputs
+        expenses = st.session_state.get("expenses_dict", {})
+        base_expenses_per_acre = float(sum(expenses.values()) if expenses else 0.0)
 
+        # Calculate variable rate costs from uploaded prescription maps
         fert_var = seed_var = 0.0
-        for d in st.session_state.get("fert_layers_store", {}).values():
-            if isinstance(d, pd.DataFrame) and not d.empty:
-                fert_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
+        
+        # Get variable rate inputs from the editor
+        var_inputs = st.session_state.get("variable_rate_inputs", pd.DataFrame())
+        if not var_inputs.empty:
+            total_var_cost = var_inputs["Units Applied"] * var_inputs["Price per Unit ($)"]
+            total_var_cost = pd.to_numeric(total_var_cost, errors="coerce").fillna(0).sum()
+            
+            # Distribute cost across fertilizer vs seed based on product types
+            fert_products = var_inputs[var_inputs["Type"] == "Fertilizer"]
+            seed_products = var_inputs[var_inputs["Type"] == "Seed"]
+            
+            if not fert_products.empty:
+                fert_var = pd.to_numeric(fert_products["Units Applied"] * fert_products["Price per Unit ($)"], errors="coerce").fillna(0).sum()
+            if not seed_products.empty:
+                seed_var = pd.to_numeric(seed_products["Units Applied"] * seed_products["Price per Unit ($)"], errors="coerce").fillna(0).sum()
 
-        for d in st.session_state.get("seed_layers_store", {}).values():
-            if isinstance(d, pd.DataFrame) and not d.empty:
-                seed_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
-
+        # Calculate fixed rate costs
         fx = st.session_state.get("fixed_products", pd.DataFrame())
-        fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
+        fixed_costs = 0.0
+        if not fx.empty and "$/ac" in fx.columns:
+            fixed_costs = pd.to_numeric(fx["$/ac"], errors="coerce").fillna(0).sum()
 
-        # Use sell price from session state (will be 0 if not set)
+        # Get current sell price (always reactive to input changes)
         active_sell_price = float(st.session_state.get("sell_price", 0.0))
         
+        # Recalculate profit metrics with current inputs
         if "Yield" in df_for_maps.columns:
             df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * active_sell_price
             df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
@@ -2314,40 +2376,45 @@ if not df_valid.empty:
             df_for_maps["Revenue_per_acre"] = 0.0
             df_for_maps["NetProfit_Variable"] = 0.0
             df_for_maps["NetProfit_Fixed"] = 0.0
+            
+        # Store calculated values for hover popup access
+        st.session_state["_profit_calculated"] = {
+            "base_expenses": base_expenses_per_acre,
+            "fert_var": fert_var,
+            "seed_var": seed_var,
+            "fixed_costs": fixed_costs,
+            "sell_price": active_sell_price
+        }
     except Exception as e:
         st.warning(f"Profit calculation fallback triggered: {e}")
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
             df_for_maps[c] = 0.0
 
     # =========================================================
-    # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
+    # RENDER HEATMAPS IN PRIORITY ORDER: PROFIT > YIELD > OTHERS
     # =========================================================
-    def safe_overlay(colname, title, cmap, show_default):
+    def safe_overlay(colname, title, cmap, show_default, z_index=1000):
         if colname not in df_for_maps.columns or df_for_maps.empty:
             return None, None
         try:
-            return add_heatmap_overlay(
-                m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
+            # Create overlay with specified z-index for layer ordering
+            vmin, vmax = add_heatmap_overlay(
+                m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds, z_index
             )
+            return vmin, vmax
         except Exception:
             return None, None
 
-    # Always render Yield overlay
-    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
-    print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
-    if ymin is not None:
-        add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
-        print(f"DEBUG: Added Yield legend")
-
-    # Gate profit overlays based on sell price
+    # 1. PROFIT LAYER (TOP PRIORITY) - Always render first for top z-index
+    profit_vmin = profit_vmax = None
     if st.session_state.get("sell_price", 0) > 0:
-        vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-        print(f"DEBUG: Variable Profit overlay returned vmin={vmin}, vmax={vmax}")
-        if vmin is not None:
-            add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
+        profit_vmin, profit_vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, True, z_index=3000)
+        print(f"DEBUG: Variable Profit overlay returned vmin={profit_vmin}, vmax={profit_vmax}")
+        if profit_vmin is not None:
+            add_gradient_legend(m, "Variable Rate Profit ($/ac)", profit_vmin, profit_vmax, plt.cm.RdYlGn)
             print(f"DEBUG: Added Variable Profit legend")
 
-        # ✅ Fixed Profit ($/ac) — only if valid fixed-cost data exists
+        # Fixed Profit overlay (if data exists)
         fx = st.session_state.get("fixed_products", pd.DataFrame())
         has_fixed_costs = (
             not fx.empty and
@@ -2355,13 +2422,11 @@ if not df_valid.empty:
         )
 
         if has_fixed_costs:
-            fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+            fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False, z_index=2999)
             print(f"DEBUG: Fixed Profit overlay returned fmin={fmin}, fmax={fmax}")
             if fmin is not None:
                 add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
                 print(f"DEBUG: Added Fixed Profit legend")
-        else:
-            print("DEBUG: Skipping Fixed Profit overlay — no fixed cost data detected.")
     else:
         # ⚠️ Show small disclaimer when sell price not entered
         st.markdown(
@@ -2374,6 +2439,13 @@ if not df_valid.empty:
             """,
             unsafe_allow_html=True
         )
+
+    # 2. YIELD LAYER (SECOND PRIORITY)
+    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True, z_index=2000)
+    print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
+    if ymin is not None:
+        add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
+        print(f"DEBUG: Added Yield legend")
 
 # Final fit using all active layers
 try:
@@ -2454,13 +2526,19 @@ for k in list(st.session_state.keys()):
     if "layer" in k:
         layer_states[k] = False
 
-# defaults
+# Set correct defaults with profit layer always on top
 layer_states.update({
-    "profit_layer": True,
-    "yield_layer": True,
-    "zones_layer": True,
-    "zones_outline_layer": True
+    "Variable Rate Profit ($/ac)": True,  # Profit layer - TOP PRIORITY
+    "Fixed Rate Profit ($/ac)": False,    # Fixed profit - OFF by default
+    "Yield (bu/ac)": True,                # Yield layer - SECOND
+    "Zones (Fill)": True,                 # Zone fill - THIRD
+    "Zone Outlines (Top)": True,          # Zone outlines - ALWAYS VISIBLE
 })
+
+# Set all prescription layers OFF by default
+for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
+    layer_states[f"Fertilizer RX: {k}"] = False
+layer_states["Seed RX"] = False
 
 st.session_state["layer_visibility"] = layer_states
 
@@ -2476,48 +2554,131 @@ for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]
     bring_front(key)
 
 
-# --- INJECT JS: PRIORITY-BASED HOVER WITH VALUE EXTRACTION ---
+# --- INJECT JS: PRIORITY-BASED HOVER WITH LIVE VALUE EXTRACTION ---
 hover_js = """
 <script>
 (function(){
   const order = ["profit","yield","zone"];
   const popup = L.popup({autoPan:false, closeButton:false});
-  function val(layer, latlng){
-    let v=null;
-    if(layer instanceof L.GeoJSON){
-      layer.eachLayer(f=>{
-        if(f.getBounds && f.getBounds().contains(latlng)){
-          const p=f.feature?.properties||{};
-          for(const k in p){
-            if(typeof p[k]==='number'){v=p[k];break;}
+  
+  // Extract value from heatmap overlay using pixel sampling
+  function getHeatmapValue(overlay, latlng) {
+    try {
+      // For ImageOverlay, we need to sample the pixel data
+      if (overlay instanceof L.ImageOverlay) {
+        const bounds = overlay.getBounds();
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
+        
+        // Check if point is within overlay bounds
+        if (latlng.lat >= sw.lat && latlng.lat <= ne.lat && 
+            latlng.lng >= sw.lng && latlng.lng <= ne.lng) {
+          
+          // Calculate normalized position within overlay
+          const x = (latlng.lng - sw.lng) / (ne.lng - sw.lng);
+          const y = 1 - (latlng.lat - sw.lat) / (ne.lat - sw.lat);
+          
+          // Sample from the stored data if available
+          const name = overlay.options.name || "";
+          if (window.overlayData && window.overlayData[name]) {
+            const data = window.overlayData[name];
+            const gridX = Math.floor(x * (data.width - 1));
+            const gridY = Math.floor(y * (data.height - 1));
+            const value = data.values[gridY * data.width + gridX];
+            if (value !== undefined && !isNaN(value)) {
+              return value;
+            }
+          }
+        }
+      }
+    } catch(e) {
+      console.log("Heatmap value extraction error:", e);
+    }
+    return null;
+  }
+  
+  // Extract value from GeoJSON layer
+  function getGeoJSONValue(layer, latlng) {
+    let v = null;
+    if (layer instanceof L.GeoJSON) {
+      layer.eachLayer(f => {
+        if (f.getBounds && f.getBounds().contains(latlng)) {
+          const p = f.feature?.properties || {};
+          for (const k in p) {
+            if (typeof p[k] === 'number' && !isNaN(p[k])) {
+              v = p[k];
+              break;
+            }
           }
         }
       });
     }
     return v;
   }
-  function show(e, lines){
+  
+  function show(e, lines) {
     popup.setLatLng(e.latlng)
       .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
       .openOn(window.map);
   }
-  function hide(){setTimeout(()=>window.map.closePopup(popup),300);}
+  function hide() {
+    setTimeout(() => window.map.closePopup(popup), 300);
+  }
   
   window.addEventListener("load", () => {
-    setTimeout(()=>{
-      if(!window.map) return;
-      window.map.on('mousemove',e=>{
-        const layers=Object.values(window.map._layers);
-        const info=[];
-        layers.forEach(l=>{
-          const name=(l.options?.name||"").toLowerCase();
-          let p=99;for(let i=0;i<order.length;i++)if(name.includes(order[i])){p=i;break;}
-          const v=val(l,e.latlng);
-          if(v!=null)info.push({p:p,t:`${l.options.name}: ${v.toFixed(1)}`});
+    setTimeout(() => {
+      if (!window.map) return;
+      
+      window.map.on('mousemove', e => {
+        const layers = Object.values(window.map._layers);
+        const info = [];
+        
+        layers.forEach(l => {
+          const name = (l.options?.name || "").toLowerCase();
+          let p = 99;
+          for (let i = 0; i < order.length; i++) {
+            if (name.includes(order[i])) {
+              p = i;
+              break;
+            }
+          }
+          
+          let v = null;
+          
+          // Try heatmap value first (for profit/yield overlays)
+          if (name.includes("profit") || name.includes("yield")) {
+            v = getHeatmapValue(l, e.latlng);
+          }
+          
+          // Try GeoJSON value for zones and prescriptions
+          if (v === null) {
+            v = getGeoJSONValue(l, e.latlng);
+          }
+          
+          if (v !== null) {
+            // Format display names
+            let displayName = l.options.name || "";
+            if (displayName.includes("Variable Rate Profit")) {
+              displayName = "Variable Rate Profit ($/ac)";
+            } else if (displayName.includes("Yield")) {
+              displayName = "Yield (bu/ac)";
+            } else if (displayName.includes("Zone")) {
+              displayName = "Zone";
+            }
+            
+            info.push({p: p, t: `${displayName}: ${v.toFixed(1)}`});
+          }
         });
-        if(info.length){info.sort((a,b)=>a.p-b.p);show(e,info.map(i=>i.t).join("<br>"));}else hide();
+        
+        if (info.length) {
+          info.sort((a, b) => a.p - b.p);
+          show(e, info.map(i => i.t).join("<br>"));
+        } else {
+          hide();
+        }
       });
-      window.map.on('mouseout',hide);
+      
+      window.map.on('mouseout', hide);
     }, 600);
   });
 })();
