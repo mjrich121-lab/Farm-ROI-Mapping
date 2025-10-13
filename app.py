@@ -411,7 +411,7 @@ def _bootstrap_defaults():
 # =========================================================
 def render_uploaders():
     st.subheader("Upload Maps")
-    st.markdown('<div id="upload-scope">', unsafe_allow_html=True)
+    st.markdown('<div class="upload-scope">', unsafe_allow_html=True)
     u1, u2, u3, u4 = st.columns(4)
 
     # ------------------------- ZONES -------------------------
@@ -950,43 +950,43 @@ def render_uploaders():
 <style>
 
 /* === COMPACT STYLING — UPLOAD AREA ONLY === */
-#upload-scope [data-testid="stAlert"] {
+.upload-scope [data-testid="stAlert"] {
     font-size: 12.5px !important;
     line-height: 1.05 !important;
     padding: 4px 8px !important;
     margin: 2px 0 !important;
     border-radius: 4px !important;
 }
-#upload-scope [data-testid="stAlert"] div {
+.upload-scope [data-testid="stAlert"] div {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-#upload-scope [data-testid="stDataFrameContainer"] {
+.upload-scope [data-testid="stDataFrameContainer"] {
     height: auto !important;
     max-height: 115px !important;
     overflow: hidden !important;
     margin-bottom: 0 !important;
 }
 
-#upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+.upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
     height: 22px !important;
     font-size: 13px !important;
     padding: 0 5px !important;
     line-height: 1.0 !important;
 }
-#upload-scope div[data-testid="stNumberInput"] > div > div > div {
+.upload-scope div[data-testid="stNumberInput"] > div > div > div {
     min-height: 22px !important;
     height: 22px !important;
     padding: 0 !important;
     margin: 0 !important;
 }
 
-/* Prevent bleed into other sections */
-section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stDataFrameContainer"],
-section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stAlert"],
-section[data-testid="stHorizontalBlock"] div:not(#upload-scope) [data-testid="stNumberInput"] {
-    all: unset !important;
+/* Ensure styles don't leak below */
+section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stAlert"],
+section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stDataFrameContainer"],
+section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stNumberInput"] {
+    all: revert !important;
 }
 
 </style>
