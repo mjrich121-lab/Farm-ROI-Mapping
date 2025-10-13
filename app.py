@@ -450,13 +450,12 @@ def render_uploaders():
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
                 
-                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
+                # --- Final no-scroll calibration ---
                 nrows = len(disp)
                 row_h = 28
                 header_h = 36
-                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
-                scroll_guard = 4 if nrows >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
-                dynamic_height = int(header_h + (nrows * row_h) + base_pad + scroll_guard)
+                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
+                height_calc = int(header_h + (nrows * row_h) + true_pad)
                 
                 edited = st.data_editor(
                     disp,
@@ -466,7 +465,7 @@ def render_uploaders():
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
                         "Override Acres": st.column_config.NumberColumn(format="%.2f"),
                     },
-                    height=dynamic_height,    # dynamic instead of fixed
+                    height=height_calc,
                     key="zones_editor"
                 )
                 edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
@@ -1045,17 +1044,16 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
+                # --- Final no-scroll calibration ---
                 fert_df = pd.DataFrame(summary)
                 nrows_fert = len(fert_df)
                 row_h = 28
                 header_h = 36
-                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
-                scroll_guard = 4 if nrows_fert >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
-                fert_height = int(header_h + (nrows_fert * row_h) + base_pad + scroll_guard)
+                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
+                height_calc_fert = int(header_h + (nrows_fert * row_h) + true_pad)
                 
                 st.dataframe(fert_df, use_container_width=True,
-                             hide_index=True, height=fert_height)
+                             hide_index=True, height=height_calc_fert)
             else:
                 st.error("No valid fertilizer RX maps detected.")
         else:
@@ -1096,17 +1094,16 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
+                # --- Final no-scroll calibration ---
                 seed_df = pd.DataFrame(summary)
                 nrows_seed = len(seed_df)
                 row_h = 28
                 header_h = 36
-                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
-                scroll_guard = 4 if nrows_seed >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
-                seed_height = int(header_h + (nrows_seed * row_h) + base_pad + scroll_guard)
+                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
+                height_calc_seed = int(header_h + (nrows_seed * row_h) + true_pad)
                 
                 st.dataframe(seed_df, use_container_width=True,
-                             hide_index=True, height=seed_height)
+                             hide_index=True, height=height_calc_seed)
             else:
                 st.error("No valid seed RX maps detected.")
         else:
@@ -1867,11 +1864,19 @@ _bootstrap_defaults()
 # Suppress phantom scrollbars in DataFrames
 st.markdown("""
 <style>
+/* Remove vertical + horizontal ghost scrollbars from dataframes */
+[data-testid="stDataFrameScrollableContainer"] {
+    overflow: hidden !important;
+    height: auto !important;
+}
+/* Disable the WebKit scroll track itself */
 [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar {
     display: none !important;
 }
-[data-testid="stDataFrameScrollableContainer"] {
-    overflow: hidden !important;
+/* Lock font scaling for consistency */
+[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+    font-size: 13px !important;
+    line-height: 1.1 !important;
 }
 </style>
 """, unsafe_allow_html=True)
