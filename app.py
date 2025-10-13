@@ -1669,7 +1669,8 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
 
     folium.GeoJson(
         gdf, name=name, style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases),
+        show=False  # Prescription layers OFF by default
     ).add_to(m)
 
     add_gradient_legend(m, legend_name, vmin, vmax, cmap, index)
@@ -2145,6 +2146,7 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
             ),
+            show=True  # Zones ON by default
         ).add_to(m)
 
         # Add zone boundaries with thick black lines
@@ -2157,7 +2159,8 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
                 "weight": 3,
                 "opacity": 1.0,
             },
-            tooltip=None
+            tooltip=None,
+            show=True  # Zone outlines always ON
         ).add_to(m)
 
         legend_items = "".join(
@@ -2562,7 +2565,10 @@ hover_js = """
 
         window.map.eachLayer(function(layer) {
           if (!layer.options || !layer.options.name) return;
+
           const name = layer.options.name.toLowerCase();
+          if (name.includes("fert") || name.includes("seed")) return;  // skip RX layers
+
           let val = null;
 
           if (layer instanceof L.GeoJSON) {
