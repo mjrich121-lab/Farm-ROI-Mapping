@@ -950,35 +950,38 @@ def render_uploaders():
 <style>
 
 /* ==============================================================
-   COMPACT STYLING — UPLOAD AREA ONLY (.upload-scope)
+   FINAL COMPACT POLISH — UPLOAD AREA ONLY (.upload-scope)
    ============================================================== */
 
-/* Target all nested containers under .upload-scope */
-.upload-scope :is([data-testid="stAlert"], [data-testid="stDataFrameContainer"], [data-testid="stNumberInput"]) {
+/* Universal compact inheritance for upload area */
+.upload-scope :is([data-testid="stAlert"],
+                  [data-testid="stDataFrameContainer"],
+                  [data-testid="stNumberInput"]) {
     font-size: 12.5px !important;
-    line-height: 1.05 !important;
+    line-height: 1.0 !important;
 }
 
 /* --- Alert banners --- */
 .upload-scope [data-testid="stAlert"] {
-    padding: 4px 8px !important;
+    padding: 3px 6px !important;      /* smaller all around */
     margin: 2px 0 !important;
     border-radius: 4px !important;
+    min-height: 20px !important;
 }
 .upload-scope [data-testid="stAlert"] div {
     padding: 0 !important;
     margin: 0 !important;
 }
 
-/* --- DataFrames (Zone/Yield tables) --- */
+/* --- DataFrames (Zone / Yield tables) --- */
 .upload-scope [data-testid="stDataFrameContainer"] {
     height: auto !important;
-    max-height: 115px !important;
+    max-height: 105px !important;     /* tighter limit */
     overflow: hidden !important;
     margin-bottom: 0 !important;
 }
 
-/* --- Number inputs (Sell Price) --- */
+/* --- Sell price input --- */
 .upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
     height: 22px !important;
     font-size: 13px !important;
@@ -992,16 +995,19 @@ def render_uploaders():
     margin: 0 !important;
 }
 
-/* --- Ensure inner Streamlit sections inherit styling --- */
+/* Ensure nested Streamlit sections inherit compact sizing */
 .upload-scope section[data-testid="stHorizontalBlock"] * {
     font-size: inherit !important;
     line-height: inherit !important;
 }
 
-/* --- Protect all other sections (Fixed Inputs, Profit Summary, etc.) --- */
-section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stAlert"],
-section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stDataFrameContainer"],
-section[data-testid="stHorizontalBlock"]:not(.upload-scope) [data-testid="stNumberInput"] {
+/* Protect all other sections (Fixed Inputs, Map, Profit Summary) */
+section[data-testid="stHorizontalBlock"]:not(.upload-scope)
+  [data-testid="stAlert"],
+section[data-testid="stHorizontalBlock"]:not(.upload-scope)
+  [data-testid="stDataFrameContainer"],
+section[data-testid="stHorizontalBlock"]:not(.upload-scope)
+  [data-testid="stNumberInput"] {
     all: revert !important;
 }
 
