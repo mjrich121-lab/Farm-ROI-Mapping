@@ -944,6 +944,27 @@ def render_uploaders():
             label_visibility="collapsed"
         )
         st.session_state["sell_price"] = sell_price
+        
+        st.markdown(
+            """
+            <style>
+            /* Shrink sell price box */
+            div[data-baseweb="input"] input {
+                height: 28px !important;
+                font-size: 13px !important;
+                padding: 2px 6px !important;
+            }
+            /* Compact alert banners */
+            [data-testid="stAlert"] {
+                font-size: 13px !important;
+                padding: 6px 10px !important;
+                margin-bottom: 4px !important;
+                border-radius: 6px !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
