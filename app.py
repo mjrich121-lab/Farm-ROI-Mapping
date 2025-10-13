@@ -2440,6 +2440,70 @@ legend_css = """
 """
 m.get_root().header.add_child(folium.Element(legend_css))
 
+# ==========================================================
+# MULTI-LAYER HOVER INSPECTOR (value + units)
+# ==========================================================
+
+# Inject client-side hover handler
+hover_script = """
+<script>
+function roundValue(v){return Math.round((v + Number.EPSILON) * 10) / 10;}
+
+function attachMultiHover(map){
+  let popup = L.popup({closeButton:false, autoPan:false, className:'multi-layer-popup'});
+  map.on('mousemove', function(e){
+    const latlng = e.latlng;
+    let info = [];
+
+    map.eachLayer(l => {
+      // ImageOverlay or GeoJSON with bounds
+      if (l.options && l.options.name && l.getBounds && l.getBounds().contains(latlng)) {
+        let label = l.options.name;
+        let unit = l.options.unit || '';
+        // Attempt to extract pixel value if rasterized
+        try {
+          if (l._url && l._image && l._image.complete){
+            // skip heavy pixel read; show placeholder
+            info.push(label + ' — value visible on map' + (unit ? ' (' + unit + ')' : ''));
+          } else if (l.feature && l.feature.properties){
+            let vals = Object.values(l.feature.properties).slice(0,3).join(', ');
+            info.push(label + ': ' + vals + (unit ? ' ' + unit : ''));
+          } else {
+            info.push(label);
+          }
+        } catch(err){info.push(label);}
+      }
+    });
+
+    if (info.length > 0){
+      popup
+        .setLatLng(latlng)
+        .setContent('<div style="background:rgba(30,30,30,0.85);color:white;padding:6px 10px;border-radius:6px;font-size:12.5px;line-height:1.3;">'
+          + info.join('<br>') + '</div>')
+        .openOn(map);
+    } else {
+      map.closePopup(popup);
+    }
+  });
+}
+
+setTimeout(()=>{attachMultiHover(map);},600);
+</script>
+"""
+m.get_root().html.add_child(folium.Element(hover_script))
+
+# Optional CSS Polish for popup
+popup_css = """
+<style>
+.multi-layer-popup {
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    backdrop-filter: blur(3px);
+}
+</style>
+"""
+m.get_root().header.add_child(folium.Element(popup_css))
+
 # Dynamic map key for refresh on file upload (controlled)
 map_key = f"main_map_{st.session_state.get('map_refresh_trigger', 0)}"
 
