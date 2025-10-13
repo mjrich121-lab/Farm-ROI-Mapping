@@ -1388,13 +1388,13 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
         print(f"DEBUG: add_gradient_legend() skipped for '{name}' (vmin={vmin}, vmax={vmax})")
         return
 
-    # Ensure counter exists and use it when index is not provided
+    # Ensure counter exists - always use the shared counter for continuous stacking
     st.session_state.setdefault("_legend_counts", {"tl": 0})
-    seq = index if isinstance(index, int) else st.session_state["_legend_counts"]["tl"]
-    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {14 + (seq * 84)}px")
+    seq = st.session_state["_legend_counts"]["tl"]
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {20 + (seq * 92)}px")
 
-    # Fixed vertical spacing per card (px). 84 is tight but safe.
-    top_offset = 14 + (seq * 84)
+    # Fixed vertical spacing per card (px). 92px provides clear separation.
+    top_offset = 20 + (seq * 92)
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
@@ -1418,9 +1418,8 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    # Increment internal sequence only when we owned it
-    if index is None:
-        st.session_state["_legend_counts"]["tl"] = seq + 1
+    # ALWAYS increment counter for continuous stacking
+    st.session_state["_legend_counts"]["tl"] = seq + 1
 
 def detect_rate_type(gdf):
     try:
