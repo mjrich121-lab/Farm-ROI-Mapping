@@ -1045,8 +1045,17 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                st.dataframe(pd.DataFrame(summary), use_container_width=True,
-                             hide_index=True, height=df_px_height(len(summary)))
+                # --- Dynamic height for Fertilizer table (match zone map behavior) ---
+                fert_df = pd.DataFrame(summary)
+                nrows_fert = len(fert_df)
+                row_h = 28
+                header_h = 36
+                base_pad = 24
+                scroll_guard = 2 if nrows_fert >= 5 else 0
+                fert_height = int(header_h + (nrows_fert * row_h) + base_pad + scroll_guard)
+                
+                st.dataframe(fert_df, use_container_width=True,
+                             hide_index=True, height=fert_height)
             else:
                 st.error("No valid fertilizer RX maps detected.")
         else:
@@ -1087,8 +1096,17 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                st.dataframe(pd.DataFrame(summary), use_container_width=True,
-                             hide_index=True, height=df_px_height(len(summary)))
+                # --- Dynamic height for Seed table (match zone map behavior) ---
+                seed_df = pd.DataFrame(summary)
+                nrows_seed = len(seed_df)
+                row_h = 28
+                header_h = 36
+                base_pad = 24
+                scroll_guard = 2 if nrows_seed >= 5 else 0
+                seed_height = int(header_h + (nrows_seed * row_h) + base_pad + scroll_guard)
+                
+                st.dataframe(seed_df, use_container_width=True,
+                             hide_index=True, height=seed_height)
             else:
                 st.error("No valid seed RX maps detected.")
         else:
