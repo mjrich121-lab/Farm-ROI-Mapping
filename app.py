@@ -2121,26 +2121,21 @@ if not df_valid.empty:
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
             df_for_maps[c] = 0.0
 
-    # =========================================================
-    # 💵 PROFIT MAP CONTROLS
-    # =========================================================
-    st.markdown("### 💵 Profit Map Controls")
-    
+    # === Compact Profit Controls (auto-refresh) ===
     if "sell_price" not in st.session_state:
         st.session_state["sell_price"] = 0.0
     
-    sell_price_input = st.number_input(
-        "Enter Crop Sell Price ($/bu) to Enable Profit Maps",
+    sell_price = st.number_input(
+        "Crop Sell Price ($/bu)",
         min_value=0.0,
         value=float(st.session_state["sell_price"]),
         step=0.1,
-        key="sell_price_input"
+        key="sell_price_input",
+        label_visibility="visible"
     )
     
-    generate_profit = st.button("Generate Profit Maps")
-    
-    if generate_profit and sell_price_input > 0:
-        st.session_state["sell_price"] = sell_price_input
+    # Auto-update on change (no button)
+    st.session_state["sell_price"] = sell_price
 
     # =========================================================
     # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
