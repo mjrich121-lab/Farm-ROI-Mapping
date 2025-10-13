@@ -2445,12 +2445,10 @@ legend_css = """
 m.get_root().header.add_child(folium.Element(legend_css))
 
 # =========================================================
-# 🔁 LAYER AUTO-TOGGLE + STACK PRIORITY + HOVER ORDER
+# LAYER STACK + LEGEND ORDER CONTROL
 # =========================================================
 
-# --- 1️⃣ AUTO-TOGGLE: Profit ON, others OFF (keep zone outlines visible) ---
-# Note: Folium layers are controlled by show=True/False at creation time
-# This is for future state management if needed
+# --- AUTO-TOGGLE STATE ---
 layer_states = {}
 if st.session_state.get("sell_price", 0) > 0:
     layer_states["profit_visible"] = True
@@ -2459,37 +2457,36 @@ else:
 st.session_state["layer_visibility"] = layer_states
 
 
-# --- 2️⃣ INJECT JS: PRIORITY-BASED HOVER ORDER + FADE OUT ---
+# --- INJECT JS: PRIORITY-BASED HOVER WITH VALUE EXTRACTION ---
 hover_js = """
 <script>
-(function() {
+(function(){
   const priorityOrder = ["profit", "yield", "zone"];
   const popup = L.popup({autoPan:false, closeButton:false});
 
-  function getLayerValue(layer, latlng) {
-    try {
-      if (layer instanceof L.GeoJSON) {
-        let val = null;
-        layer.eachLayer(function(f){
-          if (f.getBounds && f.getBounds().contains(latlng)) {
-            const props = f.feature?.properties || {};
-            const first = Object.values(props)[0];
-            if (!isNaN(first)) val = first;
+  function getValue(layer, latlng){
+    if(!layer || !layer.getBounds) return null;
+    let val = null;
+    if(layer instanceof L.GeoJSON){
+      layer.eachLayer(f=>{
+        if(f.getBounds && f.getBounds().contains(latlng)){
+          const p = f.feature?.properties || {};
+          for(const k in p){
+            if(typeof p[k]==='number') { val=p[k]; break; }
           }
-        });
-        return val;
-      }
-    } catch(e) { return null; }
-    return null;
+        }
+      });
+    }
+    return val;
   }
 
-  function showPopup(e, text) {
+  function showPopup(e, lines){
     popup.setLatLng(e.latlng)
-         .setContent(`<div class='multi-layer-popup'>${text}</div>`)
+         .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
          .openOn(window.map);
   }
 
-  function hidePopup() {
+  function hidePopup(){
     setTimeout(()=>{window.map.closePopup(popup);},300);
   }
 
@@ -2499,22 +2496,24 @@ hover_js = """
       
       window.map.on('mousemove', function(e){
         const layers = Object.values(window.map._layers);
-        const layerInfo = [];
+        const info = [];
 
-        layers.forEach(l => {
-          const label = (l.options?.name || "").toLowerCase();
+        layers.forEach(l=>{
+          const name=(l.options?.name||"").toLowerCase();
           let priority = 99;
-          for (let i=0; i<priorityOrder.length; i++) {
-            if (label.includes(priorityOrder[i])) { priority = i; break; }
+          for(let i=0;i<priorityOrder.length;i++){
+            if(name.includes(priorityOrder[i])) {priority=i; break;}
           }
-          const val = getLayerValue(l, e.latlng);
-          if (val != null) layerInfo.push({priority:priority, text:`${l.options.name}: ${val}`});
+          const val=getValue(l,e.latlng);
+          if(val!=null){
+            info.push({priority:priority,
+                       text:`${l.options.name}: ${val.toFixed(1)}`});
+          }
         });
 
-        if (layerInfo.length>0){
-          layerInfo.sort((a,b)=>a.priority-b.priority);
-          const lines = layerInfo.map(i=>i.text).join("<br>");
-          showPopup(e, lines);
+        if(info.length>0){
+          info.sort((a,b)=>a.priority-b.priority);
+          showPopup(e,info.map(i=>i.text).join("<br>"));
         } else hidePopup();
       });
 
@@ -2524,16 +2523,21 @@ hover_js = """
 })();
 </script>
 """
-
 m.get_root().html.add_child(folium.Element(hover_js))
 
-# Optional CSS Polish for popup
+# Popup CSS
 popup_css = """
 <style>
 .multi-layer-popup {
-    pointer-events: none;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-    backdrop-filter: blur(3px);
+  background: rgba(20,20,20,0.85);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  font-size: 13px;
+  line-height: 1.3;
+  backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 </style>
 """
