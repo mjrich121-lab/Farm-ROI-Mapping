@@ -1756,15 +1756,22 @@ def compute_bounds_for_heatmaps():
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
 def add_legend_html(m: folium.Map, html: str, offset: int = 10):
-    """Helper function to add legend HTML using proper Template handling with vertical spacing"""
+    """Helper function to add legend HTML with vertical spacing"""
     legend_html = f"""
-    <div class="legend-control" style="position:absolute; top:{offset}px; left:20px; z-index:9999;">
+    <div class="legend-control" style="
+        position:absolute; 
+        top:{offset}px; 
+        left:20px; 
+        z-index:9999;
+        background:rgba(30,30,30,0.25);
+        color:white;
+        padding:6px 10px;
+        border-radius:6px;
+        font-size:13px;">
       {html}
     </div>
     """
-    legend = MacroElement()
-    legend._template = Template(legend_html)
-    m.get_root().add_child(legend)
+    m.get_root().html.add_child(folium.Element(legend_html))
 
 def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index=1000):
     try:
@@ -1921,28 +1928,50 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
         # Add overlay to map
         overlay.add_to(m)
         
-        # Add z-index control and data storage for hover sampling using proper helper
+        # Add z-index control using proper Template handling
         overlay_script = """
         {% macro script(this, kwargs) %}
         {{this._parent.get_name()}}.on('add', function() {
             if (this._container) {
                 this._container.style.zIndex = """ + str(z_index) + """;
             }
-            // Store grid data for hover sampling
-            if (window.overlayData === undefined) {
-                window.overlayData = {};
-            }
-            window.overlayData[\"""" + name + """\"] = {
-                width: """ + str(grid.shape[1]) + """,
-                height: """ + str(grid.shape[0]) + """,
-                values: """ + str(grid.flatten().tolist()) + """,
-                vmin: """ + str(vmin) + """,
-                vmax: """ + str(vmax) + """
-            };
         });
         {% endmacro %}
         """
-        add_legend_html(m, overlay_script)
+        script_element = MacroElement()
+        script_element._template = Template(overlay_script)
+        m.get_root().add_child(script_element)
+        
+        # Create synthetic GeoJSON hover layer for profit/yield overlays
+        if "profit" in name.lower() or "yield" in name.lower():
+            # Sample points from the grid at regular intervals for hover detection
+            hover_points = []
+            step = max(1, len(df) // 200)  # Sample ~200 points for performance
+            
+            for idx in range(0, len(df), step):
+                try:
+                    lat_val = df.iloc[idx][latc]
+                    lon_val = df.iloc[idx][lonc]
+                    data_val = df.iloc[idx][values.name]
+                    
+                    if pd.notna(lat_val) and pd.notna(lon_val) and pd.notna(data_val):
+                        hover_points.append({
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [float(lon_val), float(lat_val)]},
+                            "properties": {name: float(data_val)}
+                        })
+                except Exception:
+                    continue
+            
+            if hover_points:
+                hover_geojson = folium.GeoJson(
+                    {"type": "FeatureCollection", "features": hover_points},
+                    name=f"{name}",
+                    show=show_default,
+                    style_function=lambda x: {'fillOpacity': 0, 'opacity': 0, 'weight': 0},
+                    tooltip=folium.GeoJsonTooltip(fields=[name], aliases=[name])
+                )
+                hover_geojson.add_to(m)
 
         return vmin, vmax
 
