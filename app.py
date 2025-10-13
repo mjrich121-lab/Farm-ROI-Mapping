@@ -2448,76 +2448,76 @@ m.get_root().header.add_child(folium.Element(legend_css))
 # LAYER STACK + LEGEND ORDER CONTROL
 # =========================================================
 
-# --- AUTO-TOGGLE STATE ---
+# --- AUTO-TOGGLE DEFAULTS ---
 layer_states = {}
-if st.session_state.get("sell_price", 0) > 0:
-    layer_states["profit_visible"] = True
-else:
-    layer_states["profit_visible"] = False
+for k in list(st.session_state.keys()):
+    if "layer" in k:
+        layer_states[k] = False
+
+# defaults
+layer_states.update({
+    "profit_layer": True,
+    "yield_layer": True,
+    "zones_layer": True,
+    "zones_outline_layer": True
+})
+
 st.session_state["layer_visibility"] = layer_states
+
+
+# --- ENFORCE VISUAL ORDER ---
+def bring_front(key):
+    lyr = st.session_state.get(key)
+    if lyr: 
+        try: lyr.add_to(m)
+        except: pass
+
+for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]:
+    bring_front(key)
 
 
 # --- INJECT JS: PRIORITY-BASED HOVER WITH VALUE EXTRACTION ---
 hover_js = """
 <script>
 (function(){
-  const priorityOrder = ["profit", "yield", "zone"];
+  const order = ["profit","yield","zone"];
   const popup = L.popup({autoPan:false, closeButton:false});
-
-  function getValue(layer, latlng){
-    if(!layer || !layer.getBounds) return null;
-    let val = null;
+  function val(layer, latlng){
+    let v=null;
     if(layer instanceof L.GeoJSON){
       layer.eachLayer(f=>{
         if(f.getBounds && f.getBounds().contains(latlng)){
-          const p = f.feature?.properties || {};
+          const p=f.feature?.properties||{};
           for(const k in p){
-            if(typeof p[k]==='number') { val=p[k]; break; }
+            if(typeof p[k]==='number'){v=p[k];break;}
           }
         }
       });
     }
-    return val;
+    return v;
   }
-
-  function showPopup(e, lines){
+  function show(e, lines){
     popup.setLatLng(e.latlng)
-         .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
-         .openOn(window.map);
+      .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
+      .openOn(window.map);
   }
-
-  function hidePopup(){
-    setTimeout(()=>{window.map.closePopup(popup);},300);
-  }
-
+  function hide(){setTimeout(()=>window.map.closePopup(popup),300);}
+  
   window.addEventListener("load", () => {
     setTimeout(()=>{
-      if (!window.map) return;
-      
-      window.map.on('mousemove', function(e){
-        const layers = Object.values(window.map._layers);
-        const info = [];
-
+      if(!window.map) return;
+      window.map.on('mousemove',e=>{
+        const layers=Object.values(window.map._layers);
+        const info=[];
         layers.forEach(l=>{
           const name=(l.options?.name||"").toLowerCase();
-          let priority = 99;
-          for(let i=0;i<priorityOrder.length;i++){
-            if(name.includes(priorityOrder[i])) {priority=i; break;}
-          }
-          const val=getValue(l,e.latlng);
-          if(val!=null){
-            info.push({priority:priority,
-                       text:`${l.options.name}: ${val.toFixed(1)}`});
-          }
+          let p=99;for(let i=0;i<order.length;i++)if(name.includes(order[i])){p=i;break;}
+          const v=val(l,e.latlng);
+          if(v!=null)info.push({p:p,t:`${l.options.name}: ${v.toFixed(1)}`});
         });
-
-        if(info.length>0){
-          info.sort((a,b)=>a.priority-b.priority);
-          showPopup(e,info.map(i=>i.text).join("<br>"));
-        } else hidePopup();
+        if(info.length){info.sort((a,b)=>a.p-b.p);show(e,info.map(i=>i.t).join("<br>"));}else hide();
       });
-
-      window.map.on('mouseout', hidePopup);
+      window.map.on('mouseout',hide);
     }, 600);
   });
 })();
@@ -2528,16 +2528,16 @@ m.get_root().html.add_child(folium.Element(hover_js))
 # Popup CSS
 popup_css = """
 <style>
-.multi-layer-popup {
-  background: rgba(20,20,20,0.85);
-  color: white;
-  padding: 6px 10px;
-  border-radius: 6px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  font-size: 13px;
-  line-height: 1.3;
-  backdrop-filter: blur(2px);
-  pointer-events: none;
+.multi-layer-popup{
+  background:rgba(25,25,25,0.88);
+  color:#fff;
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:13px;
+  line-height:1.3;
+  box-shadow:0 2px 6px rgba(0,0,0,0.4);
+  backdrop-filter:blur(2px);
+  pointer-events:none;
 }
 </style>
 """
