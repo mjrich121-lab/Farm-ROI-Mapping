@@ -1391,21 +1391,25 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
     # Ensure counter exists - always use the shared counter for continuous stacking
     st.session_state.setdefault("_legend_counts", {"tl": 0})
     seq = st.session_state["_legend_counts"]["tl"]
-    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {20 + (seq * 92)}px")
 
-    # Fixed vertical spacing per card (px). 92px provides clear separation.
+    # Auto-scaling spacing: compress when many legends present to prevent clipping
     top_offset = 20 + (seq * 92)
+    if top_offset > 520:   # when >6–7 legends, start compacting
+        top_offset = 20 + (seq * 78)
+    
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {top_offset}px")
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
              for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
 
-    # Transparent, no shadow, white text only
+    # Transparent background, battleship gray text with subtle glow
     legend_html = f"""
     <div style="
         position:absolute; top:{top_offset}px; left:10px; z-index:9999;
-        font-family:sans-serif; font-size:12px; color:#ffffff;
+        font-family:sans-serif; font-size:12px; color:#b0b3b8;
+        text-shadow:0 0 3px rgba(0,0,0,0.5); font-weight:500;
         background: rgba(255,255,255,0.0); padding:6px 10px; border-radius:6px;
         box-shadow:none; border:none; width:220px;">
       <div style="font-weight:600; margin-bottom:4px;">{name}</div>
@@ -1780,7 +1784,9 @@ def init_legend_rails(m):
       }
       #legend-tl { top: 14px; left: 10px; width: 220px; }
       .legend-card {
-        color: #fff; 
+        color: #b0b3b8 !important; 
+        text-shadow: 0 0 3px rgba(0,0,0,0.5) !important;
+        font-weight: 500 !important;
         background: rgba(255,255,255,0.0);
         padding: 6px 10px; 
         border-radius: 6px;
@@ -2174,7 +2180,9 @@ legend_css = """
     background-color: rgba(255,255,255,0.0) !important;
     box-shadow: none !important;
     border: none !important;
-    color: white !important;
+    color: #b0b3b8 !important;
+    text-shadow: 0 0 3px rgba(0,0,0,0.5) !important;
+    font-weight: 500 !important;
     font-size: 13px !important;
     backdrop-filter: none !important;
     opacity: 1.0 !important;
