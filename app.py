@@ -1757,6 +1757,12 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
+def add_legend_html(m: folium.Map, html: str):
+    """Helper function to add legend HTML using proper Template handling"""
+    legend = MacroElement()
+    legend._template = Template(html)
+    m.get_root().add_child(legend)
+
 def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index=1000):
     try:
         # Bail if nothing to draw
@@ -1909,37 +1915,31 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
             show=show_default
         )
         
-        # Add z-index control and data storage for hover sampling
-        overlay._template = Template("""
+        # Add overlay to map
+        overlay.add_to(m)
+        
+        # Add z-index control and data storage for hover sampling using proper helper
+        overlay_script = """
         {% macro script(this, kwargs) %}
         {{this._parent.get_name()}}.on('add', function() {
             if (this._container) {
-                this._container.style.zIndex = {{ z_index }};
+                this._container.style.zIndex = """ + str(z_index) + """;
             }
             // Store grid data for hover sampling
             if (window.overlayData === undefined) {
                 window.overlayData = {};
             }
-            window.overlayData["{{ name }}"] = {
-                width: {{ grid_width }},
-                height: {{ grid_height }},
-                values: {{ grid_values }},
-                vmin: {{ vmin }},
-                vmax: {{ vmax }}
+            window.overlayData[\"""" + name + """\"] = {
+                width: """ + str(grid.shape[1]) + """,
+                height: """ + str(grid.shape[0]) + """,
+                values: """ + str(grid.flatten().tolist()) + """,
+                vmin: """ + str(vmin) + """,
+                vmax: """ + str(vmax) + """
             };
         });
         {% endmacro %}
-        """)
-        overlay._template._env.globals.update({
-            'z_index': z_index,
-            'grid_width': grid.shape[1],
-            'grid_height': grid.shape[0],
-            'grid_values': grid.flatten().tolist(),
-            'vmin': vmin,
-            'vmax': vmax
-        })
-        
-        overlay.add_to(m)
+        """
+        add_legend_html(m, overlay_script)
 
         return vmin, vmax
 
@@ -2521,37 +2521,26 @@ m.get_root().header.add_child(folium.Element(legend_css))
 # =========================================================
 
 # --- AUTO-TOGGLE DEFAULTS ---
-layer_states = {}
+st.session_state.setdefault("layer_visibility", {})
+vis = st.session_state["layer_visibility"]
 for k in list(st.session_state.keys()):
-    if "layer" in k:
-        layer_states[k] = False
+    if k.endswith("_layer"):
+        vis.setdefault(k, False)
 
-# Set correct defaults with profit layer always on top
-layer_states.update({
-    "Variable Rate Profit ($/ac)": True,  # Profit layer - TOP PRIORITY
-    "Fixed Rate Profit ($/ac)": False,    # Fixed profit - OFF by default
-    "Yield (bu/ac)": True,                # Yield layer - SECOND
-    "Zones (Fill)": True,                 # Zone fill - THIRD
-    "Zone Outlines (Top)": True,          # Zone outlines - ALWAYS VISIBLE
-})
+for k in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]:
+    if k in st.session_state:
+        vis[k] = True
+st.session_state["layer_visibility"] = vis
 
-# Set all prescription layers OFF by default
-for k, fgdf in st.session_state.get("fert_gdfs", {}).items():
-    layer_states[f"Fertilizer RX: {k}"] = False
-layer_states["Seed RX"] = False
-
-st.session_state["layer_visibility"] = layer_states
-
-
-# --- ENFORCE VISUAL ORDER ---
-def bring_front(key):
+# Enforce visual stack order
+def _front(key):
     lyr = st.session_state.get(key)
-    if lyr: 
+    if lyr:
         try: lyr.add_to(m)
         except: pass
 
 for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]:
-    bring_front(key)
+    _front(key)
 
 
 # --- INJECT JS: PRIORITY-BASED HOVER WITH LIVE VALUE EXTRACTION ---
