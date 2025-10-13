@@ -2444,85 +2444,88 @@ legend_css = """
 """
 m.get_root().header.add_child(folium.Element(legend_css))
 
-# ==========================================================
-# MULTI-LAYER HOVER INSPECTOR (value + units)
-# ==========================================================
+# =========================================================
+# 🔁 LAYER AUTO-TOGGLE + STACK PRIORITY + HOVER ORDER
+# =========================================================
 
-# Inject client-side hover handler with priority sorting
-hover_script = """
+# --- 1️⃣ AUTO-TOGGLE: Profit ON, others OFF (keep zone outlines visible) ---
+# Note: Folium layers are controlled by show=True/False at creation time
+# This is for future state management if needed
+layer_states = {}
+if st.session_state.get("sell_price", 0) > 0:
+    layer_states["profit_visible"] = True
+else:
+    layer_states["profit_visible"] = False
+st.session_state["layer_visibility"] = layer_states
+
+
+# --- 2️⃣ INJECT JS: PRIORITY-BASED HOVER ORDER + FADE OUT ---
+hover_js = """
 <script>
-function roundValue(v){return Math.round((v + Number.EPSILON) * 10) / 10;}
-
-function attachMultiHover(map){
-  let popup = L.popup({closeButton:false, autoPan:false, className:'multi-layer-popup'});
-  
-  // Priority order for layer display
+(function() {
   const priorityOrder = ["profit", "yield", "zone"];
-  
-  map.on('mousemove', function(e){
-    const latlng = e.latlng;
-    let layerInfo = [];
+  const popup = L.popup({autoPan:false, closeButton:false});
 
-    map.eachLayer(l => {
-      // ImageOverlay or GeoJSON with bounds
-      if (l.options && l.options.name && l.getBounds && l.getBounds().contains(latlng)) {
-        let label = l.options.name;
-        let unit = l.options.unit || '';
-        let priority = 99;
-        
-        // Determine priority based on layer name
-        const nameLower = label.toLowerCase();
-        for (let i = 0; i < priorityOrder.length; i++) {
-          if (nameLower.includes(priorityOrder[i])) {
-            priority = i;
-            break;
+  function getLayerValue(layer, latlng) {
+    try {
+      if (layer instanceof L.GeoJSON) {
+        let val = null;
+        layer.eachLayer(function(f){
+          if (f.getBounds && f.getBounds().contains(latlng)) {
+            const props = f.feature?.properties || {};
+            const first = Object.values(props)[0];
+            if (!isNaN(first)) val = first;
           }
-        }
-        
-        // Attempt to extract pixel value if rasterized
-        try {
-          let displayText = '';
-          if (l._url && l._image && l._image.complete){
-            // skip heavy pixel read; show placeholder
-            displayText = label + ' — value visible on map' + (unit ? ' (' + unit + ')' : '');
-          } else if (l.feature && l.feature.properties){
-            let vals = Object.values(l.feature.properties).slice(0,3).join(', ');
-            displayText = label + ': ' + vals + (unit ? ' ' + unit : '');
-          } else {
-            displayText = label;
-          }
-          layerInfo.push({priority: priority, text: displayText});
-        } catch(err){
-          layerInfo.push({priority: priority, text: label});
-        }
+        });
+        return val;
       }
-    });
+    } catch(e) { return null; }
+    return null;
+  }
 
-    // Sort by priority (profit first, then yield, then zone, then others)
-    layerInfo.sort((a, b) => a.priority - b.priority);
-    let info = layerInfo.map(item => item.text);
+  function showPopup(e, text) {
+    popup.setLatLng(e.latlng)
+         .setContent(`<div class='multi-layer-popup'>${text}</div>`)
+         .openOn(window.map);
+  }
 
-    if (info.length > 0){
-      popup
-        .setLatLng(latlng)
-        .setContent('<div style="background:rgba(30,30,30,0.85);color:white;padding:6px 10px;border-radius:6px;font-size:12.5px;line-height:1.3;">'
-          + info.join('<br>') + '</div>')
-        .openOn(map);
-    } else {
-      map.closePopup(popup);
-    }
+  function hidePopup() {
+    setTimeout(()=>{window.map.closePopup(popup);},300);
+  }
+
+  window.addEventListener("load", () => {
+    setTimeout(()=>{
+      if (!window.map) return;
+      
+      window.map.on('mousemove', function(e){
+        const layers = Object.values(window.map._layers);
+        const layerInfo = [];
+
+        layers.forEach(l => {
+          const label = (l.options?.name || "").toLowerCase();
+          let priority = 99;
+          for (let i=0; i<priorityOrder.length; i++) {
+            if (label.includes(priorityOrder[i])) { priority = i; break; }
+          }
+          const val = getLayerValue(l, e.latlng);
+          if (val != null) layerInfo.push({priority:priority, text:`${l.options.name}: ${val}`});
+        });
+
+        if (layerInfo.length>0){
+          layerInfo.sort((a,b)=>a.priority-b.priority);
+          const lines = layerInfo.map(i=>i.text).join("<br>");
+          showPopup(e, lines);
+        } else hidePopup();
+      });
+
+      window.map.on('mouseout', hidePopup);
+    }, 600);
   });
-  
-  // Fade out on mouseout
-  map.on('mouseout', function(){
-    setTimeout(()=>{map.closePopup(popup);}, 300);
-  });
-}
-
-setTimeout(()=>{attachMultiHover(map);},600);
+})();
 </script>
 """
-m.get_root().html.add_child(folium.Element(hover_script))
+
+m.get_root().html.add_child(folium.Element(hover_js))
 
 # Optional CSS Polish for popup
 popup_css = """
