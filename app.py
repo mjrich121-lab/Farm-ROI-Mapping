@@ -449,6 +449,14 @@ def render_uploaders():
                 zones_gdf["Override Acres"] = zones_gdf["Calculated Acres"].astype(float)
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
+                
+                # --- Adaptive table height: show all zones without scroll ---
+                nrows = len(disp)
+                row_h = 28          # per-row pixel height
+                header_h = 36       # header height
+                pad = 10            # buffer space
+                dynamic_height = int(header_h + nrows * row_h + pad)
+                
                 edited = st.data_editor(
                     disp,
                     num_rows="fixed", hide_index=True, use_container_width=True,
@@ -457,7 +465,8 @@ def render_uploaders():
                         "Calculated Acres": st.column_config.NumberColumn(format="%.2f", disabled=True),
                         "Override Acres": st.column_config.NumberColumn(format="%.2f"),
                     },
-                    height=110,
+                    height=dynamic_height,    # dynamic instead of fixed
+                    key="zones_editor"
                 )
                 edited["Override Acres"] = pd.to_numeric(edited["Override Acres"], errors="coerce") \
                     .fillna(edited["Calculated Acres"])
@@ -520,7 +529,14 @@ def render_uploaders():
                                     reps = gdf.geometry.representative_point()
                                     gdf["Longitude"] = reps.x
                                     gdf["Latitude"] = reps.y
-                                    st.info(f"✅ Extracted coordinates from geometry column in {yf.name}")
+                                    
+                                    # Compact pill for coordinates extraction
+                                    st.markdown(f"""
+                                    <div style="display:inline-block; background:#1f3b53; color:#cfe7ff;
+                                                padding:4px 8px; border-radius:6px; font-size:12.5px; margin:2px 0;">
+                                        ✅ Extracted coordinates from geometry column in <b>{yf.name}</b>
+                                    </div>
+                                    """, unsafe_allow_html=True)
                                     
                                     st.session_state["_yield_gdf_raw"] = gdf
                                     df = pd.DataFrame(gdf.drop(columns="geometry", errors="ignore"))
@@ -876,7 +892,13 @@ def render_uploaders():
                         st.warning(f"Looking for patterns: Yld_Vol_Dr, Dry_Yield, Yield_buac, etc.")
                         continue
                     
-                    st.info(f"✅ Using yield column: '{yield_col}'")
+                    # Compact pill for chosen yield column
+                    st.markdown(f"""
+                    <div style="display:inline-block; background:#1f3b53; color:#cfe7ff;
+                                padding:4px 8px; border-radius:6px; font-size:12.5px; margin:2px 0;">
+                        ✅ Using yield column: <b>{yield_col}</b>
+                    </div>
+                    """, unsafe_allow_html=True)
 
                     # --- Fill coords if missing ---
                     if "Latitude" not in df.columns or "Longitude" not in df.columns:
@@ -963,15 +985,19 @@ def render_uploaders():
         # === Compact Sell Price Input (integrated into Yield section) ===
         st.markdown("**Crop Sell Price ($/bu)**")
         
-        sell_price_val = st.number_input(
-            label="Crop Sell Price ($/bu)",
-            min_value=0.0,
-            value=float(st.session_state.get("sell_price", 0.0)),  # always 0.0 on first run
-            step=0.1,
-            key="sell_price_v2",               # NEW key = no sticky 5.00
-            label_visibility="collapsed",
-            format="%.2f"
-        )
+        # Place input in a narrow left column to avoid full-width stretch
+        col_price, _ = st.columns([0.45, 0.55])
+        with col_price:
+            sell_price_val = st.number_input(
+                label="Crop Sell Price ($/bu)",
+                min_value=0.0,
+                value=0.0,             # enforced default
+                step=0.1,
+                key="sell_price_v3",   # fresh key to break old sticky 5.00
+                label_visibility="collapsed",
+                format="%.2f"
+            )
+        
         st.session_state["sell_price"] = float(sell_price_val)
 
     # ------------------------- FERTILIZER -------------------------
