@@ -1910,7 +1910,7 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
         )
         
         # Add z-index control and data storage for hover sampling
-        overlay._template = folium.Template("""
+        overlay._template = Template("""
         {% macro script(this, kwargs) %}
         {{this._parent.get_name()}}.on('add', function() {
             if (this._container) {
