@@ -1385,11 +1385,13 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
     so cards stack reliably without any runtime DOM manipulation.
     """
     if vmin is None or vmax is None:
+        print(f"DEBUG: add_gradient_legend() skipped for '{name}' (vmin={vmin}, vmax={vmax})")
         return
 
     # Ensure counter exists and use it when index is not provided
     st.session_state.setdefault("_legend_counts", {"tl": 0})
     seq = index if isinstance(index, int) else st.session_state["_legend_counts"]["tl"]
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {14 + (seq * 84)}px")
 
     # Fixed vertical spacing per card (px). 84 is tight but safe.
     top_offset = 14 + (seq * 84)
@@ -1823,6 +1825,7 @@ def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
 
 # Reset legend counter to prevent duplicates on rerun
 st.session_state["_legend_counts"] = {"tl": 0}
+print(f"DEBUG: Legend counter reset to {st.session_state['_legend_counts']}")
 
 # Initialize the legend rail
 init_legend_rails(m)
@@ -1934,6 +1937,7 @@ palette_options = [plt.cm.Blues, plt.cm.Purples, plt.cm.Oranges, plt.cm.Greys]
 legend_ix = 0
 seed_gdf = st.session_state.get("seed_gdf")
 if seed_gdf is not None and not getattr(seed_gdf, "empty", True):
+    print(f"DEBUG: Adding Seed RX overlay at legend_ix={legend_ix}")
     add_prescription_overlay(m, seed_gdf, "Seed RX", plt.cm.Greens, legend_ix)
     legend_ix += 1
 
@@ -1941,8 +1945,11 @@ for idx, (k, fgdf) in enumerate(st.session_state.get("fert_gdfs", {}).items()):
     if fgdf is not None and not fgdf.empty:
         # Use distinct colormap for each fertilizer layer
         cmap = palette_options[idx % len(palette_options)]
+        print(f"DEBUG: Adding Fertilizer RX '{k}' at legend_ix={legend_ix}")
         add_prescription_overlay(m, fgdf, f"Fertilizer RX: {k}", cmap, legend_ix)
         legend_ix += 1
+
+print(f"DEBUG: Total prescription overlays added: {legend_ix}")
 
 # ---------- Heatmaps (yield / profits) — FOOLPROOF ----------
 bounds = compute_bounds_for_heatmaps()
@@ -2121,16 +2128,22 @@ if not df_valid.empty:
             return None, None
 
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
+    print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
     if ymin is not None:
         add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
+        print(f"DEBUG: Added Yield legend")
 
     vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    print(f"DEBUG: Variable Profit overlay returned vmin={vmin}, vmax={vmax}")
     if vmin is not None:
         add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
+        print(f"DEBUG: Added Variable Profit legend")
 
     fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+    print(f"DEBUG: Fixed Profit overlay returned fmin={fmin}, fmax={fmax}")
     if fmin is not None:
         add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
+        print(f"DEBUG: Added Fixed Profit legend")
 
 # Final fit using all active layers
 try:
@@ -2197,7 +2210,20 @@ m.get_root().header.add_child(folium.Element(legend_css))
 
 # Dynamic map key for refresh on file upload (controlled)
 map_key = f"main_map_{st.session_state.get('map_refresh_trigger', 0)}"
+
+# === DIAGNOSTIC: Pre-render legend check ===
+print(f"DEBUG: Final legend counter state before render: {st.session_state.get('_legend_counts')}")
+html_preview = m.get_root().render()
+legend_snips = [line for line in html_preview.splitlines() if "legend" in line.lower()]
+print(f"=== LEGEND HTML PREVIEW START (found {len(legend_snips)} lines) ===")
+for l in legend_snips[:20]:
+    print(l)
+print("=== LEGEND HTML PREVIEW END ===")
+
 st_folium(m, use_container_width=True, height=600, key=map_key)
+
+# === DIAGNOSTIC: Post-render check ===
+print("Map rendered; checking post-render legend presence…")
 
 # =========================================================
 # PROFIT SUMMARY — BULLETPROOF STATIC TABLES (NO SCROLL)
