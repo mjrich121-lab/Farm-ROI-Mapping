@@ -152,9 +152,9 @@ def df_px_height(nrows: int, row_h: int = 28, header: int = 34, pad: int = 2) ->
 # ---- Data editor height helper (matches Streamlit's real row metrics) ----
 def editor_height(num_rows: int) -> int:
     # Visual metrics measured from the current theme:
-    HEADER = 42   # px  (includes header row + top border)
-    ROW    = 34   # px  (body row height incl. row border)
-    PAD    = 12   # px  (bottom padding so last row is never clipped)
+    HEADER = 42   # header row incl. border
+    ROW    = 34   # body row height
+    PAD    = 8    # tighter bottom padding (was 12)
     if num_rows < 1:
         num_rows = 1
     return int(HEADER + num_rows * ROW + PAD)
