@@ -450,12 +450,11 @@ def render_uploaders():
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
                 
-                # --- Final no-scroll calibration ---
-                nrows = len(disp)
+                # --- Simple uniform height ---
                 row_h = 28
                 header_h = 36
-                true_pad = 20            # <- lowered from 28 to eliminate fert bottom gap
-                height_calc = int(header_h + (nrows * row_h) + true_pad + 10)  # +10px compensation
+                base_pad = 12
+                height_calc = int(header_h + (len(disp) * row_h) + base_pad)
                 
                 edited = st.data_editor(
                     disp,
@@ -1044,25 +1043,12 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                # --- Dynamic height: scale with row count ---
+                # --- Simple uniform height ---
                 fert_df = pd.DataFrame(summary)
-                nrows_fert = len(fert_df)
                 row_h = 28
                 header_h = 36
-                
-                # Adaptive padding: smaller for short tables, larger for big ones
-                if nrows_fert <= 1:
-                    pad = 14         # Tight for 1 file
-                elif nrows_fert == 2:
-                    pad = 10         # Slightly smaller gap
-                elif nrows_fert == 3:
-                    pad = 6
-                elif nrows_fert == 4:
-                    pad = 4
-                else:
-                    pad = 2          # Full 5+ files → minimal padding, no scroll
-                
-                height_calc_fert = int(header_h + (nrows_fert * row_h) + pad)
+                base_pad = 12
+                height_calc_fert = int(header_h + (len(fert_df) * row_h) + base_pad)
                 
                 st.dataframe(fert_df, use_container_width=True,
                              hide_index=True, height=height_calc_fert)
@@ -1106,25 +1092,12 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                # --- Dynamic height: scale with row count ---
+                # --- Simple uniform height ---
                 seed_df = pd.DataFrame(summary)
-                nrows_seed = len(seed_df)
                 row_h = 28
                 header_h = 36
-                
-                # Adaptive padding: smaller for short tables, larger for big ones
-                if nrows_seed <= 1:
-                    pad = 14         # Tight for 1 file
-                elif nrows_seed == 2:
-                    pad = 10         # Slightly smaller gap
-                elif nrows_seed == 3:
-                    pad = 6
-                elif nrows_seed == 4:
-                    pad = 4
-                else:
-                    pad = 2          # Full 5+ files → minimal padding, no scroll
-                
-                height_calc_seed = int(header_h + (nrows_seed * row_h) + pad)
+                base_pad = 12
+                height_calc_seed = int(header_h + (len(seed_df) * row_h) + base_pad)
                 
                 st.dataframe(seed_df, use_container_width=True,
                              hide_index=True, height=height_calc_seed)
@@ -1886,40 +1859,43 @@ apply_compact_theme()
 _bootstrap_defaults()
 
 # ==============================================================
-# 🔒 FINAL SCROLLBAR REMOVAL — applies to all data editors
+# 🔒 FINAL SCROLLBAR + HEIGHT NORMALIZER
 # ==============================================================
 st.markdown("""
 <style>
-/* Step 1 — Disable all overflow in dataframe containers */
+/* Hide all scrollbars */
 [data-testid="stDataFrameScrollableContainer"] {
-    overflow: hidden !important;
-    height: auto !important;
-    scrollbar-width: none !important;    /* Firefox */
+  overflow: hidden !important;
+  scrollbar-width: none !important;
+  height: auto !important;
 }
-
-/* Step 2 — Hide WebKit scrollbars (Chrome, Edge, Safari) */
 [data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar {
-    display: none !important;
+  display: none !important;
 }
-
-/* Step 3 — Lock visual alignment and text sizing */
-[data-testid="stDataFrame"] td,
-[data-testid="stDataFrame"] th {
-    font-size: 13px !important;
-    line-height: 1.1 !important;
-    border: none !important;
+/* Normalize text sizing and remove phantom borders */
+[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+  font-size: 13px !important;
+  line-height: 1.1 !important;
+  border: none !important;
 }
 </style>
 
 <script>
-/* Step 4 — JS fallback: forcibly remove scrollbars at runtime */
 window.addEventListener("load", () => {
-  const frames = document.querySelectorAll('[data-testid="stDataFrameScrollableContainer"]');
-  frames.forEach(f => {
-    f.style.overflow = "hidden";
-    f.style.scrollbarWidth = "none";
-    f.style.height = "auto";
-  });
+  // Wait for all dataframes to mount
+  setTimeout(() => {
+    const frames = document.querySelectorAll('[data-testid="stDataFrameScrollableContainer"]');
+    frames.forEach(f => {
+      // Measure internal table height and apply directly
+      const table = f.querySelector("table");
+      if (table) {
+        const h = table.offsetHeight + 4; // +4 for bottom clip
+        f.style.height = h + "px";
+        f.style.overflow = "hidden";
+        f.style.scrollbarWidth = "none";
+      }
+    });
+  }, 400);  // slight delay ensures Streamlit finished virtualizing
 });
 </script>
 """, unsafe_allow_html=True)
