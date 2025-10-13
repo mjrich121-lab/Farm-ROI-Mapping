@@ -985,17 +985,25 @@ def render_uploaders():
         # === Compact Sell Price Input (integrated into Yield section) ===
         # Tighten spacing above Sell Price label
         st.markdown("<div style='margin-top:-10px;'></div>", unsafe_allow_html=True)
-        st.markdown("**Crop Sell Price ($/bu)**")
         
-        # Place input in a narrow left column to avoid full-width stretch
+        # --- Compact Sell Price Control ---
+        st.markdown("""
+<div style='display:flex; flex-direction:column; align-items:flex-start; margin-top:-4px;'>
+    <label style='font-weight:600; font-size:14px; margin-bottom:2px;'>
+        Crop Sell Price ($/bu)
+    </label>
+</div>
+""", unsafe_allow_html=True)
+        
+        # Input directly follows label, no gap
         col_price, _ = st.columns([0.45, 0.55])
         with col_price:
             sell_price_val = st.number_input(
                 label="Crop Sell Price ($/bu)",
                 min_value=0.0,
-                value=0.0,             # enforced default
+                value=0.0,
                 step=0.1,
-                key="sell_price_v3",   # fresh key to break old sticky 5.00
+                key="sell_price_v4",          # new key to avoid sticky cache
                 label_visibility="collapsed",
                 format="%.2f"
             )
