@@ -1959,7 +1959,6 @@ print(f"DEBUG: Total prescription overlays added: {legend_ix}")
 # ---------- Heatmaps (yield / profits) — FOOLPROOF ----------
 bounds = compute_bounds_for_heatmaps()
 ydf = st.session_state.get("yield_df")
-sell_price = float(st.session_state.get("sell_price", st.session_state.get("corn_price", 5.0)))
 
 # =========================================================
 # DEFENSIVE CONVERSION — SINGLE BRANCH STRUCTURE
@@ -2102,8 +2101,11 @@ if not df_valid.empty:
         fx = st.session_state.get("fixed_products", pd.DataFrame())
         fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
 
+        # Use sell price from session state (will be 0 if not set)
+        active_sell_price = float(st.session_state.get("sell_price", 0.0))
+        
         if "Yield" in df_for_maps.columns:
-            df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * sell_price
+            df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * active_sell_price
             df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
                 base_expenses_per_acre + fert_var + seed_var
             )
@@ -2120,6 +2122,27 @@ if not df_valid.empty:
             df_for_maps[c] = 0.0
 
     # =========================================================
+    # 💵 PROFIT MAP CONTROLS
+    # =========================================================
+    st.markdown("### 💵 Profit Map Controls")
+    
+    if "sell_price" not in st.session_state:
+        st.session_state["sell_price"] = 0.0
+    
+    sell_price_input = st.number_input(
+        "Enter Crop Sell Price ($/bu) to Enable Profit Maps",
+        min_value=0.0,
+        value=float(st.session_state["sell_price"]),
+        step=0.1,
+        key="sell_price_input"
+    )
+    
+    generate_profit = st.button("Generate Profit Maps")
+    
+    if generate_profit and sell_price_input > 0:
+        st.session_state["sell_price"] = sell_price_input
+
+    # =========================================================
     # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
     # =========================================================
     def safe_overlay(colname, title, cmap, show_default):
@@ -2132,23 +2155,48 @@ if not df_valid.empty:
         except Exception:
             return None, None
 
+    # Always render Yield overlay
     ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
     print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
     if ymin is not None:
         add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
         print(f"DEBUG: Added Yield legend")
 
-    vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-    print(f"DEBUG: Variable Profit overlay returned vmin={vmin}, vmax={vmax}")
-    if vmin is not None:
-        add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
-        print(f"DEBUG: Added Variable Profit legend")
+    # Gate profit overlays based on sell price
+    if st.session_state.get("sell_price", 0) > 0:
+        vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+        print(f"DEBUG: Variable Profit overlay returned vmin={vmin}, vmax={vmax}")
+        if vmin is not None:
+            add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
+            print(f"DEBUG: Added Variable Profit legend")
 
-    fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
-    print(f"DEBUG: Fixed Profit overlay returned fmin={fmin}, fmax={fmax}")
-    if fmin is not None:
-        add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
-        print(f"DEBUG: Added Fixed Profit legend")
+        # ✅ Fixed Profit ($/ac) — only if valid fixed-cost data exists
+        fx = st.session_state.get("fixed_products", pd.DataFrame())
+        has_fixed_costs = (
+            not fx.empty and
+            pd.to_numeric(fx.get("$/ac", []), errors="coerce").fillna(0).sum() > 0
+        )
+
+        if has_fixed_costs:
+            fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+            print(f"DEBUG: Fixed Profit overlay returned fmin={fmin}, fmax={fmax}")
+            if fmin is not None:
+                add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
+                print(f"DEBUG: Added Fixed Profit legend")
+        else:
+            print("DEBUG: Skipping Fixed Profit overlay — no fixed cost data detected.")
+    else:
+        # ⚠️ Show small disclaimer when sell price not entered
+        st.markdown(
+            """
+            <div style="color:#b0b3b8; font-size:14px; margin-bottom:8px;
+                        background:rgba(255,255,255,0.05); padding:6px 10px;
+                        border-radius:6px; width:fit-content;">
+            ⚠️ Enter a valid sell price above to generate profit maps.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # Final fit using all active layers
 try:
