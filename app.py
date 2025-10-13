@@ -983,8 +983,8 @@ def render_uploaders():
             st.caption("No yield files uploaded.")
         
         # === Compact Sell Price Input (integrated into Yield section) ===
-        # Reduce vertical spacing above Sell Price label
-        st.markdown("<div style='margin-top:-6px;'></div>", unsafe_allow_html=True)
+        # Tighten spacing above Sell Price label
+        st.markdown("<div style='margin-top:-10px;'></div>", unsafe_allow_html=True)
         st.markdown("**Crop Sell Price ($/bu)**")
         
         # Place input in a narrow left column to avoid full-width stretch
@@ -1001,6 +1001,9 @@ def render_uploaders():
             )
         
         st.session_state["sell_price"] = float(sell_price_val)
+        
+        # Subtle visual anchor below input to balance vertical rhythm
+        st.markdown("<div style='margin-bottom:4px;'></div>", unsafe_allow_html=True)
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
