@@ -416,6 +416,28 @@ def render_uploaders():
 
     # ------------------------- ZONES -------------------------
     with u1:
+        st.markdown("""
+        <style>
+        [data-testid="stAlert"] {
+            font-size:12.5px !important;
+            line-height:1.0 !important;
+            padding:3px 6px !important;
+            margin:2px 0 !important;
+            border-radius:4px !important;
+        }
+        [data-testid="stDataFrameContainer"] {
+            max-height:105px !important;
+            overflow:hidden !important;
+            margin-bottom:0 !important;
+        }
+        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+            height:22px !important;
+            font-size:13px !important;
+            padding:0 5px !important;
+            line-height:1.0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
                                      key="up_zone", accept_multiple_files=False)
@@ -475,6 +497,28 @@ def render_uploaders():
 
     # ------------------------- YIELD -------------------------
     with u2:
+        st.markdown("""
+        <style>
+        [data-testid="stAlert"] {
+            font-size:12.5px !important;
+            line-height:1.0 !important;
+            padding:3px 6px !important;
+            margin:2px 0 !important;
+            border-radius:4px !important;
+        }
+        [data-testid="stDataFrameContainer"] {
+            max-height:105px !important;
+            overflow:hidden !important;
+            margin-bottom:0 !important;
+        }
+        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+            height:22px !important;
+            font-size:13px !important;
+            padding:0 5px !important;
+            line-height:1.0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
             "Yield", type=["zip", "shp", "geojson", "json", "csv"],
@@ -945,77 +989,31 @@ def render_uploaders():
             label_visibility="collapsed"
         )
         st.session_state["sell_price"] = sell_price
-        
-        st.markdown("""
-<style>
-
-/* ==============================================================
-   FINAL COMPACT POLISH — UPLOAD AREA ONLY (.upload-scope)
-   ============================================================== */
-
-/* Universal compact inheritance for upload area */
-.upload-scope :is([data-testid="stAlert"],
-                  [data-testid="stDataFrameContainer"],
-                  [data-testid="stNumberInput"]) {
-    font-size: 12.5px !important;
-    line-height: 1.0 !important;
-}
-
-/* --- Alert banners --- */
-.upload-scope [data-testid="stAlert"] {
-    padding: 3px 6px !important;      /* smaller all around */
-    margin: 2px 0 !important;
-    border-radius: 4px !important;
-    min-height: 20px !important;
-}
-.upload-scope [data-testid="stAlert"] div {
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-/* --- DataFrames (Zone / Yield tables) --- */
-.upload-scope [data-testid="stDataFrameContainer"] {
-    height: auto !important;
-    max-height: 105px !important;     /* tighter limit */
-    overflow: hidden !important;
-    margin-bottom: 0 !important;
-}
-
-/* --- Sell price input --- */
-.upload-scope div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-    height: 22px !important;
-    font-size: 13px !important;
-    padding: 0 5px !important;
-    line-height: 1.0 !important;
-}
-.upload-scope div[data-testid="stNumberInput"] > div > div > div {
-    min-height: 22px !important;
-    height: 22px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-/* Ensure nested Streamlit sections inherit compact sizing */
-.upload-scope section[data-testid="stHorizontalBlock"] * {
-    font-size: inherit !important;
-    line-height: inherit !important;
-}
-
-/* Protect all other sections (Fixed Inputs, Map, Profit Summary) */
-section[data-testid="stHorizontalBlock"]:not(.upload-scope)
-  [data-testid="stAlert"],
-section[data-testid="stHorizontalBlock"]:not(.upload-scope)
-  [data-testid="stDataFrameContainer"],
-section[data-testid="stHorizontalBlock"]:not(.upload-scope)
-  [data-testid="stNumberInput"] {
-    all: revert !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
+        st.markdown("""
+        <style>
+        [data-testid="stAlert"] {
+            font-size:12.5px !important;
+            line-height:1.0 !important;
+            padding:3px 6px !important;
+            margin:2px 0 !important;
+            border-radius:4px !important;
+        }
+        [data-testid="stDataFrameContainer"] {
+            max-height:105px !important;
+            overflow:hidden !important;
+            margin-bottom:0 !important;
+        }
+        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+            height:22px !important;
+            font-size:13px !important;
+            padding:0 5px !important;
+            line-height:1.0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         fert_files = st.file_uploader("Fert", type=["csv", "geojson", "json", "zip"],
                                       key="up_fert", accept_multiple_files=True)
@@ -1054,6 +1052,28 @@ section[data-testid="stHorizontalBlock"]:not(.upload-scope)
 
     # ------------------------- SEED -------------------------
     with u4:
+        st.markdown("""
+        <style>
+        [data-testid="stAlert"] {
+            font-size:12.5px !important;
+            line-height:1.0 !important;
+            padding:3px 6px !important;
+            margin:2px 0 !important;
+            border-radius:4px !important;
+        }
+        [data-testid="stDataFrameContainer"] {
+            max-height:105px !important;
+            overflow:hidden !important;
+            margin-bottom:0 !important;
+        }
+        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+            height:22px !important;
+            font-size:13px !important;
+            padding:0 5px !important;
+            line-height:1.0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         seed_files = st.file_uploader("Seed", type=["csv", "geojson", "json", "zip"],
                                       key="up_seed", accept_multiple_files=True)
