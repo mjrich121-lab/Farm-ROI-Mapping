@@ -450,12 +450,12 @@ def render_uploaders():
 
                 disp = zones_gdf[["Zone", "Calculated Acres", "Override Acres"]].copy()
                 
-                # --- Dynamic table height: ensure full rows visible, no scroll ---
+                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
                 nrows = len(disp)
-                row_h = 28        # per-row pixel height
-                header_h = 36     # header height
-                base_pad = 24     # slightly higher buffer (was 22)
-                scroll_guard = 2 if nrows >= 5 else 0  # tiny top offset Streamlit adds
+                row_h = 28
+                header_h = 36
+                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
+                scroll_guard = 4 if nrows >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
                 dynamic_height = int(header_h + (nrows * row_h) + base_pad + scroll_guard)
                 
                 edited = st.data_editor(
@@ -1045,13 +1045,13 @@ def render_uploaders():
                     st.warning(f"Fertilizer {f.name}: {e}")
 
             if summary:
-                # --- Dynamic height for Fertilizer table (match zone map behavior) ---
+                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
                 fert_df = pd.DataFrame(summary)
                 nrows_fert = len(fert_df)
                 row_h = 28
                 header_h = 36
-                base_pad = 24
-                scroll_guard = 2 if nrows_fert >= 5 else 0
+                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
+                scroll_guard = 4 if nrows_fert >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
                 fert_height = int(header_h + (nrows_fert * row_h) + base_pad + scroll_guard)
                 
                 st.dataframe(fert_df, use_container_width=True,
@@ -1096,13 +1096,13 @@ def render_uploaders():
                 st.session_state["seed_gdf"] = last_gdf
 
             if summary:
-                # --- Dynamic height for Seed table (match zone map behavior) ---
+                # --- Dynamic height (final calibration, no scroll / no bottom bar) ---
                 seed_df = pd.DataFrame(summary)
                 nrows_seed = len(seed_df)
                 row_h = 28
                 header_h = 36
-                base_pad = 24
-                scroll_guard = 2 if nrows_seed >= 5 else 0
+                base_pad = 28       # ↑ was 24 — adds 4 px to fully reveal bottom border
+                scroll_guard = 4 if nrows_seed >= 5 else 2  # ↑ bumped slightly for Streamlit's border box
                 seed_height = int(header_h + (nrows_seed * row_h) + base_pad + scroll_guard)
                 
                 st.dataframe(seed_df, use_container_width=True,
@@ -1863,6 +1863,18 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 # ===========================
 apply_compact_theme()
 _bootstrap_defaults()
+
+# Suppress phantom scrollbars in DataFrames
+st.markdown("""
+<style>
+[data-testid="stDataFrameScrollableContainer"]::-webkit-scrollbar {
+    display: none !important;
+}
+[data-testid="stDataFrameScrollableContainer"] {
+    overflow: hidden !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Canonical default for sell price
 if "sell_price" not in st.session_state:
