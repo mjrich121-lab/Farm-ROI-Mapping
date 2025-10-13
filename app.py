@@ -412,32 +412,39 @@ def _bootstrap_defaults():
 def render_uploaders():
     st.subheader("Upload Maps")
     st.markdown('<div class="upload-scope">', unsafe_allow_html=True)
+    
+    # ==============================================================
+    # 1. COMPACT CSS — inject per column (Zone / Yield / Fert / Seed)
+    # ==============================================================
+    compact_css = """
+<style>
+[data-testid="stAlert"] {
+    font-size: 12.3px !important;
+    line-height: 1.0 !important;
+    padding: 2px 5px !important;       /* Tightest padding yet */
+    margin: 2px 0 !important;
+    border-radius: 4px !important;
+    min-height: 18px !important;       /* ↓ from 20px */
+}
+[data-testid="stDataFrameContainer"] {
+    height: 100px !important;          /* Exact cap to eliminate scroll */
+    overflow: hidden !important;
+    margin-bottom: 0 !important;
+}
+div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
+    height: 22px !important;
+    font-size: 13px !important;
+    padding: 0 4px !important;
+    line-height: 1.0 !important;
+}
+</style>
+"""
+    
     u1, u2, u3, u4 = st.columns(4)
 
     # ------------------------- ZONES -------------------------
     with u1:
-        st.markdown("""
-        <style>
-        [data-testid="stAlert"] {
-            font-size:12.5px !important;
-            line-height:1.0 !important;
-            padding:3px 6px !important;
-            margin:2px 0 !important;
-            border-radius:4px !important;
-        }
-        [data-testid="stDataFrameContainer"] {
-            max-height:105px !important;
-            overflow:hidden !important;
-            margin-bottom:0 !important;
-        }
-        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-            height:22px !important;
-            font-size:13px !important;
-            padding:0 5px !important;
-            line-height:1.0 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Zone Map · GeoJSON/JSON/ZIP(SHP)")
         zone_file = st.file_uploader("Zone", type=["geojson", "json", "zip"],
                                      key="up_zone", accept_multiple_files=False)
@@ -497,28 +504,7 @@ def render_uploaders():
 
     # ------------------------- YIELD -------------------------
     with u2:
-        st.markdown("""
-        <style>
-        [data-testid="stAlert"] {
-            font-size:12.5px !important;
-            line-height:1.0 !important;
-            padding:3px 6px !important;
-            margin:2px 0 !important;
-            border-radius:4px !important;
-        }
-        [data-testid="stDataFrameContainer"] {
-            max-height:105px !important;
-            overflow:hidden !important;
-            margin-bottom:0 !important;
-        }
-        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-            height:22px !important;
-            font-size:13px !important;
-            padding:0 5px !important;
-            line-height:1.0 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Yield Map(s) · SHP/GeoJSON/ZIP(SHP)/CSV")
         yield_files = st.file_uploader(
             "Yield", type=["zip", "shp", "geojson", "json", "csv"],
@@ -992,28 +978,7 @@ def render_uploaders():
 
     # ------------------------- FERTILIZER -------------------------
     with u3:
-        st.markdown("""
-        <style>
-        [data-testid="stAlert"] {
-            font-size:12.5px !important;
-            line-height:1.0 !important;
-            padding:3px 6px !important;
-            margin:2px 0 !important;
-            border-radius:4px !important;
-        }
-        [data-testid="stDataFrameContainer"] {
-            max-height:105px !important;
-            overflow:hidden !important;
-            margin-bottom:0 !important;
-        }
-        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-            height:22px !important;
-            font-size:13px !important;
-            padding:0 5px !important;
-            line-height:1.0 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Fertilizer RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         fert_files = st.file_uploader("Fert", type=["csv", "geojson", "json", "zip"],
                                       key="up_fert", accept_multiple_files=True)
@@ -1052,28 +1017,7 @@ def render_uploaders():
 
     # ------------------------- SEED -------------------------
     with u4:
-        st.markdown("""
-        <style>
-        [data-testid="stAlert"] {
-            font-size:12.5px !important;
-            line-height:1.0 !important;
-            padding:3px 6px !important;
-            margin:2px 0 !important;
-            border-radius:4px !important;
-        }
-        [data-testid="stDataFrameContainer"] {
-            max-height:105px !important;
-            overflow:hidden !important;
-            margin-bottom:0 !important;
-        }
-        div[data-testid="stNumberInput"] div[data-baseweb="input"] input {
-            height:22px !important;
-            font-size:13px !important;
-            padding:0 5px !important;
-            line-height:1.0 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(compact_css, unsafe_allow_html=True)
         st.caption("Seed RX · CSV/GeoJSON/JSON/ZIP(SHP)")
         seed_files = st.file_uploader("Seed", type=["csv", "geojson", "json", "zip"],
                                       key="up_seed", accept_multiple_files=True)
@@ -1867,6 +1811,17 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
 # ===========================
 apply_compact_theme()
 _bootstrap_defaults()
+
+# ==============================================================
+# 0. SESSION DEFAULTS — enforce reset for fresh app loads
+# ==============================================================
+if "sell_price" not in st.session_state:
+    st.session_state["sell_price"] = 0.0
+elif st.session_state.get("reset_defaults", True):
+    st.session_state["sell_price"] = 0.0
+    st.session_state["reset_defaults"] = False
+# ==============================================================
+
 render_uploaders()
 render_fixed_inputs_and_strip()
 # Three collapsible input dropdowns ABOVE the map
