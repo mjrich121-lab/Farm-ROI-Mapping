@@ -1547,15 +1547,20 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     else:
         priority = 99
     
+    # Skip hover layers from legend display
+    if "(Hover)" in name:
+        return
+    
     # Track this legend's priority
     st.session_state["_legend_priorities"].append({"name": name, "priority": priority, "vmin": vmin, "vmax": vmax, "cmap": cmap})
     
-    # Sort legends by priority and calculate position
+    # Sort legends by priority and calculate position (filter out hover layers)
     sorted_legends = sorted(st.session_state["_legend_priorities"], key=lambda x: x["priority"])
-    seq = next(i for i, legend in enumerate(sorted_legends) if legend["name"] == name)
+    visible_legends = [leg for leg in sorted_legends if "(Hover)" not in leg["name"]]
+    seq = next(i for i, legend in enumerate(visible_legends) if legend["name"] == name)
     
     # Calculate top offset based on priority order with proper spacing
-    offset = 20 + seq * 95  # adjust for legend height
+    offset = 20 + seq * 110  # increased spacing between legends
     
     print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
 
@@ -1768,8 +1773,9 @@ def add_legend_html(m: folium.Map, html: str, offset: int = 10):
         padding:6px 10px;
         border-radius:6px;
         font-size:13px;
-        line-height:1.3;
-        pointer-events:none;">
+        line-height:1.4;
+        pointer-events:none;
+        white-space:nowrap;">
       {html}
     </div>
     """
@@ -2578,7 +2584,7 @@ for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]
     _front(key)
 
 
-# --- INJECT JS: PRIORITY-BASED HOVER WITH LIVE VALUE EXTRACTION ---
+# --- INJECT JS: HOVER INSPECTOR (FINAL VERSION) ---
 hover_js = """
 <script>
 (function(){
@@ -2586,63 +2592,32 @@ hover_js = """
     setTimeout(() => {
       if (!window.map) return;
       
-      let currentPopup = null;
-      
-      window.map.on("mousemove", function(e) {
-        let info = [];
-        const latlng = e.latlng;
-        const priority = ["profit","yield","zone"];
-
+      window.map.on('mousemove', function(e) {
+        const hoverLayers = [];
         window.map.eachLayer(function(layer) {
-          if (!layer.options || !layer.options.name) return;
+          if (layer.options && layer.options.name && layer.options.name.includes('(Hover)')) {
+            hoverLayers.push(layer);
+          }
+        });
 
-          const name = layer.options.name.toLowerCase();
-          if (name.includes("fert") || name.includes("seed")) return;  // skip RX layers
+        const popup = L.popup({offset: L.point(5, -10), autoClose: true, closeButton: false});
+        let content = '';
 
-          let val = null;
-
-          if (layer instanceof L.GeoJSON) {
-            layer.eachLayer(function(f) {
-              if (f.getBounds && f.getBounds().contains(latlng)) {
-                const p = f.feature?.properties || {};
-                for (const k in p) {
-                  if (typeof p[k] === "number") {
-                    val = p[k].toFixed(1);
-                    break;
-                  }
-                }
+        hoverLayers.forEach(layer => {
+          layer.eachLayer(point => {
+            if (point.getLatLng && point.getLatLng().distanceTo(e.latlng) < 20) {  // 20m hover radius
+              const props = point.feature.properties;
+              for (const key in props) {
+                const value = props[key].toFixed(1);
+                content += `<b>${key}:</b> ${value}<br>`;
               }
-            });
-          }
-
-          if (val !== null) info.push(`${layer.options.name}: ${val}`);
-        });
-
-        info.sort((a,b)=>{
-          const ai = priority.findIndex(p=>a.toLowerCase().includes(p));
-          const bi = priority.findIndex(p=>b.toLowerCase().includes(p));
-          return (ai===-1?99:ai)-(bi===-1?99:bi);
-        });
-
-        if (info.length){
-          if (currentPopup) {
-            window.map.closePopup(currentPopup);
-          }
-          currentPopup = L.popup({offset:L.point(10,-10),closeButton:false,className:"multi-layer-popup"})
-            .setLatLng(latlng)
-            .setContent(info.join("<br>"))
-            .openOn(window.map);
-        }
-      });
-      
-      window.map.on('mouseout', function() {
-        if (currentPopup) {
-          setTimeout(() => {
-            if (currentPopup) {
-              window.map.closePopup(currentPopup);
-              currentPopup = null;
             }
-          }, 300);
+          });
+        });
+
+        if (content) {
+          popup.setLatLng(e.latlng).setContent(content).openOn(window.map);
+          setTimeout(() => window.map.closePopup(popup), 300);
         }
       });
     }, 600);
