@@ -1524,6 +1524,15 @@ def make_base_map():
         st.error(f"Map fallback triggered: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
 
+def clean_legend_title(name: str) -> str:
+    """
+    Remove file references, underscores, and target rate text from legend titles.
+    """
+    name = name.replace("_", " ").replace(".shp", "").replace(".geojson", "")
+    name = name.replace("foss russ", "").replace("map poly", "")
+    name = name.replace("Target Rate", "").strip(" —")
+    return name.strip()
+
 def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     """
     Priority-based legend renderer: legends stack in priority order
@@ -1531,6 +1540,10 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     """
     if vmin is None or vmax is None:
         print(f"DEBUG: add_gradient_legend() skipped for '{name}' (vmin={vmin}, vmax={vmax})")
+        return
+
+    # Skip hover layers from legend display
+    if "(Hover)" in name:
         return
 
     # Initialize legend priority tracking
@@ -1547,9 +1560,8 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     else:
         priority = 99
     
-    # Skip hover layers from legend display
-    if "(Hover)" in name:
-        return
+    # Clean the legend title
+    display_name = clean_legend_title(name)
     
     # Track this legend's priority
     st.session_state["_legend_priorities"].append({"name": name, "priority": priority, "vmin": vmin, "vmax": vmax, "cmap": cmap})
@@ -1562,7 +1574,7 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     # Calculate top offset based on priority order with proper spacing
     offset = 20 + seq * 110  # increased spacing between legends
     
-    print(f"DEBUG: add_gradient_legend() called for '{name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
+    print(f"DEBUG: add_gradient_legend() called for '{display_name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
@@ -1576,7 +1588,7 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
         text-shadow:0 0 3px rgba(0,0,0,0.5); font-weight:500;
         background: rgba(255,255,255,0.0); padding:6px 10px; border-radius:6px;
         box-shadow:none; border:none; width:220px;">
-      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
+      <div style="font-weight:600; margin-bottom:4px;">{display_name}</div>
       <div style="height:14px; border-radius:2px; margin-bottom:4px;
                   background:linear-gradient(90deg, {gradient_css});"></div>
       <div style="display:flex; justify-content:space-between;">
@@ -1585,6 +1597,44 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
     </div>
     """
     add_legend_html(m, legend_content, offset)
+
+def add_hover_points(m, layer_name, grid_df, value_col):
+    """Add invisible hover points for profit/yield layers"""
+    if grid_df is None or grid_df.empty:
+        return
+    
+    # Check if required columns exist
+    if "Latitude" not in grid_df.columns or "Longitude" not in grid_df.columns:
+        return
+    if value_col not in grid_df.columns:
+        return
+
+    hover_features = []
+    sampled_df = grid_df.sample(min(len(grid_df), 300))
+
+    for _, row in sampled_df.iterrows():
+        try:
+            hover_features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(row["Longitude"]), float(row["Latitude"])]
+                },
+                "properties": {
+                    f"{layer_name}": float(row[value_col])
+                }
+            })
+        except Exception:
+            continue
+
+    if hover_features:
+        hover_geojson = folium.GeoJson(
+            {"type": "FeatureCollection", "features": hover_features},
+            name=f"{layer_name} (Hover)",
+            show=False,
+            style_function=lambda x: {"opacity": 0, "fillOpacity": 0},
+        )
+        hover_geojson.add_to(m)
 
 def detect_rate_type(gdf):
     try:
@@ -1952,13 +2002,16 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
         
         # Create invisible GeoJSON hover layer for profit/yield overlays
         if "profit" in name.lower() or "yield" in name.lower():
-            # Build hover points from data
+            # Build hover points from sampled data (max 300 points for performance)
             hover_points = []
-            for idx in range(len(df)):
+            sample_size = min(len(df), 300)
+            sampled_df = df.sample(n=sample_size) if len(df) > sample_size else df
+            
+            for _, row in sampled_df.iterrows():
                 try:
-                    lat_val = df.iloc[idx][latc]
-                    lon_val = df.iloc[idx][lonc]
-                    data_val = df.iloc[idx][values.name]
+                    lat_val = row[latc]
+                    lon_val = row[lonc]
+                    data_val = row[values.name]
                     
                     if pd.notna(lat_val) and pd.notna(lon_val) and pd.notna(data_val):
                         hover_points.append({
@@ -2605,10 +2658,10 @@ hover_js = """
 
         hoverLayers.forEach(layer => {
           layer.eachLayer(point => {
-            if (point.getLatLng && point.getLatLng().distanceTo(e.latlng) < 20) {  // 20m hover radius
+            if (point.getLatLng && point.getLatLng().distanceTo(e.latlng) < 25) {  // 25m hover radius
               const props = point.feature.properties;
               for (const key in props) {
-                const value = props[key].toFixed(1);
+                const value = parseFloat(props[key]).toFixed(1);
                 content += `<b>${key}:</b> ${value}<br>`;
               }
             }
@@ -2617,7 +2670,7 @@ hover_js = """
 
         if (content) {
           popup.setLatLng(e.latlng).setContent(content).openOn(window.map);
-          setTimeout(() => window.map.closePopup(popup), 300);
+          setTimeout(() => window.map.closePopup(popup), 400);
         }
       });
     }, 600);
