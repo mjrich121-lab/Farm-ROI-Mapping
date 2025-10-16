@@ -1810,16 +1810,17 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-# --- Legend Rendering with Dynamic Offset ---
+# --- Legend Rendering with Persistent Counter ---
 def add_legend_html(m, html_content, base_offset=20, spacing=115):
     """
-    Adds legend HTML to the Folium map with dynamic spacing between stacked legends.
-    - base_offset: starting pixel offset from the top
-    - spacing: distance between consecutive legends
+    Adds legend HTML to the Folium map with persistent counter for reliable spacing.
     """
-    # Count existing legends on the map to dynamically offset new ones
-    existing_legends = sum(1 for c in m._children if "legend-control" in c)
-    offset_px = base_offset + existing_legends * spacing
+    if "legend_counter" not in st.session_state:
+        st.session_state["legend_counter"] = 0
+    else:
+        st.session_state["legend_counter"] += 1
+
+    offset_px = 20 + st.session_state["legend_counter"] * 115
 
     legend_html = f"""
     <div class="legend-control" style="
@@ -2042,6 +2043,7 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
                     tooltip=None
                 )
                 m.add_child(hover_geojson)
+                hover_geojson.layer_name = None  # Prevent showing in layer control
 
         return vmin, vmax
 
@@ -2738,10 +2740,20 @@ if "map_drawn" not in st.session_state:
 
 if not st.session_state["map_drawn"]:
     st.session_state["map_drawn"] = True
-    st_data = st_folium(m, width=1600, height=800, returned_objects=["last_active_drawing"])
+    st_data = st_folium(
+        m,
+        width=1900,   # Full-width for large monitors
+        height=900,   # Taller aspect for precision mapping
+        returned_objects=["last_active_drawing"]
+    )
 else:
     with st.spinner("Map stable. Hover and layer controls active..."):
-        st_data = st_folium(m, width=1600, height=800, returned_objects=["last_active_drawing"])
+        st_data = st_folium(
+            m,
+            width=1900,   # Full-width for large monitors
+            height=900,   # Taller aspect for precision mapping
+            returned_objects=["last_active_drawing"]
+        )
 
 # === DIAGNOSTIC: Post-render check ===
 print("Map rendered; checking post-render legend presence…")
