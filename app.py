@@ -2769,10 +2769,9 @@ for name in layer_order:
         if getattr(layer, "name", None) == name:
             layer.add_to(m)
 
-# --- Auto-fit map to full field extent ---
+# --- Auto-fit with extended padding and safe zoom buffer ---
 try:
     bounds = None
-    # Priority: yield extent → zone extent → fertilizer extent
     if "ydf" in locals() and not ydf.empty:
         bounds = [[ydf["Latitude"].min(), ydf["Longitude"].min()],
                   [ydf["Latitude"].max(), ydf["Longitude"].max()]]
@@ -2784,8 +2783,19 @@ try:
         bounds = [[f[1], f[0]], [f[3], f[2]]]
 
     if bounds:
-        m.fit_bounds(bounds, padding=(20, 20))
-        print("Fitting bounds:", bounds)
+        # Add small buffer (0.0008 degrees ≈ 90 meters) for better visual margins
+        lat_buffer = 0.0008
+        lon_buffer = 0.0008
+        padded_bounds = [
+            [bounds[0][0] - lat_buffer, bounds[0][1] - lon_buffer],
+            [bounds[1][0] + lat_buffer, bounds[1][1] + lon_buffer]
+        ]
+
+        # Fit with extra padding to ensure bottom-right legend is visible
+        m.fit_bounds(padded_bounds, padding=(60, 60))
+        m.options['maxZoom'] = 17
+        m.options['minZoom'] = 9
+        print("Fitting padded bounds:", padded_bounds)
 except Exception as e:
     print(f"Auto-fit skipped: {e}")
 
@@ -2973,4 +2983,3 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
-
