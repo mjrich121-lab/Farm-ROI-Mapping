@@ -1596,7 +1596,7 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
       </div>
     </div>
     """
-    add_legend_html(m, legend_content, offset)
+    add_legend_html(m, legend_content)
 
 def add_hover_points(m, layer_name, grid_df, value_col):
     """Add invisible hover points for profit/yield layers"""
@@ -1810,13 +1810,22 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-def add_legend_html(m: folium.Map, html: str, offset: int = 10):
-    """Helper function to add legend HTML with vertical spacing"""
+# --- Legend Rendering with Dynamic Offset ---
+def add_legend_html(m, html_content, base_offset=20, spacing=115):
+    """
+    Adds legend HTML to the Folium map with dynamic spacing between stacked legends.
+    - base_offset: starting pixel offset from the top
+    - spacing: distance between consecutive legends
+    """
+    # Count existing legends on the map to dynamically offset new ones
+    existing_legends = sum(1 for c in m._children if "legend-control" in c)
+    offset_px = base_offset + existing_legends * spacing
+
     legend_html = f"""
     <div class="legend-control" style="
-        position:absolute; 
-        top:{offset}px; 
-        left:20px; 
+        position:absolute;
+        top:{offset_px}px;
+        left:20px;
         z-index:9999;
         background:rgba(30,30,30,0.25);
         color:white;
@@ -1825,8 +1834,9 @@ def add_legend_html(m: folium.Map, html: str, offset: int = 10):
         font-size:13px;
         line-height:1.4;
         pointer-events:none;
-        white-space:nowrap;">
-      {html}
+        width:200px;
+    ">
+        {html_content}
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -2722,7 +2732,16 @@ for name in layer_order:
         if getattr(layer, "name", None) == name:
             layer.add_to(m)
 
-st_folium(m, use_container_width=True, height=600, key=map_key)
+# --- Stable Map Rendering (Prevents Flicker) ---
+if "map_drawn" not in st.session_state:
+    st.session_state["map_drawn"] = False
+
+if not st.session_state["map_drawn"]:
+    st.session_state["map_drawn"] = True
+    st_data = st_folium(m, width=1600, height=800, returned_objects=["last_active_drawing"])
+else:
+    with st.spinner("Map stable. Hover and layer controls active..."):
+        st_data = st_folium(m, width=1600, height=800, returned_objects=["last_active_drawing"])
 
 # === DIAGNOSTIC: Post-render check ===
 print("Map rendered; checking post-render legend presence…")
