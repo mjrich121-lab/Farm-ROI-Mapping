@@ -2115,6 +2115,26 @@ window.addEventListener("load", () => {
 </script>
 """, unsafe_allow_html=True)
 
+# --- Prevent outer scrollbar and fix map container height ---
+st.markdown("""
+<style>
+html, body, [data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
+    overflow: hidden !important;
+}
+
+[data-testid="stVerticalBlock"] {
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: hidden !important;
+}
+
+iframe[title="st_folium"] {
+    height: 88vh !important;    /* dynamically fits viewport without clipping */
+    max-height: 88vh !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Canonical default for sell price
 if "sell_price" not in st.session_state:
     st.session_state["sell_price"] = 0.0
@@ -2778,16 +2798,16 @@ if not st.session_state["map_drawn"]:
     st.session_state["map_drawn"] = True
     st_data = st_folium(
         m,
-        width=1500,     # slightly narrower for sidebar + legend visibility
-        height=780,     # balanced vertical aspect to fit within window
+        width=1500,
+        height=720,  # slightly shorter to align with new CSS vh scaling
         returned_objects=["last_active_drawing"]
     )
 else:
     with st.spinner("Map stable. Hover and layer controls active..."):
         st_data = st_folium(
             m,
-            width=1500,     # slightly narrower for sidebar + legend visibility
-            height=780,     # balanced vertical aspect to fit within window
+            width=1500,
+            height=720,  # slightly shorter to align with new CSS vh scaling
             returned_objects=["last_active_drawing"]
         )
 
