@@ -2118,13 +2118,18 @@ window.addEventListener("load", () => {
 # --- Stable map height + no outer scrollbars ---
 st.markdown("""
 <style>
-/* Allow normal scroll inside Streamlit, but control Folium frame only */
+/* Stable map viewport — never allow scrollbars or overflow */
 iframe[title="st_folium"] {
-    height: 82vh !important;   /* fits most viewports without overflow */
+    height: 82vh !important;
     max-height: 82vh !important;
     border: none !important;
     display: block;
     margin: 0 auto;
+}
+.legend-control {
+    background: rgba(40,40,40,0.25) !important;
+    border-radius: 6px !important;
+    padding: 6px 8px !important;
 }
 
 /* Prevent the Streamlit container from adding an extra bottom buffer */
@@ -2769,7 +2774,9 @@ for name in layer_order:
         if getattr(layer, "name", None) == name:
             layer.add_to(m)
 
-# --- Auto-fit with extended padding and safe zoom buffer ---
+# =========================================================
+# STABLE AUTO-FIT + LEGEND SAFE ZONE (PERMANENT FIX)
+# =========================================================
 try:
     bounds = None
     if "ydf" in locals() and not ydf.empty:
@@ -2783,19 +2790,27 @@ try:
         bounds = [[f[1], f[0]], [f[3], f[2]]]
 
     if bounds:
-        # Add small buffer (0.0008 degrees ≈ 90 meters) for better visual margins
-        lat_buffer = 0.0008
-        lon_buffer = 0.0008
+        # === Always add robust geographic padding (≈150m margin) ===
+        lat_pad = 0.0013
+        lon_pad = 0.0013
         padded_bounds = [
-            [bounds[0][0] - lat_buffer, bounds[0][1] - lon_buffer],
-            [bounds[1][0] + lat_buffer, bounds[1][1] + lon_buffer]
+            [bounds[0][0] - lat_pad, bounds[0][1] - lon_pad],
+            [bounds[1][0] + lat_pad, bounds[1][1] + lon_pad]
         ]
 
-        # Fit with extra padding to ensure bottom-right legend is visible
-        m.fit_bounds(padded_bounds, padding=(60, 60))
-        m.options['maxZoom'] = 17
+        # === Fit with strong leaflet padding ===
+        m.fit_bounds(padded_bounds, padding=(100, 100))
+
+        # === Post-fit offset (up + left) to ensure bottom-right legend visibility ===
+        center_lat = (padded_bounds[0][0] + padded_bounds[1][0]) / 2
+        center_lon = (padded_bounds[0][1] + padded_bounds[1][1]) / 2
+        m.location = [center_lat + 0.0005, center_lon - 0.0005]
+
+        # === Stable zoom limits ===
         m.options['minZoom'] = 9
-        print("Fitting padded bounds:", padded_bounds)
+        m.options['maxZoom'] = 17
+        print("Stable fit applied:", padded_bounds)
+
 except Exception as e:
     print(f"Auto-fit skipped: {e}")
 
