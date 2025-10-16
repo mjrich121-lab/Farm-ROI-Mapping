@@ -1524,71 +1524,40 @@ def make_base_map():
         st.error(f"Map fallback triggered: {e}")
         return folium.Map(location=[39.5, -98.35], zoom_start=5, tiles="CartoDB positron", attr="CartoDB")
 
-def clean_legend_title(name: str) -> str:
+def add_gradient_legend(m, name, vmin, vmax, cmap, index=None):
     """
-    Remove file references, underscores, and target rate text from legend titles.
-    """
-    name = name.replace("_", " ").replace(".shp", "").replace(".geojson", "")
-    name = name.replace("foss russ", "").replace("map poly", "")
-    name = name.replace("Target Rate", "").strip(" —")
-    return name.strip()
-
-def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
-    """
-    Priority-based legend renderer: legends stack in priority order
-    Profit (priority 1) > Yield (priority 2) > Others (priority 99)
+    Non-JS legend renderer: uses absolute positioning with an internal counter
+    so cards stack reliably without any runtime DOM manipulation.
     """
     if vmin is None or vmax is None:
         print(f"DEBUG: add_gradient_legend() skipped for '{name}' (vmin={vmin}, vmax={vmax})")
         return
 
-    # Skip hover layers from legend display
-    if "(Hover)" in name:
-        return
+    # Ensure counter exists - always use the shared counter for continuous stacking
+    st.session_state.setdefault("_legend_counts", {"tl": 0})
+    seq = st.session_state["_legend_counts"]["tl"]
 
-    # Initialize legend priority tracking
-    if "_legend_priorities" not in st.session_state:
-        st.session_state["_legend_priorities"] = []
+    # Auto-scaling spacing: compress when many legends present to prevent clipping
+    top_offset = 20 + (seq * 92)
+    if top_offset > 520:   # when >6–7 legends, start compacting
+        top_offset = 20 + (seq * 78)
     
-    # Set priority based on layer name
-    if "profit" in name.lower():
-        priority = 1
-    elif "yield" in name.lower():
-        priority = 2
-    elif "zone" in name.lower():
-        priority = 3
-    else:
-        priority = 99
-    
-    # Clean the legend title
-    display_name = clean_legend_title(name)
-    
-    # Track this legend's priority
-    st.session_state["_legend_priorities"].append({"name": name, "priority": priority, "vmin": vmin, "vmax": vmax, "cmap": cmap})
-    
-    # Sort legends by priority and calculate position (filter out hover layers)
-    sorted_legends = sorted(st.session_state["_legend_priorities"], key=lambda x: x["priority"])
-    visible_legends = [leg for leg in sorted_legends if "(Hover)" not in leg["name"]]
-    seq = next(i for i, legend in enumerate(visible_legends) if legend["name"] == name)
-    
-    # Calculate top offset based on priority order with proper spacing
-    offset = 20 + seq * 110  # increased spacing between legends
-    
-    print(f"DEBUG: add_gradient_legend() called for '{display_name}' at priority {priority}, sequence {seq}, offset will be {offset}px")
+    print(f"DEBUG: add_gradient_legend() called for '{name}' at sequence {seq}, top_offset will be {top_offset}px")
 
     # Build gradient stops
     stops = [f"{mpl_colors.rgb2hex(cmap(i/100.0)[:3])} {i}%"
              for i in range(0, 101, 10)]
     gradient_css = ", ".join(stops)
 
-    # Legend content without positioning (will be positioned by add_legend_html)
-    legend_content = f"""
+    # Transparent background, battleship gray text with subtle glow
+    legend_html = f"""
     <div style="
+        position:absolute; top:{top_offset}px; left:10px; z-index:9999;
         font-family:sans-serif; font-size:12px; color:#b0b3b8;
         text-shadow:0 0 3px rgba(0,0,0,0.5); font-weight:500;
         background: rgba(255,255,255,0.0); padding:6px 10px; border-radius:6px;
         box-shadow:none; border:none; width:220px;">
-      <div style="font-weight:600; margin-bottom:4px;">{display_name}</div>
+      <div style="font-weight:600; margin-bottom:4px;">{name}</div>
       <div style="height:14px; border-radius:2px; margin-bottom:4px;
                   background:linear-gradient(90deg, {gradient_css});"></div>
       <div style="display:flex; justify-content:space-between;">
@@ -1596,45 +1565,10 @@ def add_gradient_legend(m, name, vmin, vmax, cmap, priority=99):
       </div>
     </div>
     """
-    add_legend_html(m, legend_content)
+    m.get_root().html.add_child(folium.Element(legend_html))
 
-def add_hover_points(m, layer_name, grid_df, value_col):
-    """Add invisible hover points for profit/yield layers"""
-    if grid_df is None or grid_df.empty:
-        return
-    
-    # Check if required columns exist
-    if "Latitude" not in grid_df.columns or "Longitude" not in grid_df.columns:
-        return
-    if value_col not in grid_df.columns:
-        return
-
-    hover_features = []
-    sampled_df = grid_df.sample(min(len(grid_df), 300))
-
-    for _, row in sampled_df.iterrows():
-        try:
-            hover_features.append({
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [float(row["Longitude"]), float(row["Latitude"])]
-                },
-                "properties": {
-                    f"{layer_name}": float(row[value_col])
-                }
-            })
-        except Exception:
-            continue
-
-    if hover_features:
-        hover_geojson = folium.GeoJson(
-            {"type": "FeatureCollection", "features": hover_features},
-            name=f"{layer_name} (Hover)",
-            show=False,
-            style_function=lambda x: {"opacity": 0, "fillOpacity": 0},
-        )
-        hover_geojson.add_to(m)
+    # ALWAYS increment counter for continuous stacking
+    st.session_state["_legend_counts"]["tl"] = seq + 1
 
 def detect_rate_type(gdf):
     try:
@@ -1722,14 +1656,9 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
     if rate_col:    fields.append(rate_col);    aliases.append(rate_alias)
     fields.append("RateType"); aliases.append("Type")
 
-    # --- Defensive layer naming ---
-    if not name or str(name).strip().lower() in ["none", "null", "nan"]:
-        name = "Unnamed Layer"
-
     folium.GeoJson(
         gdf, name=name, style_function=style_fn,
-        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases),
-        show=False  # Prescription layers OFF by default
+        tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases)
     ).add_to(m)
 
     add_gradient_legend(m, legend_name, vmin, vmax, cmap, index)
@@ -1814,48 +1743,7 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-# --- Legend Rendering with Auto-Compress ---
-def add_legend_html(m, html_content, base_offset=20, spacing=115):
-    """
-    Adds legend HTML with auto-compress to prevent off-screen overflow.
-    """
-    if "legend_counter" not in st.session_state:
-        st.session_state["legend_counter"] = 0
-    else:
-        st.session_state["legend_counter"] += 1
-
-    # Max visible legends before compressing spacing
-    max_legends = 6
-    spacing = 110
-    compress_spacing = 85  # tighter stack when >6 legends
-    legend_count = st.session_state["legend_counter"]
-
-    if legend_count >= max_legends:
-        offset_px = 20 + (legend_count * compress_spacing)
-    else:
-        offset_px = 20 + (legend_count * spacing)
-
-    legend_html = f"""
-    <div class="legend-control" style="
-        position:absolute;
-        top:{offset_px}px;
-        left:20px;
-        z-index:9999;
-        background:rgba(30,30,30,0.25);
-        color:white;
-        padding:6px 10px;
-        border-radius:6px;
-        font-size:13px;
-        line-height:1.4;
-        pointer-events:none;
-        width:200px;
-    ">
-        {html_content}
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index=1000):
+def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds):
     try:
         # Bail if nothing to draw
         if df is None or df.empty:
@@ -1997,66 +1885,14 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
         # Add yield map overlay
         overlay_bounds = [[ymin, xmin], [ymax, xmax]]
         
-        # Create overlay with z-index for layer ordering
-        overlay = folium.raster_layers.ImageOverlay(
+        folium.raster_layers.ImageOverlay(
             image=rgba,
             bounds=overlay_bounds,
             opacity=1.0,
             name=name,
             overlay=True,
             show=show_default
-        )
-        
-        # Add overlay to map
-        overlay.add_to(m)
-        
-        # Add z-index control using proper Template handling
-        overlay_script = """
-        {% macro script(this, kwargs) %}
-        {{this._parent.get_name()}}.on('add', function() {
-            if (this._container) {
-                this._container.style.zIndex = """ + str(z_index) + """;
-            }
-        });
-        {% endmacro %}
-        """
-        script_element = MacroElement()
-        script_element._template = Template(overlay_script)
-        m.get_root().add_child(script_element)
-        
-        # Create invisible GeoJSON hover layer for profit/yield overlays
-        if "profit" in name.lower() or "yield" in name.lower():
-            # Build hover points from sampled data (max 300 points for performance)
-            hover_points = []
-            sample_size = min(len(df), 300)
-            sampled_df = df.sample(n=sample_size) if len(df) > sample_size else df
-            
-            for _, row in sampled_df.iterrows():
-                try:
-                    lat_val = row[latc]
-                    lon_val = row[lonc]
-                    data_val = row[values.name]
-                    
-                    if pd.notna(lat_val) and pd.notna(lon_val) and pd.notna(data_val):
-                        hover_points.append({
-                            "type": "Feature",
-                            "geometry": {"type": "Point", "coordinates": [float(lon_val), float(lat_val)]},
-                            "properties": {name: float(data_val)}
-                        })
-                except Exception:
-                    continue
-            
-            if hover_points:
-                hover_geojson = folium.GeoJson(
-                    {"type": "FeatureCollection", "features": hover_points},
-                    name=f"{name} (Hover)",
-                    show=False,
-                    style_function=lambda x: {"opacity": 0, "fillOpacity": 0},
-                    highlight_function=None,
-                    tooltip=None
-                )
-                m.add_child(hover_geojson)
-                hover_geojson.layer_name = None  # Prevent showing in layer control
+        ).add_to(m)
 
         return vmin, vmax
 
@@ -2069,9 +1905,6 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
 # ===========================
 apply_compact_theme()
 _bootstrap_defaults()
-
-# --- Reset legend counter each rerun ---
-st.session_state["legend_counter"] = 0
 
 # ==============================================================
 # 🔒 FINAL SCROLLBAR + HEIGHT NORMALIZER
@@ -2113,30 +1946,6 @@ window.addEventListener("load", () => {
   }, 400);  // slight delay ensures Streamlit finished virtualizing
 });
 </script>
-""", unsafe_allow_html=True)
-
-# --- Stable map height + no outer scrollbars ---
-st.markdown("""
-<style>
-/* Stable map viewport — never allow scrollbars or overflow */
-iframe[title="st_folium"] {
-    height: 82vh !important;
-    max-height: 82vh !important;
-    border: none !important;
-    display: block;
-    margin: 0 auto;
-}
-.legend-control {
-    background: rgba(40,40,40,0.25) !important;
-    border-radius: 6px !important;
-    padding: 6px 8px !important;
-}
-
-/* Prevent the Streamlit container from adding an extra bottom buffer */
-[data-testid="stVerticalBlock"] > div:last-child {
-    margin-bottom: 0 !important;
-}
-</style>
 """, unsafe_allow_html=True)
 
 # Canonical default for sell price
@@ -2217,9 +2026,9 @@ def add_gradient_legend_pos(m, name, vmin, vmax, cmap, corner="tl"):
     """))
     st.session_state["_legend_counts"][corner] = idx + 1
 
-# Reset legend priorities to ensure proper ordering on each render
-st.session_state["_legend_priorities"] = []
-print(f"DEBUG: Legend priorities reset for proper ordering")
+# Reset legend counter to prevent duplicates on rerun
+st.session_state["_legend_counts"] = {"tl": 0}
+print(f"DEBUG: Legend counter reset to {st.session_state['_legend_counts']}")
 
 # Initialize the legend rail
 init_legend_rails(m)
@@ -2287,7 +2096,6 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
             tooltip=folium.GeoJsonTooltip(
                 fields=[c for c in ["Zone", "Calculated Acres", "Override Acres"] if c in zones_gdf.columns]
             ),
-            show=True  # Zones ON by default
         ).add_to(m)
 
         # Add zone boundaries with thick black lines
@@ -2300,8 +2108,7 @@ if zones_gdf is not None and not getattr(zones_gdf, "empty", True):
                 "weight": 3,
                 "opacity": 1.0,
             },
-            tooltip=None,
-            show=True  # Zone outlines always ON
+            tooltip=None
         ).add_to(m)
 
         legend_items = "".join(
@@ -2475,41 +2282,26 @@ if not df_valid.empty:
         pass
 
     # =========================================================
-    # DYNAMIC PROFIT METRICS - RECALCULATES ON EVERY INPUT CHANGE
+    # SAFE PROFIT METRICS
     # =========================================================
     try:
-        # Calculate base expenses from fixed inputs
-        expenses = st.session_state.get("expenses_dict", {})
-        base_expenses_per_acre = float(sum(expenses.values()) if expenses else 0.0)
+        base_expenses_per_acre = float(st.session_state.get("base_expenses_per_acre", 0.0))
 
-        # Calculate variable rate costs from uploaded prescription maps
         fert_var = seed_var = 0.0
-        
-        # Get variable rate inputs from the editor
-        var_inputs = st.session_state.get("variable_rate_inputs", pd.DataFrame())
-        if not var_inputs.empty:
-            total_var_cost = var_inputs["Units Applied"] * var_inputs["Price per Unit ($)"]
-            total_var_cost = pd.to_numeric(total_var_cost, errors="coerce").fillna(0).sum()
-            
-            # Distribute cost across fertilizer vs seed based on product types
-            fert_products = var_inputs[var_inputs["Type"] == "Fertilizer"]
-            seed_products = var_inputs[var_inputs["Type"] == "Seed"]
-            
-            if not fert_products.empty:
-                fert_var = pd.to_numeric(fert_products["Units Applied"] * fert_products["Price per Unit ($)"], errors="coerce").fillna(0).sum()
-            if not seed_products.empty:
-                seed_var = pd.to_numeric(seed_products["Units Applied"] * seed_products["Price per Unit ($)"], errors="coerce").fillna(0).sum()
+        for d in st.session_state.get("fert_layers_store", {}).values():
+            if isinstance(d, pd.DataFrame) and not d.empty:
+                fert_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
 
-        # Calculate fixed rate costs
+        for d in st.session_state.get("seed_layers_store", {}).values():
+            if isinstance(d, pd.DataFrame) and not d.empty:
+                seed_var += pd.to_numeric(d.get("CostPerAcre", 0), errors="coerce").fillna(0).sum()
+
         fx = st.session_state.get("fixed_products", pd.DataFrame())
-        fixed_costs = 0.0
-        if not fx.empty and "$/ac" in fx.columns:
-            fixed_costs = pd.to_numeric(fx["$/ac"], errors="coerce").fillna(0).sum()
+        fixed_costs = pd.to_numeric(fx.get("$/ac", 0), errors="coerce").fillna(0).sum() if not fx.empty else 0.0
 
-        # Get current sell price (always reactive to input changes)
+        # Use sell price from session state (will be 0 if not set)
         active_sell_price = float(st.session_state.get("sell_price", 0.0))
         
-        # Recalculate profit metrics with current inputs
         if "Yield" in df_for_maps.columns:
             df_for_maps["Revenue_per_acre"] = df_for_maps["Yield"] * active_sell_price
             df_for_maps["NetProfit_Variable"] = df_for_maps["Revenue_per_acre"] - (
@@ -2522,45 +2314,40 @@ if not df_valid.empty:
             df_for_maps["Revenue_per_acre"] = 0.0
             df_for_maps["NetProfit_Variable"] = 0.0
             df_for_maps["NetProfit_Fixed"] = 0.0
-            
-        # Store calculated values for hover popup access
-        st.session_state["_profit_calculated"] = {
-            "base_expenses": base_expenses_per_acre,
-            "fert_var": fert_var,
-            "seed_var": seed_var,
-            "fixed_costs": fixed_costs,
-            "sell_price": active_sell_price
-        }
     except Exception as e:
         st.warning(f"Profit calculation fallback triggered: {e}")
         for c in ["Revenue_per_acre", "NetProfit_Variable", "NetProfit_Fixed"]:
             df_for_maps[c] = 0.0
 
     # =========================================================
-    # RENDER HEATMAPS IN PRIORITY ORDER: PROFIT > YIELD > OTHERS
+    # RENDER HEATMAPS + LEGENDS (NO DUPLICATES)
     # =========================================================
-    def safe_overlay(colname, title, cmap, show_default, z_index=1000):
+    def safe_overlay(colname, title, cmap, show_default):
         if colname not in df_for_maps.columns or df_for_maps.empty:
             return None, None
         try:
-            # Create overlay with specified z-index for layer ordering
-            vmin, vmax = add_heatmap_overlay(
-                m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds, z_index
+            return add_heatmap_overlay(
+                m, df_for_maps, df_for_maps[colname], title, cmap, show_default, bounds
             )
-            return vmin, vmax
         except Exception:
             return None, None
 
-    # 1. PROFIT LAYER (TOP PRIORITY) - Always render first for top z-index
-    profit_vmin = profit_vmax = None
+    # Always render Yield overlay
+    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True)
+    print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
+    if ymin is not None:
+        add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
+        print(f"DEBUG: Added Yield legend")
+
+    # Gate profit overlays based on sell price
     if st.session_state.get("sell_price", 0) > 0:
-        profit_vmin, profit_vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, True, z_index=3000)
-        print(f"DEBUG: Variable Profit overlay returned vmin={profit_vmin}, vmax={profit_vmax}")
-        if profit_vmin is not None:
-            add_gradient_legend(m, "Variable Rate Profit ($/ac)", profit_vmin, profit_vmax, plt.cm.RdYlGn)
+        vmin, vmax = safe_overlay("NetProfit_Variable", "Variable Rate Profit ($/ac)", plt.cm.RdYlGn, False)
+        print(f"DEBUG: Variable Profit overlay returned vmin={vmin}, vmax={vmax}")
+        if vmin is not None:
+            add_gradient_legend(m, "Variable Rate Profit ($/ac)", vmin, vmax, plt.cm.RdYlGn)
             print(f"DEBUG: Added Variable Profit legend")
 
-        # Fixed Profit overlay (if data exists)
+        # ✅ Fixed Profit ($/ac) — only if valid fixed-cost data exists
         fx = st.session_state.get("fixed_products", pd.DataFrame())
         has_fixed_costs = (
             not fx.empty and
@@ -2568,11 +2355,13 @@ if not df_valid.empty:
         )
 
         if has_fixed_costs:
-            fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False, z_index=2999)
+            fmin, fmax = safe_overlay("NetProfit_Fixed", "Fixed Rate Profit ($/ac)", plt.cm.RdYlGn, False)
             print(f"DEBUG: Fixed Profit overlay returned fmin={fmin}, fmax={fmax}")
             if fmin is not None:
                 add_gradient_legend(m, "Fixed Rate Profit ($/ac)", fmin, fmax, plt.cm.RdYlGn)
                 print(f"DEBUG: Added Fixed Profit legend")
+        else:
+            print("DEBUG: Skipping Fixed Profit overlay — no fixed cost data detected.")
     else:
         # ⚠️ Show small disclaimer when sell price not entered
         st.markdown(
@@ -2585,13 +2374,6 @@ if not df_valid.empty:
             """,
             unsafe_allow_html=True
         )
-
-    # 2. YIELD LAYER (SECOND PRIORITY)
-    ymin, ymax = safe_overlay("Yield", "Yield (bu/ac)", plt.cm.RdYlGn, True, z_index=2000)
-    print(f"DEBUG: Yield overlay returned ymin={ymin}, ymax={ymax}")
-    if ymin is not None:
-        add_gradient_legend(m, "Yield (bu/ac)", ymin, ymax, plt.cm.RdYlGn)
-        print(f"DEBUG: Added Yield legend")
 
 # Final fit using all active layers
 try:
@@ -2612,6 +2394,62 @@ except Exception:
 
 # Add layer control to make layers toggleable
 folium.LayerControl(collapsed=False).add_to(m)
+
+# ==============================================================
+# MAP RENDERING SECTION
+# ==============================================================
+
+# Add CSS for stable map rendering
+st.markdown("""
+<style>
+/* Stable map viewport — never allow scrollbars or overflow */
+iframe[title="st_folium"] {
+    height: 82vh !important;
+    max-height: 82vh !important;
+    border: none !important;
+    display: block;
+    margin: 0 auto;
+}
+.legend-control {
+    background: rgba(40,40,40,0.25) !important;
+    border-radius: 6px !important;
+    padding: 6px 8px !important;
+}
+
+/* Prevent the Streamlit container from adding an extra bottom buffer */
+[data-testid="stVerticalBlock"] > div:last-child {
+    margin-bottom: 0 !important;
+}
+
+/* === FORCE LEGENDS INSIDE MAP CONTAINER === */
+.leaflet-bottom.leaflet-right,
+.leaflet-bottom.leaflet-left,
+.leaflet-top.leaflet-left,
+.leaflet-top.leaflet-right {
+    position: absolute !important;
+    z-index: 9999 !important;
+    overflow: visible !important;
+}
+
+.leaflet-bottom.leaflet-right {
+    right: 20px !important;
+    bottom: 25px !important;
+    transform: none !important;
+    margin: 0 !important;
+}
+
+.legend, .branca-colormap {
+    background-color: rgba(40, 40, 40, 0.35) !important;
+    border-radius: 6px !important;
+    padding: 5px 8px !important;
+    margin: 4px !important;
+    box-shadow: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Render the map
+st_folium(m, width=1500, height=720, returned_objects=["last_active_drawing"])
 
 # --- LAYER VISIBILITY: Profit ON by default, others OFF ---
 # (Note: Folium layers are already added with show=True/False in safe_overlay calls)
@@ -2667,64 +2505,75 @@ m.get_root().header.add_child(folium.Element(legend_css))
 # =========================================================
 
 # --- AUTO-TOGGLE DEFAULTS ---
-defaults = {
+layer_states = {}
+for k in list(st.session_state.keys()):
+    if "layer" in k:
+        layer_states[k] = False
+
+# defaults
+layer_states.update({
     "profit_layer": True,
     "yield_layer": True,
     "zones_layer": True,
-    "zones_outline_layer": True,
-    "fert_layer": False,
-    "seed_layer": False
-}
-for k, v in defaults.items():
-    st.session_state[k] = v
+    "zones_outline_layer": True
+})
 
-# Enforce visual stack order
-def _front(key):
+st.session_state["layer_visibility"] = layer_states
+
+
+# --- ENFORCE VISUAL ORDER ---
+def bring_front(key):
     lyr = st.session_state.get(key)
-    if lyr:
+    if lyr: 
         try: lyr.add_to(m)
         except: pass
 
 for key in ["profit_layer", "yield_layer", "zones_layer", "zones_outline_layer"]:
-    _front(key)
+    bring_front(key)
 
 
-# --- INJECT JS: HOVER INSPECTOR (FINAL VERSION) ---
+# --- INJECT JS: PRIORITY-BASED HOVER WITH VALUE EXTRACTION ---
 hover_js = """
 <script>
 (function(){
-  window.addEventListener("load", () => {
-    setTimeout(() => {
-      if (!window.map) return;
-      
-      window.map.on('mousemove', function(e) {
-        const hoverLayers = [];
-        window.map.eachLayer(function(layer) {
-          if (layer.options && layer.options.name && layer.options.name.includes('(Hover)')) {
-            hoverLayers.push(layer);
+  const order = ["profit","yield","zone"];
+  const popup = L.popup({autoPan:false, closeButton:false});
+  function val(layer, latlng){
+    let v=null;
+    if(layer instanceof L.GeoJSON){
+      layer.eachLayer(f=>{
+        if(f.getBounds && f.getBounds().contains(latlng)){
+          const p=f.feature?.properties||{};
+          for(const k in p){
+            if(typeof p[k]==='number'){v=p[k];break;}
           }
-        });
-
-        const popup = L.popup({offset: L.point(5, -10), autoClose: true, closeButton: false});
-        let content = '';
-
-        hoverLayers.forEach(layer => {
-          layer.eachLayer(point => {
-            if (point.getLatLng && point.getLatLng().distanceTo(e.latlng) < 25) {  // 25m hover radius
-              const props = point.feature.properties;
-              for (const key in props) {
-                const value = parseFloat(props[key]).toFixed(1);
-                content += `<b>${key}:</b> ${value}<br>`;
-              }
-            }
-          });
-        });
-
-        if (content) {
-          popup.setLatLng(e.latlng).setContent(content).openOn(window.map);
-          setTimeout(() => window.map.closePopup(popup), 400);
         }
       });
+    }
+    return v;
+  }
+  function show(e, lines){
+    popup.setLatLng(e.latlng)
+      .setContent(`<div class='multi-layer-popup'>${lines}</div>`)
+      .openOn(window.map);
+  }
+  function hide(){setTimeout(()=>window.map.closePopup(popup),300);}
+  
+  window.addEventListener("load", () => {
+    setTimeout(()=>{
+      if(!window.map) return;
+      window.map.on('mousemove',e=>{
+        const layers=Object.values(window.map._layers);
+        const info=[];
+        layers.forEach(l=>{
+          const name=(l.options?.name||"").toLowerCase();
+          let p=99;for(let i=0;i<order.length;i++)if(name.includes(order[i])){p=i;break;}
+          const v=val(l,e.latlng);
+          if(v!=null)info.push({p:p,t:`${l.options.name}: ${v.toFixed(1)}`});
+        });
+        if(info.length){info.sort((a,b)=>a.p-b.p);show(e,info.map(i=>i.t).join("<br>"));}else hide();
+      });
+      window.map.on('mouseout',hide);
     }, 600);
   });
 })();
@@ -2762,62 +2611,7 @@ for l in legend_snips[:20]:
     print(l)
 print("=== LEGEND HTML PREVIEW END ===")
 
-# Force correct visual stacking
-layer_order = [
-    "Variable Rate Profit ($/ac)",
-    "Yield (bu/ac)",
-    "Zones (Fill)",
-    "Zone Outlines (Top)"
-]
-for name in layer_order:
-    for layer in m._children.values():
-        if getattr(layer, "name", None) == name:
-            layer.add_to(m)
-
-# --- Auto-fit stable version ---
-try:
-    if "ydf" in locals() and not ydf.empty:
-        bounds = [[ydf["Latitude"].min(), ydf["Longitude"].min()],
-                  [ydf["Latitude"].max(), ydf["Longitude"].max()]]
-    elif "zones_gdf" in st.session_state and not st.session_state["zones_gdf"].empty:
-        z = st.session_state["zones_gdf"].total_bounds
-        bounds = [[z[1], z[0]], [z[3], z[2]]]
-    elif "fert_gdf" in st.session_state and not st.session_state["fert_gdf"].empty:
-        f = st.session_state["fert_gdf"].total_bounds
-        bounds = [[f[1], f[0]], [f[3], f[2]]]
-    if bounds:
-        # Add small 0.0008° (~90 m) margin
-        lat_pad, lon_pad = 0.0008, 0.0008
-        padded = [
-            [bounds[0][0] - lat_pad, bounds[0][1] - lon_pad],
-            [bounds[1][0] + lat_pad, bounds[1][1] + lon_pad]
-        ]
-        m.fit_bounds(padded, padding=(60, 60))
-        m.options['maxZoom'] = 17
-        m.options['minZoom'] = 9
-except Exception as e:
-    print(f"Auto-fit skipped: {e}")
-
-# --- Stable Map Rendering (Prevents Flicker) ---
-if "map_drawn" not in st.session_state:
-    st.session_state["map_drawn"] = False
-
-if not st.session_state["map_drawn"]:
-    st.session_state["map_drawn"] = True
-    st_data = st_folium(
-        m,
-        width=1500,
-        height=720,
-        returned_objects=["last_active_drawing"]
-    )
-else:
-    with st.spinner("Map stable. Hover and layer controls active..."):
-        st_data = st_folium(
-            m,
-            width=1500,
-            height=720,
-            returned_objects=["last_active_drawing"]
-        )
+st_folium(m, use_container_width=True, height=600, key=map_key)
 
 # === DIAGNOSTIC: Post-render check ===
 print("Map rendered; checking post-render legend presence…")
