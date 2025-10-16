@@ -1722,6 +1722,10 @@ def add_prescription_overlay(m, gdf, name, cmap, index):
     if rate_col:    fields.append(rate_col);    aliases.append(rate_alias)
     fields.append("RateType"); aliases.append("Type")
 
+    # --- Defensive layer naming ---
+    if not name or str(name).strip().lower() in ["none", "null", "nan"]:
+        name = "Unnamed Layer"
+
     folium.GeoJson(
         gdf, name=name, style_function=style_fn,
         tooltip=folium.GeoJsonTooltip(fields=fields, aliases=aliases),
@@ -1810,17 +1814,26 @@ def compute_bounds_for_heatmaps():
         
     return 25.0, -125.0, 49.0, -66.0  # fallback USA
 
-# --- Legend Rendering with Persistent Counter ---
+# --- Legend Rendering with Auto-Compress ---
 def add_legend_html(m, html_content, base_offset=20, spacing=115):
     """
-    Adds legend HTML to the Folium map with persistent counter for reliable spacing.
+    Adds legend HTML with auto-compress to prevent off-screen overflow.
     """
     if "legend_counter" not in st.session_state:
         st.session_state["legend_counter"] = 0
     else:
         st.session_state["legend_counter"] += 1
 
-    offset_px = 20 + st.session_state["legend_counter"] * 115
+    # Max visible legends before compressing spacing
+    max_legends = 6
+    spacing = 110
+    compress_spacing = 85  # tighter stack when >6 legends
+    legend_count = st.session_state["legend_counter"]
+
+    if legend_count >= max_legends:
+        offset_px = 20 + (legend_count * compress_spacing)
+    else:
+        offset_px = 20 + (legend_count * spacing)
 
     legend_html = f"""
     <div class="legend-control" style="
@@ -2056,6 +2069,9 @@ def add_heatmap_overlay(m, df, values, name, cmap, show_default, bounds, z_index
 # ===========================
 apply_compact_theme()
 _bootstrap_defaults()
+
+# --- Reset legend counter each rerun ---
+st.session_state["legend_counter"] = 0
 
 # ==============================================================
 # 🔒 FINAL SCROLLBAR + HEIGHT NORMALIZER
