@@ -2734,6 +2734,26 @@ for name in layer_order:
         if getattr(layer, "name", None) == name:
             layer.add_to(m)
 
+# --- Auto-fit map to full field extent ---
+try:
+    bounds = None
+    # Priority: yield extent → zone extent → fertilizer extent
+    if "ydf" in locals() and not ydf.empty:
+        bounds = [[ydf["Latitude"].min(), ydf["Longitude"].min()],
+                  [ydf["Latitude"].max(), ydf["Longitude"].max()]]
+    elif "zones_gdf" in st.session_state and not st.session_state["zones_gdf"].empty:
+        z = st.session_state["zones_gdf"].total_bounds
+        bounds = [[z[1], z[0]], [z[3], z[2]]]
+    elif "fert_gdf" in st.session_state and not st.session_state["fert_gdf"].empty:
+        f = st.session_state["fert_gdf"].total_bounds
+        bounds = [[f[1], f[0]], [f[3], f[2]]]
+
+    if bounds:
+        m.fit_bounds(bounds, padding=(20, 20))
+        print("Fitting bounds:", bounds)
+except Exception as e:
+    print(f"Auto-fit skipped: {e}")
+
 # --- Stable Map Rendering (Prevents Flicker) ---
 if "map_drawn" not in st.session_state:
     st.session_state["map_drawn"] = False
@@ -2742,16 +2762,16 @@ if not st.session_state["map_drawn"]:
     st.session_state["map_drawn"] = True
     st_data = st_folium(
         m,
-        width=1900,   # Full-width for large monitors
-        height=900,   # Taller aspect for precision mapping
+        width=1500,     # slightly narrower for sidebar + legend visibility
+        height=780,     # balanced vertical aspect to fit within window
         returned_objects=["last_active_drawing"]
     )
 else:
     with st.spinner("Map stable. Hover and layer controls active..."):
         st_data = st_folium(
             m,
-            width=1900,   # Full-width for large monitors
-            height=900,   # Taller aspect for precision mapping
+            width=1500,     # slightly narrower for sidebar + legend visibility
+            height=780,     # balanced vertical aspect to fit within window
             returned_objects=["last_active_drawing"]
         )
 
