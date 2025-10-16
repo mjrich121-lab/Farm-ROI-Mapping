@@ -2115,22 +2115,21 @@ window.addEventListener("load", () => {
 </script>
 """, unsafe_allow_html=True)
 
-# --- Prevent outer scrollbar and fix map container height ---
+# --- Stable map height + no outer scrollbars ---
 st.markdown("""
 <style>
-html, body, [data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
-    overflow: hidden !important;
-}
-
-[data-testid="stVerticalBlock"] {
-    height: 100vh !important;
-    max-height: 100vh !important;
-    overflow-y: hidden !important;
-}
-
+/* Allow normal scroll inside Streamlit, but control Folium frame only */
 iframe[title="st_folium"] {
-    height: 88vh !important;    /* dynamically fits viewport without clipping */
-    max-height: 88vh !important;
+    height: 82vh !important;   /* fits most viewports without overflow */
+    max-height: 82vh !important;
+    border: none !important;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Prevent the Streamlit container from adding an extra bottom buffer */
+[data-testid="stVerticalBlock"] > div:last-child {
+    margin-bottom: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -2799,7 +2798,7 @@ if not st.session_state["map_drawn"]:
     st_data = st_folium(
         m,
         width=1500,
-        height=720,  # slightly shorter to align with new CSS vh scaling
+        height=680,
         returned_objects=["last_active_drawing"]
     )
 else:
@@ -2807,7 +2806,7 @@ else:
         st_data = st_folium(
             m,
             width=1500,
-            height=720,  # slightly shorter to align with new CSS vh scaling
+            height=680,
             returned_objects=["last_active_drawing"]
         )
 
@@ -2974,3 +2973,4 @@ def render_profit_summary():
 
 # ---------- render ----------
 render_profit_summary()
+
