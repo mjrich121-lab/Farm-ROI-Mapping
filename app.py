@@ -2801,15 +2801,35 @@ try:
         # === Fit with strong leaflet padding ===
         m.fit_bounds(padded_bounds, padding=(100, 100))
 
-        # === Post-fit offset (up + left) to ensure bottom-right legend visibility ===
-        center_lat = (padded_bounds[0][0] + padded_bounds[1][0]) / 2
-        center_lon = (padded_bounds[0][1] + padded_bounds[1][1]) / 2
-        m.location = [center_lat + 0.0005, center_lon - 0.0005]
+        # --- Post-fit centering and stable zoom balance ---
+        try:
+            # Calculate midpoint
+            center_lat = (padded_bounds[0][0] + padded_bounds[1][0]) / 2
+            center_lon = (padded_bounds[0][1] + padded_bounds[1][1]) / 2
 
-        # === Stable zoom limits ===
-        m.options['minZoom'] = 9
-        m.options['maxZoom'] = 17
-        print("Stable fit applied:", padded_bounds)
+            # Slight upward/left nudge (~40 m) to ensure legend visibility
+            m.location = [center_lat + 0.00035, center_lon - 0.00035]
+
+            # Force a practical zoom level (auto-fit can be too wide)
+            # 14 works best for 40–200 ac fields, 13 for large farms
+            m.zoom_start = 14
+
+            # Optional: Dynamic zoom for mixed-size fields
+            # Uncomment the following block if fields vary drastically in size:
+            # field_width = padded_bounds[1][1] - padded_bounds[0][1]
+            # if field_width > 0.01:         # very large
+            #     m.zoom_start = 12
+            # elif field_width > 0.005:      # medium
+            #     m.zoom_start = 13
+            # else:                          # small
+            #     m.zoom_start = 14
+
+            # Stable zoom limits
+            m.options['minZoom'] = 9
+            m.options['maxZoom'] = 17
+            print("Applied stable centering and zoom.")
+        except Exception as e:
+            print(f"Viewport adjust skipped: {e}")
 
 except Exception as e:
     print(f"Auto-fit skipped: {e}")
