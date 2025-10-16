@@ -2774,11 +2774,8 @@ for name in layer_order:
         if getattr(layer, "name", None) == name:
             layer.add_to(m)
 
-# =========================================================
-# STABLE AUTO-FIT + LEGEND SAFE ZONE (PERMANENT FIX)
-# =========================================================
+# --- Auto-fit stable version ---
 try:
-    bounds = None
     if "ydf" in locals() and not ydf.empty:
         bounds = [[ydf["Latitude"].min(), ydf["Longitude"].min()],
                   [ydf["Latitude"].max(), ydf["Longitude"].max()]]
@@ -2788,49 +2785,16 @@ try:
     elif "fert_gdf" in st.session_state and not st.session_state["fert_gdf"].empty:
         f = st.session_state["fert_gdf"].total_bounds
         bounds = [[f[1], f[0]], [f[3], f[2]]]
-
     if bounds:
-        # === Always add robust geographic padding (≈150m margin) ===
-        lat_pad = 0.0013
-        lon_pad = 0.0013
-        padded_bounds = [
+        # Add small 0.0008° (~90 m) margin
+        lat_pad, lon_pad = 0.0008, 0.0008
+        padded = [
             [bounds[0][0] - lat_pad, bounds[0][1] - lon_pad],
             [bounds[1][0] + lat_pad, bounds[1][1] + lon_pad]
         ]
-
-        # === Fit with strong leaflet padding ===
-        m.fit_bounds(padded_bounds, padding=(100, 100))
-
-        # --- Post-fit centering and stable zoom balance ---
-        try:
-            # Calculate midpoint
-            center_lat = (padded_bounds[0][0] + padded_bounds[1][0]) / 2
-            center_lon = (padded_bounds[0][1] + padded_bounds[1][1]) / 2
-
-            # Slight upward/left nudge (~40 m) to ensure legend visibility
-            m.location = [center_lat + 0.00035, center_lon - 0.00035]
-
-            # Force a practical zoom level (auto-fit can be too wide)
-            # 14 works best for 40–200 ac fields, 13 for large farms
-            m.zoom_start = 14
-
-            # Optional: Dynamic zoom for mixed-size fields
-            # Uncomment the following block if fields vary drastically in size:
-            # field_width = padded_bounds[1][1] - padded_bounds[0][1]
-            # if field_width > 0.01:         # very large
-            #     m.zoom_start = 12
-            # elif field_width > 0.005:      # medium
-            #     m.zoom_start = 13
-            # else:                          # small
-            #     m.zoom_start = 14
-
-            # Stable zoom limits
-            m.options['minZoom'] = 9
-            m.options['maxZoom'] = 17
-            print("Applied stable centering and zoom.")
-        except Exception as e:
-            print(f"Viewport adjust skipped: {e}")
-
+        m.fit_bounds(padded, padding=(60, 60))
+        m.options['maxZoom'] = 17
+        m.options['minZoom'] = 9
 except Exception as e:
     print(f"Auto-fit skipped: {e}")
 
@@ -2843,7 +2807,7 @@ if not st.session_state["map_drawn"]:
     st_data = st_folium(
         m,
         width=1500,
-        height=680,
+        height=720,
         returned_objects=["last_active_drawing"]
     )
 else:
@@ -2851,7 +2815,7 @@ else:
         st_data = st_folium(
             m,
             width=1500,
-            height=680,
+            height=720,
             returned_objects=["last_active_drawing"]
         )
 
